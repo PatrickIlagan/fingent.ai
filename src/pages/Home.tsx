@@ -4,7 +4,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, LineChart, Line, XAxis, YAxis
 import { Sparkles, ArrowDown, ArrowUp, Calendar, Receipt, ChevronRight, ChevronDown, TrendingUp, Bitcoin, FileText, Activity, Wallet } from 'lucide-react';
 import { format } from 'date-fns';
 
-export function Home({ onNavigate }: { onNavigate?: (tab: string) => void }) {
+export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) => void, toggleChat?: () => void }) {
   const { shouldRefresh, themeMode } = useStore();
   const isAdvanced = themeMode === 'advanced';
   const [data, setData] = useState<{ accounts: any[], transactions: any[], wealth: any } | null>(null);
@@ -101,7 +101,7 @@ export function Home({ onNavigate }: { onNavigate?: (tab: string) => void }) {
                 </div>
               )}
             </div>
-            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight truncate">₱{totalCash.toLocaleString()}</h1>
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight truncate">₱{totalCash.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h1>
           </div>
           
           <div className="relative z-10 flex flex-col gap-3 w-full md:w-auto">
@@ -116,10 +116,10 @@ export function Home({ onNavigate }: { onNavigate?: (tab: string) => void }) {
                </div>
              </div>
              <div className="flex gap-2">
-                <button className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold transition-transform hover:scale-105 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-lg shadow-violet-900/20' : 'bg-white/95 backdrop-blur-sm text-emerald-700 hover:bg-white shadow-sm'}`}>
+                <button onClick={() => onNavigate?.('accounts')} className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold transition-transform hover:scale-105 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-lg shadow-violet-900/20' : 'bg-white/95 backdrop-blur-sm text-emerald-700 hover:bg-white shadow-sm'}`}>
                   <ArrowDown className="w-4 h-4" /> Income
                 </button>
-                <button className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold transition-transform hover:scale-105 ${isAdvanced ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-emerald-700/40 backdrop-blur-sm hover:bg-emerald-700/60 text-white border border-emerald-400/30'}`}>
+                <button onClick={() => onNavigate?.('accounts')} className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold transition-transform hover:scale-105 ${isAdvanced ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-emerald-700/40 backdrop-blur-sm hover:bg-emerald-700/60 text-white border border-emerald-400/30'}`}>
                   <ArrowUp className="w-4 h-4" /> Expense
                 </button>
              </div>
@@ -156,7 +156,7 @@ export function Home({ onNavigate }: { onNavigate?: (tab: string) => void }) {
                      />
                    </div>
                    <p className="text-xs text-slate-500 dark:text-slate-400 text-right">
-                     ₱{goal.current.toLocaleString()} / ₱{goal.target.toLocaleString()}
+                     ₱{goal.current.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / ₱{goal.target.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                    </p>
                  </div>
                );
@@ -167,7 +167,7 @@ export function Home({ onNavigate }: { onNavigate?: (tab: string) => void }) {
         {/* Cash Flow Line Chart */}
         <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
-            <h3 className="font-bold text-lg mb-3 sm:mb-0">Cash Flow</h3>
+            <h3 className="font-bold text-lg mb-3 sm:mb-0 cursor-pointer hover:underline" onClick={() => onNavigate?.('accounts')}>Cash Flow</h3>
             <div className={`flex flex-wrap gap-1 p-1 rounded-full ${isAdvanced ? 'bg-slate-700' : 'bg-slate-100'}`}>
               {['Cash Flow', 'Expenses', 'Income', 'Credits', 'Dues'].map(tab => (
                 <button
@@ -215,7 +215,7 @@ export function Home({ onNavigate }: { onNavigate?: (tab: string) => void }) {
         <div className="grid xl:grid-cols-2 gap-6">
           <div className="space-y-6">
             {/* Wealth Portfolio Summary */}
-            <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700">
+            <div onClick={() => onNavigate?.('investments')} className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 cursor-pointer hover:shadow-md transition-shadow">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold text-lg">Wealth Portfolio</h3>
                 <button onClick={() => onNavigate?.('investments')} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
@@ -224,7 +224,7 @@ export function Home({ onNavigate }: { onNavigate?: (tab: string) => void }) {
               </div>
               <div className="mb-4">
                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Total Net Worth</p>
-                <p className="text-2xl font-bold">₱{(totalCash + 1250000).toLocaleString()}</p>
+                <p className="text-2xl font-bold">₱{(totalCash + 1250000).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                 <p className="text-xs text-emerald-500 font-medium mt-1">+2.4% this week</p>
               </div>
               <div className="flex gap-2">
@@ -252,7 +252,7 @@ export function Home({ onNavigate }: { onNavigate?: (tab: string) => void }) {
                       <Wallet className="w-6 h-6 text-emerald-500 opacity-80" />
                     </div>
                     <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{acc.name}</p>
-                    <p className="text-xl font-bold tracking-tight mt-1">₱{acc.balance.toLocaleString()}</p>
+                    <p className="text-xl font-bold tracking-tight mt-1">₱{acc.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                   </div>
                 ))}
               </div>
@@ -289,7 +289,7 @@ export function Home({ onNavigate }: { onNavigate?: (tab: string) => void }) {
                 <h3 className="font-bold text-lg">Recent Transactions</h3>
                 <button onClick={() => onNavigate?.('accounts')} className="text-sm font-medium text-emerald-500 dark:text-violet-400 hover:underline">See All</button>
               </div>
-              <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
+              <div onClick={() => onNavigate?.('accounts')} className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden cursor-pointer hover:shadow-md transition-shadow">
                 {data.transactions.slice(0, 5).map((tx, idx) => (
                   <div key={tx.id} className={`p-4 px-6 flex items-center justify-between ${idx !== 4 && idx !== data.transactions.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''} hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors`}>
                     <div className="flex items-center">
@@ -302,7 +302,7 @@ export function Home({ onNavigate }: { onNavigate?: (tab: string) => void }) {
                       </div>
                     </div>
                     <span className={`font-bold text-lg ${tx.type === 'income' ? 'text-emerald-500' : ''}`}>
-                      {tx.type === 'income' ? '+' : '-'}₱{tx.amount.toLocaleString()}
+                      {tx.type === 'income' ? '+' : '-'}₱{tx.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                 ))}
@@ -317,7 +317,7 @@ export function Home({ onNavigate }: { onNavigate?: (tab: string) => void }) {
       <div className="lg:col-span-1 xl:col-span-1 space-y-6">
         
         {/* Morning Briefing */}
-        <div className={`bg-gradient-to-br ${isAdvanced ? 'from-slate-800 to-slate-800/80 border-slate-700' : 'from-emerald-50 to-teal-50/50 border-emerald-100'} rounded-3xl p-6 shadow-sm border`}>
+        <div onClick={() => toggleChat?.()} className={`bg-gradient-to-br ${isAdvanced ? 'from-slate-800 to-slate-800/80 border-slate-700' : 'from-emerald-50 to-teal-50/50 border-emerald-100'} rounded-3xl p-6 shadow-sm border cursor-pointer hover:shadow-md transition-shadow`}>
           <h3 className={`text-sm font-bold mb-3 flex items-center ${isAdvanced ? 'text-violet-400' : 'text-emerald-600'}`}>
             <Sparkles className="w-4 h-4 mr-2" />
             FinGent Insights
@@ -340,7 +340,7 @@ export function Home({ onNavigate }: { onNavigate?: (tab: string) => void }) {
         </div>
 
         {/* Top Priorities */}
-        <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700">
+        <div onClick={() => onNavigate?.('liabilities')} className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 cursor-pointer hover:shadow-md transition-shadow">
           <h3 className="font-bold text-lg mb-4">Top Priorities</h3>
           <div className="space-y-3">
              <div className={`p-3 rounded-2xl border ${isAdvanced ? 'bg-slate-700/30 border-slate-700' : 'bg-rose-50 border-rose-100'} flex gap-3`}>
@@ -365,7 +365,7 @@ export function Home({ onNavigate }: { onNavigate?: (tab: string) => void }) {
         </div>
 
         {/* Upcoming Bills */}
-        <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700">
+        <div onClick={() => onNavigate?.('liabilities')} className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 cursor-pointer hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between mb-5">
             <h3 className="font-bold text-lg">Upcoming Bills</h3>
             <button onClick={() => onNavigate?.('liabilities-bills')} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
@@ -419,7 +419,7 @@ export function Home({ onNavigate }: { onNavigate?: (tab: string) => void }) {
                 <div key={budget.id} className="w-full">
                   <div className="flex justify-between text-sm mb-1.5">
                     <span className="font-medium text-slate-700 dark:text-slate-300">{budget.name}</span>
-                    <span className="font-medium text-slate-900 dark:text-white">₱{budget.spent.toLocaleString()} <span className="text-slate-400 text-xs font-normal">/ ₱{budget.limit.toLocaleString()}</span></span>
+                    <span className="font-medium text-slate-900 dark:text-white">₱{budget.spent.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-slate-400 text-xs font-normal">/ ₱{budget.limit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
                   </div>
                   <div className="h-2 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
                     <div 

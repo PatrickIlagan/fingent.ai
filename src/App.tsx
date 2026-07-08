@@ -10,6 +10,7 @@ import { Career } from './pages/Career';
 import { Business } from './pages/Business';
 import { Freelancing } from './pages/Freelancing';
 import { Taxes } from './pages/Taxes';
+import { Settings } from './pages/Settings';
 import { ChatSheet } from './components/ChatSheet';
 
 export default function App() {
@@ -19,16 +20,17 @@ export default function App() {
   return (
     <>
       <Layout currentTab={currentTab} setCurrentTab={setCurrentTab} toggleChat={() => setIsChatOpen(true)}>
-        {currentTab === 'home' && <Home onNavigate={setCurrentTab} />}
+        {currentTab === 'home' && <Home onNavigate={setCurrentTab} toggleChat={() => setIsChatOpen(true)} />}
         {currentTab === 'calendar' && <Calendar />}
         {currentTab.startsWith('investments') && <Investments category={currentTab.split('-').slice(1).join('-')} onNavigate={setCurrentTab} />}
         {currentTab === 'career' && <Career />}
-        {currentTab === 'business' && <Business />}
-        {currentTab === 'freelancing' && <Freelancing />}
+        {currentTab.startsWith('business') && <Business currentTab={currentTab} onNavigate={setCurrentTab} />}
+        {(currentTab === 'freelancing' || currentTab.startsWith('freelance-')) && <Freelancing currentTab={currentTab} onNavigate={setCurrentTab} />}
         {currentTab === 'taxes' && <Taxes />}
         {currentTab.startsWith('accounts') && <Accounts category={currentTab.split('-')[1]} onNavigate={setCurrentTab} />}
         {currentTab.startsWith('liabilities') && <Liabilities category={currentTab.split('-')[1]} onNavigate={setCurrentTab} />}
         {currentTab.startsWith('plans') && <Plans category={currentTab.split('-')[1]} onNavigate={setCurrentTab} />}
+        {currentTab === 'settings' && <Settings />}
       </Layout>
       <ChatSheet isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
     </>

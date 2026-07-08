@@ -1,10 +1,13 @@
 import express from "express";
+import multer from "multer";
+import fsModule from "fs";
+import crypto from "crypto";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { getDb } from "./server/db";
 import { handleAgentChat } from "./server/agent";
-import YahooFinance from 'yahoo-finance2';
-const yahooFinance = new YahooFinance();
+import yahooFinance from 'yahoo-finance2';
+
 function formatTicker(ticker: string, type: string) {
   if (!ticker) return ticker;
   let t = ticker.toUpperCase().trim();
@@ -17,11 +20,211 @@ function formatTicker(ticker: string, type: string) {
 
 async function startServer() {
   const app = express();
+const upload = multer({ dest: 'data/uploads/' });
+
   const PORT = 3000;
 
   app.use(express.json());
 
   // API Routes
+  app.get("/api/system/desktop-wrapper", async (req, res) => {
+    const archiver = (await import("archiver")).default; const archive = archiver('zip', {
+      zlib: { level: 9 }
+    });
+
+    res.attachment('FinGent-Desktop.zip');
+    archive.pipe(res);
+
+    const packageJson = {
+      "name": "fingent-desktop",
+      "version": "1.0.0",
+      "main": "main.js",
+      "scripts": {
+        "start": "electron ."
+      },
+      "dependencies": {
+        "electron": "^28.0.0"
+      }
+    };
+
+    const host = req.get('host') || '';
+    const protocol = host.includes('localhost') ? 'http' : 'https';
+    
+    const mainJs = `
+const { app, BrowserWindow } = require('electron');
+
+function createWindow () {
+  const win = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    autoHideMenuBar: true,
+    webPreferences: {
+      nodeIntegration: false
+    }
+  });
+
+  win.loadURL('${protocol}://${host}');
+}
+
+app.whenReady().then(createWindow);
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+});
+`;
+
+    const readmeMd = `
+# FinGent Desktop App Wrapper
+
+To run FinGent as a desktop application:
+
+1. Ensure you have Node.js installed on your computer.
+2. Open a terminal or command prompt in this folder.
+3. Run \`npm install\` to install Electron.
+4. Run \`npm start\` to launch the desktop app.
+    `;
+
+    archive.append(JSON.stringify(packageJson, null, 2), { name: 'package.json' });
+    archive.append(mainJs, { name: 'main.js' });
+    archive.append(readmeMd, { name: 'README.md' });
+
+    archive.finalize();
+  });
+
+  app.post("/api/system/drive/upload", async (req, res) => {
+    try {
+      const { accessToken, password } = req.body;
+      if (!accessToken || !password) return res.status(400).json({ error: "Missing token or password" });
+
+      const dbPath = path.join(process.cwd(), 'data', 'fingent.db');
+      const encPath = path.join(process.cwd(), 'data', 'fingent.db.enc');
+      
+      // Encrypt
+      const algorithm = 'aes-256-cbc';
+      const key = crypto.scryptSync(password, 'fingent_salt', 32);
+      const iv = crypto.randomBytes(16);
+      const cipher = crypto.createCipheriv(algorithm, key, iv);
+      const input = fsModule.readFileSync(dbPath);
+      const encrypted = Buffer.concat([iv, cipher.update(input), cipher.final()]);
+      fsModule.writeFileSync(encPath, encrypted);
+
+      // Check if file exists in Drive
+      const searchRes = await fetch("https://www.googleapis.com/drive/v3/files?q=name='fingent.db.enc' and trashed=false", {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const searchData = await searchRes.json();
+      let fileId = null;
+      if (searchData.files && searchData.files.length > 0) {
+        fileId = searchData.files[0].id;
+      }
+
+      // Upload to Drive (Simple upload for media, then update metadata, or multipart. We'll use multipart)
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify({ name: 'fingent.db.enc' })], { type: 'application/json' }));
+      form.append('file', new Blob([fsModule.readFileSync(encPath)]), 'fingent.db.enc');
+
+      let uploadUrl = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
+      let method = "POST";
+      if (fileId) {
+        uploadUrl = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`;
+        method = "PATCH";
+      }
+
+      const uploadRes = await fetch(uploadUrl, {
+        method,
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: form
+      });
+      
+      const uploadData = await uploadRes.json();
+      if (uploadData.error) throw new Error(uploadData.error.message);
+
+      fsModule.unlinkSync(encPath); // cleanup
+      res.json({ success: true, fileId: uploadData.id });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/system/drive/download", async (req, res) => {
+    try {
+      const { accessToken, password } = req.body;
+      if (!accessToken || !password) return res.status(400).json({ error: "Missing token or password" });
+
+      // Find file
+      const searchRes = await fetch("https://www.googleapis.com/drive/v3/files?q=name='fingent.db.enc' and trashed=false", {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const searchData = await searchRes.json();
+      if (!searchData.files || searchData.files.length === 0) {
+        return res.status(404).json({ error: "No backup found on Google Drive" });
+      }
+      const fileId = searchData.files[0].id;
+
+      // Download
+      const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      if (!downloadRes.ok) throw new Error("Failed to download from Drive");
+      
+      const arrayBuffer = await downloadRes.arrayBuffer();
+      const encrypted = Buffer.from(arrayBuffer);
+
+      // Decrypt
+      const algorithm = 'aes-256-cbc';
+      const key = crypto.scryptSync(password, 'fingent_salt', 32);
+      const iv = encrypted.slice(0, 16);
+      const data = encrypted.slice(16);
+      const decipher = crypto.createDecipheriv(algorithm, key, iv);
+      const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
+
+      // Overwrite DB
+      const dbPath = path.join(process.cwd(), 'data', 'fingent.db');
+      fsModule.writeFileSync(dbPath, decrypted);
+
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/system/export", (req, res) => {
+    const dbPath = path.join(process.cwd(), 'data', 'fingent.db');
+    if (fsModule.existsSync(dbPath)) {
+      res.download(dbPath, 'fingent_backup.db');
+    } else {
+      res.status(404).json({ error: "Database not found" });
+    }
+  });
+
+  app.post("/api/system/import", upload.single('db'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+      const dbPath = path.join(process.cwd(), 'data', 'fingent.db');
+      
+      // Close existing connections if possible, though better-sqlite3 handles it okay if overwritten usually, 
+      // but to be safe we just replace the file. The next getDb() might need a restart, but in a simple setup:
+      fsModule.copyFileSync(req.file.path, dbPath);
+      fsModule.unlinkSync(req.file.path); // cleanup uploaded file
+      
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
@@ -171,17 +374,43 @@ async function startServer() {
     }
   });
 
+  
+  app.post("/api/accounts/accrue-interest", async (req, res) => {
+    try {
+      const db = await getDb();
+      const accounts = await db.all("SELECT * FROM accounts WHERE interest_rate_pa > 0");
+      let accruedCount = 0;
+      
+      for (const account of accounts) {
+        // Daily interest = (balance * interest_rate_pa) / 365
+        const dailyInterest = (account.balance * account.interest_rate_pa) / 365;
+        if (dailyInterest > 0) {
+          const newBalance = account.balance + dailyInterest;
+          await db.run("UPDATE accounts SET balance = ? WHERE id = ?", [newBalance, account.id]);
+          await db.run(
+            "INSERT INTO transactions (account_id, type, amount, category, description, date) VALUES (?, ?, ?, ?, ?, ?)",
+            [account.id, 'income', dailyInterest, 'Interest', 'Daily Interest Payout', new Date().toISOString()]
+          );
+          accruedCount++;
+        }
+      }
+      res.json({ success: true, accruedCount });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.put("/api/accounts/:id", async (req, res) => {
     try {
       const db = await getDb();
       const { id } = req.params;
-      const { name, type, balance, color, purpose, credit_limit } = req.body;
+      const { name, type, balance, color, purpose, credit_limit, interest_rate_pa } = req.body;
       
       const oldAccount = await db.get("SELECT balance FROM accounts WHERE id = ?", [id]);
       
       await db.run(
-        "UPDATE accounts SET name = ?, type = ?, balance = ?, color = ?, purpose = ?, credit_limit = ? WHERE id = ?",
-        [name, type, balance, color, purpose, credit_limit, id]
+        "UPDATE accounts SET name = ?, type = ?, balance = ?, color = ?, purpose = ?, credit_limit = ?, interest_rate_pa = ? WHERE id = ?",
+        [name, type, balance, color, purpose, credit_limit, interest_rate_pa, id]
       );
       
       if (oldAccount && parseFloat(oldAccount.balance) !== parseFloat(balance)) {
@@ -211,6 +440,38 @@ async function startServer() {
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/rates", async (req, res) => {
+    try {
+      const phpQuote = await yahooFinance.quote("PHP=X");
+      const eurQuote = await yahooFinance.quote("EURUSD=X");
+      const gbpQuote = await yahooFinance.quote("GBPUSD=X");
+      res.json({
+        PHP: phpQuote?.regularMarketPrice || 58.5,
+        EUR: eurQuote?.regularMarketPrice ? 1 / eurQuote.regularMarketPrice : 0.92,
+        GBP: gbpQuote?.regularMarketPrice ? 1 / gbpQuote.regularMarketPrice : 0.79,
+        USD: 1
+      });
+    } catch(e) {
+      console.error(e);
+      res.json({ PHP: 58.5, EUR: 0.92, GBP: 0.79, USD: 1 });
+    }
+  });
+
+  app.get("/api/quote/:ticker", async (req, res) => {
+    try {
+      const { ticker } = req.params;
+      const type = (req.query.type as string) || 'Stocks';
+      const quote = await yahooFinance.quote(formatTicker(ticker, type)) as any;
+      if (quote && quote.regularMarketPrice) {
+        res.json({ price: quote.regularMarketPrice });
+      } else {
+        res.status(404).json({ error: "Not found" });
+      }
+    } catch(e) {
+      res.status(500).json({ error: "Failed" });
     }
   });
 
@@ -310,7 +571,12 @@ async function startServer() {
            const quote = await yahooFinance.quote(formatTicker(ticker, type)) as any;
            if (quote && quote.regularMarketPrice) {
               const currentPrice = quote.regularMarketPrice;
-              current_value = currentPrice * (shares || 0);
+              if (shares === null && current_value > 0) {
+                 shares = current_value / currentPrice;
+                 avg_price = shares > 0 ? invested / shares : null;
+              } else {
+                 current_value = currentPrice * (shares || 0);
+              }
            }
         } catch(e) {
            console.error('Failed to fetch initial price for ticker', ticker);

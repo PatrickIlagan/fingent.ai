@@ -6,6 +6,7 @@ export function Career() {
   const { themeMode } = useStore();
   const isAdvanced = themeMode === 'advanced';
 
+  const [newSkill, setNewSkill] = useState('');
   const [skills, setSkills] = useState([
     { id: 1, name: 'React Advanced Patterns', completed: true },
     { id: 2, name: 'System Design', completed: false },
@@ -13,6 +14,13 @@ export function Career() {
     { id: 4, name: 'SQL Performance Tuning', completed: false },
     { id: 5, name: 'AWS Cloud Practitioner', completed: false },
   ]);
+
+  const handleAddSkill = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSkill.trim()) return;
+    setSkills([...skills, { id: Date.now(), name: newSkill.trim(), completed: false }]);
+    setNewSkill('');
+  };
 
   const toggleSkill = (id: number) => {
     setSkills(skills.map(s => s.id === id ? { ...s, completed: !s.completed } : s));
@@ -81,6 +89,21 @@ export function Career() {
                <span className="text-xs font-bold text-slate-500">{skills.filter(s => s.completed).length}/{skills.length} Mastered</span>
             </div>
             
+            <form onSubmit={handleAddSkill} className="mb-4 flex gap-2">
+              <input 
+                type="text" 
+                value={newSkill}
+                onChange={(e) => setNewSkill(e.target.value)}
+                placeholder="Add a new skill to master..."
+                className={`flex-1 px-4 py-2.5 rounded-xl text-sm outline-none transition-colors ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
+              />
+              <button 
+                type="submit" 
+                className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}
+              >
+                Add
+              </button>
+            </form>
             <div className="grid sm:grid-cols-2 gap-4">
               {skills.map((skill) => (
                  <div 

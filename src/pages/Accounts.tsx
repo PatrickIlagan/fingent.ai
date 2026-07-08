@@ -29,7 +29,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
   const [newTx, setNewTx] = useState({ type: 'expense', title: '', amount: '', date: '', notes: '', category: 'Expenses', goalId: '' });
   const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
-  const [newAccount, setNewAccount] = useState<any>({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '' });
+  const [newAccount, setNewAccount] = useState<any>({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '' });
   
   const colorOptions = [
     { value: 'from-blue-400 to-blue-500', name: 'Blue' },
@@ -40,6 +40,17 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
     { value: 'from-slate-700 to-slate-800', name: 'Slate' }
   ];
 
+  
+  const handleAccrueInterest = async () => {
+    try {
+      await fetch('/api/accounts/accrue-interest', { method: 'POST' });
+      triggerRefresh();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  
   const handleAddAccount = async () => {
     if (!newAccount.name || !newAccount.balance) return;
     try {
@@ -64,7 +75,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
             name: newAccount.name,
             type: newAccount.type,
             balance: parseFloat(newAccount.balance),
-            interest_rate_pa: 0,
+            interest_rate_pa: newAccount.interest_rate_pa ? parseFloat(newAccount.interest_rate_pa) / 100 : 0,
             image_logo_name: 'bank',
             color: newAccount.color,
             purpose: newAccount.purpose,
@@ -74,7 +85,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
       }
       triggerRefresh();
       setIsAddAccountModalOpen(false);
-      setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '' }); setEditingAccount(null);
+      setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '' }); setEditingAccount(null);
     } catch (err) {
       console.error(err);
     }
@@ -230,7 +241,8 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                 balance: selectedAccount.balance.toString(),
                 color: selectedAccount.color || '',
                 purpose: selectedAccount.purpose || '',
-                credit_limit: selectedAccount.credit_limit ? selectedAccount.credit_limit.toString() : ''
+                credit_limit: selectedAccount.credit_limit ? selectedAccount.credit_limit.toString() : '',
+                interest_rate_pa: selectedAccount.interest_rate_pa ? (selectedAccount.interest_rate_pa * 100).toString() : ''
               });
               setIsAddAccountModalOpen(true);
             }} className={`p-2.5 rounded-xl transition-colors ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-400' : 'bg-white hover:bg-slate-50 text-slate-500 border border-slate-200 shadow-sm'}`}><Edit2 size={18} /></button>
@@ -251,7 +263,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
           </div>
           <div className="text-left sm:text-right w-full sm:w-auto">
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Current Balance</p>
-            <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight">₱{Math.abs(selectedAccount.balance).toLocaleString()}</h1>
+            <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight">₱{Math.abs(selectedAccount.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h1>
           </div>
         </div>
 
@@ -261,7 +273,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                <div className="flex items-center gap-2 mb-2 text-slate-500 dark:text-slate-400">
                  <FileText size={18} /> <span className="text-sm font-medium uppercase tracking-wider">Statement Bal.</span>
                </div>
-               <p className="font-bold text-2xl">₱{selectedAccount.statementBalance?.toLocaleString() || '0'}</p>
+               <p className="font-bold text-2xl">₱{selectedAccount.statementBalance?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0'}</p>
              </div>
              <div>
                <div className="flex items-center gap-2 mb-2 text-slate-500 dark:text-slate-400">
@@ -273,7 +285,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                <div className="flex items-center gap-2 mb-2 text-slate-500 dark:text-slate-400">
                  <CreditCard size={18} /> <span className="text-sm font-medium uppercase tracking-wider">Credit Limit</span>
                </div>
-               <p className="font-bold text-2xl">₱{selectedAccount.limit?.toLocaleString()}</p>
+               <p className="font-bold text-2xl">₱{selectedAccount.limit?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-700 rounded-full mt-3 overflow-hidden">
                  <div className="h-full bg-rose-500 rounded-full" style={{ width: `${(Math.abs(selectedAccount.balance) / (selectedAccount.limit || 1)) * 100}%` }} />
                </div>
@@ -325,7 +337,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                           </div>
                         </div>
                         <span className={`font-black text-lg ${tx.type === 'income' ? 'text-emerald-500 dark:text-emerald-400' : ''}`}>
-                          {tx.type === 'income' ? '+' : '-'}₱{tx.amount.toLocaleString()}
+                          {tx.type === 'income' ? '+' : '-'}₱{tx.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
                     ))}
@@ -358,16 +370,21 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
           <h2 className="text-2xl font-bold capitalize">{category ? `${category} Accounts` : 'All Accounts'}</h2>
           <p className="text-slate-500 dark:text-slate-400 mt-1">Manage your connected financial accounts</p>
         </div>
-        <button onClick={() => setIsAddAccountModalOpen(true)} className={`px-4 py-2.5 rounded-xl font-bold text-sm ${isAdvanced ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}>
+        <div className="flex gap-2">
+        <button onClick={handleAccrueInterest} className={`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 border transition-colors ${isAdvanced ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'}`}>
+             Simulate Next Day (Accrue Interest)
+        </button>
+        <button onClick={() => { setEditingAccount(null); setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '' }); setIsAddAccountModalOpen(true); }} className={`px-4 py-2.5 rounded-xl font-bold text-sm ${isAdvanced ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}>
           + Add Account
         </button>
+        </div>
       </div>
 
       <div className={`rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
         <div className="flex flex-col sm:flex-row justify-between gap-6 sm:gap-4">
           <div>
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Total {category ? category : 'Liquid'} Balance</p>
-            <h1 className="text-4xl font-extrabold tracking-tight text-emerald-500">₱{totalBalance.toLocaleString()}</h1>
+            <h1 className="text-4xl font-extrabold tracking-tight text-emerald-500">₱{totalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h1>
             <p className="text-xs font-medium text-slate-400 mt-2">Available across {filteredAccounts.length} accounts</p>
           </div>
           
@@ -409,7 +426,14 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
               </div>
               
               <div className="flex items-end justify-between mt-1">
-                <p className="text-2xl font-bold tracking-tight">₱{Math.abs(acc.balance).toLocaleString()}</p>
+                <div className="flex flex-col">
+                  <p className="text-2xl font-bold tracking-tight">₱{Math.abs(acc.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  {acc.interest_rate_pa > 0 && (
+                    <p className="text-xs font-bold text-emerald-500 mt-1">
+                      {(acc.interest_rate_pa * 100).toFixed(2)}% p.a.
+                    </p>
+                  )}
+                </div>
                 
                   <div className="flex gap-1.5">
                     <button onClick={(e) => handleOpenTransactionModal(acc, 'expense', e)} className={`p-1.5 rounded-lg transition-colors ${isAdvanced ? 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20' : 'bg-rose-50 text-rose-600 hover:bg-rose-100'}`}><Minus size={14} strokeWidth={3} /></button>
@@ -422,7 +446,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                   <div className="flex justify-between text-xs mb-1.5">
                     <span className="text-slate-500">Credit Limit</span>
                     <span className="font-medium">
-                      ₱{acc.credit_limit.toLocaleString()}
+                      ₱{acc.credit_limit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       <span className="text-rose-500 ml-1 font-bold">({((Math.abs(acc.balance) / acc.credit_limit) * 100).toFixed(0)}% used)</span>
                     </span>
                   </div>

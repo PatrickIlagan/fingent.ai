@@ -49,13 +49,14 @@ export function Freelancing({ currentTab, onNavigate }: any) {
     <div className="space-y-6 pb-10">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-black">Freelance Hub</h2>
-          <p className="text-slate-500 dark:text-slate-400 mt-1">Track your time, manage services, and monitor income streams.</p>
+          <h2 className="text-3xl font-black">Freelance Command Center</h2>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">Track your time, manage gigs, and monitor multiple income streams.</p>
         </div>
       </div>
 
+      {/* Internal Navigation */}
       <div className={`flex gap-2 p-1 rounded-xl w-fit ${isAdvanced ? 'bg-slate-800' : 'bg-slate-100'}`}>
-        {['overview', 'services', 'invoices'].map(tab => (
+        {['overview', 'gigs', 'invoices'].map(tab => (
           <button 
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -65,7 +66,7 @@ export function Freelancing({ currentTab, onNavigate }: any) {
                 : (isAdvanced ? 'text-slate-400 hover:text-slate-300' : 'text-slate-500 hover:text-slate-700')
             }`}
           >
-            {tab === 'services' ? 'My Services & Gigs' : tab === 'invoices' ? 'Time & Invoices' : tab}
+            {tab === 'gigs' ? 'Gigs & Contracts' : tab === 'invoices' ? 'Time & Invoices' : tab}
           </button>
         ))}
       </div>
@@ -74,6 +75,7 @@ export function Freelancing({ currentTab, onNavigate }: any) {
         <div className="space-y-6 animate-in fade-in duration-300">
           <div className="grid lg:grid-cols-3 gap-6">
             
+            {/* Live Timer Widget */}
             <div className={`lg:col-span-1 p-6 rounded-3xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-gradient-to-br from-slate-800 to-slate-900 border-slate-700' : 'bg-gradient-to-br from-white to-blue-50/50 border-slate-100'}`}>
               <div>
                 <div className="flex justify-between items-start mb-4">
@@ -102,6 +104,7 @@ export function Freelancing({ currentTab, onNavigate }: any) {
               </div>
             </div>
 
+            {/* KPI Metrics */}
             <div className="lg:col-span-2 grid sm:grid-cols-2 gap-4">
                <div className={`p-5 rounded-2xl border flex flex-col justify-center ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
                  <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">YTD Earnings</p>
@@ -119,7 +122,7 @@ export function Freelancing({ currentTab, onNavigate }: any) {
                  <p className="text-xs text-slate-500 font-bold mt-2">Est. Value: ₱27,750</p>
                </div>
                <div className={`p-5 rounded-2xl border flex flex-col justify-center ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-                 <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Active Services</p>
+                 <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Active Gigs</p>
                  <p className="font-black text-3xl">3</p>
                  <p className="text-xs text-slate-500 font-bold mt-2">Across 3 different clients</p>
                </div>
@@ -127,16 +130,16 @@ export function Freelancing({ currentTab, onNavigate }: any) {
           </div>
 
           <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-            <h3 className="font-bold text-lg mb-6">Income by Service Type</h3>
+            <h3 className="font-bold text-lg mb-6">Income by Contract Type</h3>
             <div className="h-[300px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={incomeData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isAdvanced ? '#334155' : '#e2e8f0'} />
                   <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} tickFormatter={(val) => `₱${val/1000}k`} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} tickFormatter={(val) => \`₱\${val/1000}k\`} />
                   <Tooltip 
                     cursor={{ fill: isAdvanced ? '#1e293b' : '#f8fafc' }}
-                    contentStyle={{ backgroundColor: isAdvanced ? "#0f172a" : "#ffffff", border: "none", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }}
+                    contentStyle={{ backgroundColor: isAdvanced ? '#0f172a' : '#ffffff', border: 'none', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                   />
                   <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '20px' }} />
                   <Bar dataKey="hourly" name="Hourly Work" stackId="a" fill={isAdvanced ? '#8b5cf6' : '#6366f1'} radius={[0, 0, 4, 4]} />
@@ -149,12 +152,12 @@ export function Freelancing({ currentTab, onNavigate }: any) {
         </div>
       )}
 
-      {activeTab === 'services' && (
+      {activeTab === 'gigs' && (
         <div className="space-y-4 animate-in fade-in duration-300">
           <div className="flex justify-between items-center mb-2">
-             <h3 className="font-bold text-lg">My Services</h3>
+             <h3 className="font-bold text-lg">Active Contracts</h3>
              <button className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${isAdvanced ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-slate-900 text-white hover:bg-slate-800'}`}>
-               <Plus size={16} /> New Service
+               <Plus size={16} /> New Gig
              </button>
           </div>
           <div className="grid lg:grid-cols-3 gap-6">

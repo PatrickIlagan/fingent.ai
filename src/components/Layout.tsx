@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
-import { Home, Calendar, Briefcase, Bot, PieChart, Settings, CreditCard, Receipt, Target, ChevronDown, ChevronRight, Building, FileText, Download } from 'lucide-react';
+import { Home, Calendar, Briefcase, Bot, PieChart, Settings, CreditCard, Receipt, Target, ChevronDown, ChevronRight, Building, FileText, Download, ArrowLeft, Megaphone, Package, ShoppingCart, Activity, Users, DollarSign } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any) {
-  const { themeMode, setThemeMode } = useStore();
+  const { themeMode, setThemeMode, selectedBusiness, setSelectedBusiness } = useStore();
   const [expandedTabs, setExpandedTabs] = useState<Record<string, boolean>>({});
 
   const isAdvanced = themeMode === 'advanced';
 
-  const tabs = [
+  
+  let tabs = [
     { id: 'home', icon: Home, label: 'Home' },
     { 
       id: 'accounts', 
@@ -42,6 +43,35 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
     { id: 'taxes', icon: FileText, label: 'Taxes' },
   ];
 
+  if (selectedBusiness) {
+    if (selectedBusiness.type === 'Store') {
+      tabs = [
+        { id: 'business-dashboard', icon: Building, label: 'Dashboard' },
+        { id: 'business-marketing', icon: Megaphone, label: 'Marketing' },
+        { id: 'business-logistics', icon: Package, label: 'Logistics/Stocks' },
+        { id: 'business-ordering', icon: ShoppingCart, label: 'Ordering' },
+        { id: 'business-transactions', icon: Activity, label: 'Transactions' },
+      ];
+    } else if (selectedBusiness.type === 'SaaS') {
+      tabs = [
+        { id: 'business-dashboard', icon: Building, label: 'Dashboard' },
+        { id: 'business-mrr', icon: Activity, label: 'MRR & Churn' },
+        { id: 'business-users', icon: Users, label: 'Subscriptions' },
+        { id: 'business-acquisition', icon: Megaphone, label: 'Acquisition' },
+        { id: 'business-expenditure', icon: DollarSign, label: 'Expenditure' },
+      ];
+    } else if (selectedBusiness.type === 'Agency') {
+      tabs = [
+        { id: 'business-dashboard', icon: Building, label: 'Dashboard' },
+        { id: 'business-clients', icon: Users, label: 'Clients' },
+        { id: 'business-pipeline', icon: Briefcase, label: 'Pipeline' },
+        { id: 'business-proposals', icon: FileText, label: 'Proposals' },
+        { id: 'business-invoices', icon: DollarSign, label: 'Invoices' },
+      ];
+    }
+  }
+
+
   const toggleExpand = (tabId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setExpandedTabs(prev => ({ ...prev, [tabId]: !prev[tabId] }));
@@ -59,12 +89,12 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
           <h1 className="font-extrabold text-lg tracking-tight">FinGent</h1>
         </div>
         <div className="flex items-center gap-3">
-          <button className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm hover:scale-105 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-violet-900/20' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
+          <button onClick={toggleChat} className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm hover:scale-105 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-violet-900/20' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
             <span className="text-lg leading-none">+</span> Quick Add
           </button>
           <button 
-            onClick={() => setThemeMode(isAdvanced ? 'basic' : 'advanced')}
-            className={`p-2 rounded-full transition-colors ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-violet-400' : 'bg-white shadow-sm border border-emerald-100 hover:bg-emerald-50 text-emerald-600'}`}
+            onClick={() => setCurrentTab('settings')}
+            className={`p-2 rounded-full transition-colors ${currentTab === 'settings' ? (isAdvanced ? 'bg-slate-700 text-violet-400' : 'bg-emerald-100 text-emerald-700') : (isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-400' : 'bg-white shadow-sm border border-emerald-100 hover:bg-emerald-50 text-emerald-600')}`}
           >
             <Settings size={20} />
           </button>
@@ -74,6 +104,16 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
       {/* Desktop Sidebar Nav */}
       <aside className={`hidden md:flex flex-col fixed top-16 left-0 bottom-0 w-64 border-r z-20 pt-8 px-4 ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-gradient-to-b from-white to-emerald-50/30 border-emerald-100'}`}>
         <div className="flex-1 space-y-2 overflow-y-auto hide-scrollbar pb-20">
+          {selectedBusiness && (
+            <div className="mb-4">
+              <button 
+                onClick={() => { setSelectedBusiness(null); setCurrentTab('business'); }}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-colors w-full ${isAdvanced ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'}`}
+              >
+                <ArrowLeft size={16} /> Back to Portfolio
+              </button>
+            </div>
+          )}
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = currentTab === tab.id;

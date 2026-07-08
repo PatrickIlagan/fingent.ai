@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
-import { Plus, X, ArrowUpRight, History, Trash2, Edit2, TrendingUp, TrendingDown, Clock, Activity, Calendar, RefreshCw } from 'lucide-react';
+import { Plus, X, ArrowUpRight, History, Trash2, Edit2, TrendingUp, TrendingDown, Activity, RefreshCw } from 'lucide-react';
 
 const getSymbol = (currency?: string) => {
   if (currency === 'USD') return '$';
@@ -13,7 +13,6 @@ const getSymbol = (currency?: string) => {
 };
 
 export function Investments({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
-
   const mapPortfolioData = (dataList: any[]) => {
       if (!Array.isArray(dataList)) return [];
       return dataList.map((d: any) => ({
@@ -35,6 +34,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
 
   const { themeMode } = useStore();
   const isAdvanced = themeMode === 'advanced';
+  
   
   const [investmentsData, setInvestmentsData] = useState<any[]>([]);
 
@@ -64,6 +64,13 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
          setInvestmentsData(formatted);
       })
       .catch(console.error);
+      
+    fetch('/api/rates')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.PHP) setExchangeRates(data);
+      })
+      .catch(console.error);
   }, []);
 
   const [selectedHolding, setSelectedHolding] = useState<any | null>(null);
@@ -72,6 +79,9 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
   const [editingId, setEditingId] = useState<number | null>(null);
   
   const [chartMode, setChartMode] = useState<'Portfolio' | 'Asset Breakdown'>('Portfolio');
+  const [displayCurrency, setDisplayCurrency] = useState<'USD'|'PHP'>('USD');
+  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({ PHP: 58.5, EUR: 0.92, GBP: 0.79, USD: 1 });
+
   const [timeframe, setTimeframe] = useState('1M');
   const timeframes = ['1W', '1M', '6M', '1Y', '5Y', 'YTD', 'All'];
 
@@ -79,8 +89,11 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
     name: '', type: 'Stocks', shares: '', avgPrice: '', currentValue: '', invested: '', ticker: '', currency: 'USD'
   });
 
+  const [txInputMode, setTxInputMode] = useState<'total'|'shares'>('shares');
+  const [assetInputMode, setAssetInputMode] = useState<'total'|'shares'>('shares');
+  const [fetchedPrice, setFetchedPrice] = useState<number | null>(null);
   const [newTx, setNewTx] = useState({
-    date: new Date().toISOString().split('T')[0], type: 'Buy', amount: '', price: ''
+    date: new Date().toISOString().split('T')[0], type: 'Buy', amount: '', price: '', totalAmount: ''
   });
 
   const [visibleLines, setVisibleLines] = useState({
@@ -89,16 +102,36 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
 
   const activeCategory = category ? category.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : 'All';
 
+  const convertCurrency = (amount: number, fromCurrency: string) => {
+    if (!amount) return 0;
+    if (fromCurrency === displayCurrency) return amount;
+    
+    // Convert to USD first
+    let amountInUSD = amount;
+    if (fromCurrency !== 'USD') {
+       const rateToUsd = exchangeRates[fromCurrency] || 1;
+       amountInUSD = amount / rateToUsd;
+    }
+    
+    // Convert to target currency
+    if (displayCurrency !== 'USD') {
+       const rateFromUsd = exchangeRates[displayCurrency] || 1;
+       return amountInUSD * rateFromUsd;
+    }
+    
+    return amountInUSD;
+  };
+
   const filteredInvestments = activeCategory === 'All' 
     ? investmentsData 
     : investmentsData.filter(inv => inv.type === activeCategory);
 
-  const totalValue = filteredInvestments.reduce((sum, item) => sum + item.value, 0);
+  const totalValue = filteredInvestments.reduce((sum, item) => sum + convertCurrency(item.value, item.currency), 0);
 
   // Group by type for the pie chart
   const pieDataMap = filteredInvestments.reduce((acc, inv) => {
     if (!acc[inv.type]) acc[inv.type] = { name: inv.type, value: 0, color: inv.color };
-    acc[inv.type].value += inv.value;
+    acc[inv.type].value += convertCurrency(inv.value, inv.currency);
     return acc;
   }, {} as Record<string, any>);
   const pieData: any[] = Object.values(pieDataMap);
@@ -116,14 +149,14 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
     else if (timeframe === '5Y') { points = 5; unit = 'year'; }
     else if (timeframe === 'All') { points = 10; unit = 'year'; }
 
-    let valueRE = 1900000;
-    let invRE = 2000000;
-    let valueStocks = 7500;
-    let invStocks = 7500;
-    let valueCryptos = 20000;
-    let invCryptos = 20000;
-    let valueOthers = 450000;
-    let invOthers = 450000;
+    let curValueRE = investmentsData.filter(i => i.type === 'Real Estate').reduce((s, i) => s + convertCurrency(i.value, i.currency), 0);
+    let curInvRE = investmentsData.filter(i => i.type === 'Real Estate').reduce((s, i) => s + convertCurrency(i.shares && i.avgPrice ? i.shares * i.avgPrice : i.invested, i.currency), 0);
+    let curValueStocks = investmentsData.filter(i => i.type === 'Stocks').reduce((s, i) => s + convertCurrency(i.value, i.currency), 0);
+    let curInvStocks = investmentsData.filter(i => i.type === 'Stocks').reduce((s, i) => s + convertCurrency(i.shares && i.avgPrice ? i.shares * i.avgPrice : i.invested, i.currency), 0);
+    let curValueCryptos = investmentsData.filter(i => i.type === 'Cryptos').reduce((s, i) => s + convertCurrency(i.value, i.currency), 0);
+    let curInvCryptos = investmentsData.filter(i => i.type === 'Cryptos').reduce((s, i) => s + convertCurrency(i.shares && i.avgPrice ? i.shares * i.avgPrice : i.invested, i.currency), 0);
+    let curValueOthers = investmentsData.filter(i => i.type === 'Others').reduce((s, i) => s + convertCurrency(i.value, i.currency), 0);
+    let curInvOthers = investmentsData.filter(i => i.type === 'Others').reduce((s, i) => s + convertCurrency(i.shares && i.avgPrice ? i.shares * i.avgPrice : i.invested, i.currency), 0);
 
     for (let i = points - 1; i >= 0; i--) {
       const d = new Date(now);
@@ -139,13 +172,24 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
         name = d.getFullYear().toString();
       }
 
-      // Add some random walk for realism
-      valueRE += (Math.random() - 0.4) * 20000;
-      valueStocks += (Math.random() - 0.45) * 500;
-      valueCryptos += (Math.random() - 0.45) * 3000;
+      // Calculate historical drift going backwards from current values
+      const daysAgo = i;
+      let valueRE = curValueRE;
+      let valueStocks = curValueStocks;
+      let valueCryptos = curValueCryptos;
+      let valueOthers = curValueOthers;
 
-      const totalValue = valueRE + valueStocks + valueCryptos + valueOthers;
-      const totalInvested = invRE + invStocks + invCryptos + invOthers;
+      if (daysAgo !== 0) {
+        // Approximate history by slightly drifting from current values 
+        // A real app would calculate exact values based on transaction dates
+        valueRE -= (Math.sin(daysAgo) * 0.02 + 0.01) * curValueRE * (daysAgo / points);
+        valueStocks -= (Math.cos(daysAgo) * 0.05 + 0.02) * curValueStocks * (daysAgo / points);
+        valueCryptos -= (Math.sin(daysAgo * 2) * 0.1 + 0.05) * curValueCryptos * (daysAgo / points);
+        valueOthers -= (Math.cos(daysAgo * 0.5) * 0.01) * curValueOthers * (daysAgo / points);
+      }
+
+      const dispTotal = valueRE + valueStocks + valueCryptos + valueOthers;
+      const dispTotalInv = curInvRE + curInvStocks + curInvCryptos + curInvOthers;
 
       data.push({
         name,
@@ -153,22 +197,61 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
         'Stocks': valueStocks,
         'Cryptos': valueCryptos,
         'Others': valueOthers,
-        'Total Value': totalValue,
-        'Total Invested': totalInvested,
+        'Total Value': dispTotal,
+        'Total Invested': dispTotalInv,
       });
     }
     return { chartData: data, totalInvestedLine: data[data.length - 1]['Total Invested'] };
-  }, [timeframe]);
+  }, [timeframe, displayCurrency]);
+
+  const chartGain = chartData.length > 0 ? chartData[chartData.length - 1]['Total Value'] - chartData[0]['Total Value'] : 0;
+  const chartGainPercent = chartData.length > 0 && chartData[0]['Total Value'] > 0 ? (chartGain / chartData[0]['Total Value']) * 100 : 0;
+
+  useEffect(() => {
+    if (newAsset.ticker && (newAsset.type === 'Stocks' || newAsset.type === 'Cryptos')) {
+      const delay = setTimeout(() => {
+        fetch(`/api/quote/${newAsset.ticker}?type=${newAsset.type}`)
+          .then(res => res.ok ? res.json() : { price: null })
+          .then(data => setFetchedPrice(data.price))
+          .catch(() => setFetchedPrice(null));
+      }, 500);
+      return () => clearTimeout(delay);
+    } else {
+      setFetchedPrice(null);
+    }
+  }, [newAsset.ticker, newAsset.type]);
 
   const handleSaveAsset = async () => {
-    const isSharesBased = newAsset.type === 'Stocks' || newAsset.type === 'Cryptos';
+    const isSharesBased = (newAsset.type === 'Stocks' || newAsset.type === 'Cryptos');
     
+    // Calculate final fields based on mode
+    let finalShares = null;
+    let finalAvgPrice = null;
+    let finalInvested = parseFloat(newAsset.invested) || 0;
+    let finalCurrentValue = parseFloat(newAsset.currentValue) || 0;
+
+    if (isSharesBased) {
+      if (assetInputMode === 'shares') {
+        finalShares = parseFloat(newAsset.shares) || 0;
+        finalInvested = parseFloat(newAsset.invested) || 0;
+        finalAvgPrice = finalShares > 0 ? finalInvested / finalShares : 0;
+      } else {
+        // Total value mode
+        finalInvested = parseFloat(newAsset.invested) || 0;
+        finalCurrentValue = parseFloat(newAsset.currentValue) || 0;
+        if (fetchedPrice && fetchedPrice > 0) {
+          finalShares = finalCurrentValue / fetchedPrice;
+          finalAvgPrice = finalShares > 0 ? finalInvested / finalShares : 0;
+        }
+      }
+    }
+
     try {
       if (editingId) {
         await fetch('/api/portfolios/' + editingId, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ current_value: parseFloat(newAsset.currentValue) || 0 })
+          body: JSON.stringify({ current_value: finalCurrentValue })
         });
       } else {
         await fetch('/api/portfolios', {
@@ -177,11 +260,11 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
           body: JSON.stringify({
             type: newAsset.type,
             name: newAsset.name,
-            invested: isSharesBased ? (parseFloat(newAsset.shares) || 0) * (parseFloat(newAsset.avgPrice) || 0) : (parseFloat(newAsset.invested) || 0),
-            current_value: parseFloat(newAsset.currentValue) || 0,
-            shares: isSharesBased ? parseFloat(newAsset.shares) || 0 : null,
-            avg_price: isSharesBased ? parseFloat(newAsset.avgPrice) || 0 : null,
-            ticker: isSharesBased ? newAsset.ticker || '' : null,
+            invested: finalInvested,
+            current_value: finalCurrentValue,
+            shares: finalShares,
+            avg_price: finalAvgPrice,
+            ticker: newAsset.ticker || '',
             currency: newAsset.currency
           })
         });
@@ -212,7 +295,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
     if (!selectedHolding || !newTx.price) return;
     
     let shares = parseFloat(newTx.amount);
-    if (newTx.totalAmount) {
+    if (txInputMode === 'total' && newTx.totalAmount) {
        shares = parseFloat(newTx.totalAmount) / parseFloat(newTx.price);
     }
     
@@ -268,6 +351,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
             >
               <Trash2 className="w-4 h-4" /> <span className="hidden sm:inline">Delete</span>
             </button>
+            {(selectedHolding.type === 'Stocks' || selectedHolding.type === 'Cryptos') && (
             <button 
               onClick={() => {
                 setNewTx({ date: new Date().toISOString().split('T')[0], type: 'Buy', amount: '', price: '', totalAmount: '' });
@@ -277,6 +361,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
             >
               <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Add Transaction</span>
             </button>
+            )}
           </div>
         </div>
 
@@ -315,7 +400,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
           </div>
         </div>
 
-        {(selectedHolding.shares || selectedHolding.shares === 0) && (
+        {(selectedHolding.shares != null) && (
           <div className={`rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
             <h3 className="text-lg font-bold mb-4">Position Details</h3>
             <div className="grid grid-cols-2 gap-4">
@@ -335,6 +420,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
           </div>
         )}
 
+        {(selectedHolding.type === 'Stocks' || selectedHolding.type === 'Cryptos') && (
         <div className={`rounded-3xl p-6 sm:p-8 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <h3 className="text-lg font-bold flex items-center gap-2 mb-6">
             <History size={18} /> Transaction History
@@ -354,6 +440,8 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
             )}
           </div>
         </div>
+        )}
+
       {isTxModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsTxModalOpen(false)}>
           <div 
@@ -387,10 +475,20 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
                   </select>
                </div>
                
-               {(selectedHolding?.type === 'Stocks' || selectedHolding?.type === 'Cryptos') ? (
-                 <div className="grid grid-cols-2 gap-4">
+               <div className="flex bg-slate-100 dark:bg-slate-900 rounded-lg p-1 mb-4">
+                 <button 
+                    className={`flex-1 py-1.5 text-xs font-medium rounded-md ${txInputMode === 'shares' ? 'bg-white dark:bg-slate-800 shadow' : 'text-slate-500'}`}
+                    onClick={() => { setTxInputMode('shares'); setNewTx({...newTx, totalAmount: ''}); }}
+                 >By Shares</button>
+                 <button 
+                    className={`flex-1 py-1.5 text-xs font-medium rounded-md ${txInputMode === 'total' ? 'bg-white dark:bg-slate-800 shadow' : 'text-slate-500'}`}
+                    onClick={() => { setTxInputMode('total'); setNewTx({...newTx, amount: ''}); }}
+                 >By Total Invested</button>
+               </div>
+               <div className="grid grid-cols-2 gap-4">
+                 {txInputMode === 'total' ? (
                    <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">Total Invested ({getSymbol(selectedHolding?.currency)})</label>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Total Amount ({getSymbol(selectedHolding?.currency)})</label>
                       <input 
                         type="number" 
                         value={newTx.totalAmount}
@@ -399,32 +497,35 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
                         placeholder="0" 
                       />
                    </div>
+                 ) : (
                    <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">Price per Share ({getSymbol(selectedHolding?.currency)})</label>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Shares</label>
                       <input 
                         type="number" 
-                        value={newTx.price}
-                        onChange={(e) => setNewTx({ ...newTx, price: e.target.value })}
+                        value={newTx.amount}
+                        onChange={(e) => setNewTx({ ...newTx, amount: e.target.value })}
                         className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} 
                         placeholder="0" 
                       />
                    </div>
-                   <div className="col-span-2 text-xs text-slate-500 mt-[-8px]">
-                      Calculated Shares: {newTx.totalAmount && newTx.price ? (parseFloat(newTx.totalAmount) / parseFloat(newTx.price)).toFixed(4) : 0}
-                   </div>
-                 </div>
-               ) : (
+                 )}
                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Total Amount ({getSymbol(selectedHolding?.currency)})</label>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Price per Share ({getSymbol(selectedHolding?.currency)})</label>
                     <input 
                       type="number" 
                       value={newTx.price}
-                      onChange={(e) => setNewTx({ ...newTx, price: e.target.value, amount: '1' })}
+                      onChange={(e) => setNewTx({ ...newTx, price: e.target.value })}
                       className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} 
                       placeholder="0" 
                     />
                  </div>
-               )}
+                 <div className="col-span-2 text-xs text-slate-500 mt-[-8px]">
+                    {txInputMode === 'total' 
+                      ? `Calculated Shares: ${newTx.totalAmount && newTx.price ? (parseFloat(newTx.totalAmount) / parseFloat(newTx.price)).toFixed(4) : 0}`
+                      : `Calculated Total: ${getSymbol(selectedHolding?.currency)}${newTx.amount && newTx.price ? (parseFloat(newTx.amount) * parseFloat(newTx.price)).toLocaleString() : 0}`
+                    }
+                 </div>
+               </div>
             </div>
 
             <button 
@@ -447,74 +548,88 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
           <h2 className="text-2xl font-bold">{activeCategory === 'All' ? 'Investments' : activeCategory}</h2>
           <p className="text-slate-500 dark:text-slate-400 mt-1">Track your wealth and assets</p>
         </div>
-        
-        <button 
-          onClick={handleSyncPrices}
-          disabled={isSyncing}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all shadow-sm ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'} ${isSyncing ? 'opacity-50 cursor-not-allowed' : ''}`}
-        >
-          <RefreshCw size={18} className={isSyncing ? "animate-spin" : ""} /> <span className="hidden sm:inline">{isSyncing ? 'Syncing...' : 'Sync Prices'}</span>
-        </button>
-        <button 
-          onClick={() => {
-            setEditingId(null);
-            setNewAsset({ name: '', type: activeCategory === 'All' ? 'Stocks' : activeCategory, shares: '', avgPrice: '', currentValue: '', invested: '' });
-            setIsModalOpen(true);
-          }}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all shadow-sm hover:shadow-md ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-violet-900/20' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}
-        >
-          <Plus size={18} /> <span className="hidden sm:inline">Add Asset</span>
-        </button>
-      </div>
-
-      <div className="grid lg:grid-cols-3 gap-6">
-        <div className={`lg:col-span-2 rounded-3xl p-5 shadow-sm border h-96 flex flex-col ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
-            <div className="flex items-center gap-4">
-              <h3 className="font-bold">Portfolio Growth</h3>
-              <div className={`flex rounded-xl p-1 ${isAdvanced ? 'bg-slate-900' : 'bg-slate-100'}`}>
-                {['Portfolio', 'Asset Breakdown'].map(mode => (
-                  <button 
-                    key={mode}
-                    onClick={() => setChartMode(mode as any)}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${chartMode === mode ? (isAdvanced ? 'bg-slate-700 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm') : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-                  >
-                    {mode}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className={`flex rounded-xl p-1 ${isAdvanced ? 'bg-slate-900' : 'bg-slate-100'}`}>
-              {timeframes.map(tf => (
-                <button 
-                  key={tf}
-                  onClick={() => setTimeframe(tf)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${timeframe === tf ? (isAdvanced ? 'bg-slate-700 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm') : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-                >
-                  {tf}
-                </button>
-              ))}
-            </div>
-          </div>
-          
-          {chartMode === 'Asset Breakdown' && activeCategory === 'All' && (
-            <div className="flex gap-2 text-xs flex-wrap mb-4">
-              {['Real Estate', 'Stocks', 'Cryptos', 'Others'].map(cat => (
-                <label key={cat} className={`flex items-center gap-1.5 px-2 py-1 rounded-lg cursor-pointer transition-colors ${visibleLines[cat as keyof typeof visibleLines] ? (isAdvanced ? 'bg-slate-700' : 'bg-slate-100') : 'opacity-50'}`}>
-                  <input 
-                    type="checkbox" 
-                    className="hidden"
-                    checked={visibleLines[cat as keyof typeof visibleLines]}
-                    onChange={() => setVisibleLines(prev => ({ ...prev, [cat]: !prev[cat as keyof typeof visibleLines] }))}
-                  />
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: cat === 'Real Estate' ? '#3B82F6' : cat === 'Stocks' ? '#10B981' : cat === 'Cryptos' ? '#F59E0B' : '#8B5CF6' }} />
-                  {cat}
-                </label>
-              ))}
+        <div className="flex gap-2 items-center">
+          {displayCurrency === 'PHP' && exchangeRates['PHP'] && (
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border ${isAdvanced ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}>
+              <Activity size={14} className="text-emerald-500" />
+              1 USD = {exchangeRates['PHP'].toFixed(2)} PHP
             </div>
           )}
+          {displayCurrency === 'USD' && exchangeRates['PHP'] && (
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border ${isAdvanced ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}>
+              <Activity size={14} className="text-emerald-500" />
+              1 PHP = {(1 / exchangeRates['PHP']).toFixed(4)} USD
+            </div>
+          )}
+          {displayCurrency !== 'USD' && displayCurrency !== 'PHP' && exchangeRates[displayCurrency] && (
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border ${isAdvanced ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}>
+              <Activity size={14} className="text-emerald-500" />
+              1 USD = {exchangeRates[displayCurrency].toFixed(2)} {displayCurrency}
+            </div>
+          )}
+          <select
+            value={displayCurrency}
+            onChange={(e) => setDisplayCurrency(e.target.value as any)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium outline-none ${isAdvanced ? 'bg-slate-800 border border-slate-700 text-slate-300' : 'bg-white border border-slate-200 text-slate-600'}`}
+          >
+            <option value="USD">USD</option>
+            <option value="PHP">PHP</option>
+          </select>
+          <button 
+            onClick={async () => {
+               try {
+                 await fetch('/api/portfolios/sync', { method: 'POST' });
+                 const res = await fetch('/api/portfolios');
+                 const data = await res.json();
+                 const formatted = mapPortfolioData(Array.isArray(data) ? data : []);
+                 setInvestmentsData(formatted);
+               } catch(e) {}
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700' : 'bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 shadow-sm'}`}
+          >
+            <RefreshCw size={16} /> <span className="hidden sm:inline">Sync Prices</span>
+          </button>
+          <button 
+            onClick={() => {
+              setNewAsset({ name: '', type: activeCategory !== 'All' ? activeCategory : 'Stocks', shares: '', avgPrice: '', currentValue: '', invested: '', ticker: '', currency: displayCurrency });
+              setEditingId(null);
+              setIsModalOpen(true);
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-violet-900/20' : 'bg-slate-900 hover:bg-slate-800 text-white shadow-sm'}`}
+          >
+            <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Add Asset</span>
+          </button>
+        </div>
+      </div>
 
-          <div className="flex-1 min-h-0 mt-2">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className={`lg:col-span-2 rounded-3xl p-1 sm:p-6 shadow-sm border flex flex-col ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+          <div className="p-4 sm:p-0 flex justify-between items-start mb-6">
+            <div>
+              <p className="text-sm font-medium text-slate-500 dark:text-slate-400 flex items-center gap-2">Total Balance</p>
+              <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mt-4 mb-1">
+                {getSymbol(displayCurrency)}{totalValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              </h1>
+              <p className="text-emerald-500 font-medium text-sm flex items-center gap-1">
+                {chartGain >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />} 
+   {chartGain >= 0 ? '+' : '-'}{getSymbol(displayCurrency)}{Math.abs(chartGain).toLocaleString(undefined, { maximumFractionDigits: 2 })} ({chartGainPercent > 0 ? '+' : ''}{chartGainPercent.toFixed(1)}%) 
+   <span className="text-slate-400 ml-1 font-normal">{timeframe}</span>
+              </p>
+            </div>
+            <div className={`flex p-1 rounded-xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
+               {timeframes.map(tf => (
+                 <button 
+                   key={tf}
+                   onClick={() => setTimeframe(tf)}
+                   className={`px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-all ${timeframe === tf ? (isAdvanced ? 'bg-slate-700 text-white shadow-sm' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                 >
+                   {tf}
+                 </button>
+               ))}
+            </div>
+          </div>
+
+          <div className="h-[300px] w-full mt-auto">
             <ResponsiveContainer width="100%" height="100%">
               {chartMode === 'Portfolio' ? (
                 <AreaChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
@@ -525,10 +640,10 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
                     </linearGradient>
                   </defs>
                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} minTickGap={20} padding={{ left: 20, right: 20 }} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} tickFormatter={(val) => `$${(val/1000)}k`} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} tickFormatter={(val) => `${getSymbol(displayCurrency)}${(val/1000)}k`} />
                   <Tooltip 
                     contentStyle={{ backgroundColor: isAdvanced ? '#1e293b' : '#ffffff', border: isAdvanced ? '1px solid #334155' : '1px solid #e2e8f0', borderRadius: '12px' }} 
-                    formatter={(value: number, name: string) => [`$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, name]}
+                    formatter={(value: number, name: string) => [`${getSymbol(displayCurrency)}${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, name]}
                   />
                   <Area type="monotone" dataKey="Total Value" stroke="#10B981" strokeWidth={3} fillOpacity={1} fill="url(#colorTotal)" activeDot={{ r: 6 }} />
                   <Line type="monotone" dataKey="Total Invested" stroke={isAdvanced ? '#64748b' : '#94a3b8'} strokeWidth={2} strokeDasharray="5 5" dot={false} />
@@ -536,10 +651,10 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
               ) : (
                 <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} minTickGap={20} padding={{ left: 20, right: 20 }} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} tickFormatter={(val) => `$${(val/1000)}k`} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} tickFormatter={(val) => `${getSymbol(displayCurrency)}${(val/1000)}k`} />
                   <Tooltip 
                     contentStyle={{ backgroundColor: isAdvanced ? '#1e293b' : '#ffffff', border: isAdvanced ? '1px solid #334155' : '1px solid #e2e8f0', borderRadius: '12px' }} 
-                    formatter={(value: number, name: string) => [`$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, name]}
+                    formatter={(value: number, name: string) => [`${getSymbol(displayCurrency)}${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, name]}
                   />
                   {(activeCategory === 'All' || activeCategory === 'Real Estate') && visibleLines['Real Estate'] && <Line type="monotone" dataKey="Real Estate" stroke="#3B82F6" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />}
                   {(activeCategory === 'All' || activeCategory === 'Stocks') && visibleLines['Stocks'] && <Line type="monotone" dataKey="Stocks" stroke="#10B981" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />}
@@ -563,7 +678,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
                   <Cell key={`cell-${index}`} fill={entry.color} />
                 ))}
               </Pie>
-              <Tooltip formatter={(value: number) => `$${value.toLocaleString()}`} />
+              <Tooltip formatter={(value: number) => `${getSymbol(displayCurrency)}${value.toLocaleString()}`} />
             </PieChart>
           </ResponsiveContainer>
           <div className="grid grid-cols-2 gap-2 mt-4 w-full">
@@ -574,10 +689,6 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
                  <span className="font-bold ml-auto">{((d.value / totalValue) * 100).toFixed(1)}%</span>
                </div>
             ))}
-          </div>
-          <div className={`mt-4 w-full p-3 rounded-xl text-xs font-medium flex items-start gap-2 ${isAdvanced ? 'bg-slate-900/50 text-slate-400' : 'bg-slate-50 text-slate-600'}`}>
-             <Activity className="w-4 h-4 shrink-0 mt-0.5 text-blue-500" />
-             <p>Your portfolio is heavily weighted in Real Estate. Consider increasing exposure to Stocks or Index Funds for better liquidity and diversification.</p>
           </div>
         </div>
       </div>
@@ -615,7 +726,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
                       ) : null}
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                      {inv.type} {inv.shares !== undefined ? `• ${inv.shares} shares` : ''}
+                      {inv.type} {inv.shares != null ? `• ${inv.shares} shares` : ''}
                     </p>
                   </div>
                 </div>
@@ -699,7 +810,113 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
                   </select>
                </div>
                
-               {editingId && (
+               {(newAsset.type === 'Stocks' || newAsset.type === 'Cryptos') ? (
+                 <>
+                   {!editingId && (
+                     <div className="mb-4 flex gap-2 p-1 rounded-xl bg-slate-100 dark:bg-slate-900/50">
+                        <button onClick={() => setAssetInputMode('shares')} className={`flex-1 py-1.5 text-xs font-bold rounded-lg ${assetInputMode === 'shares' ? 'bg-white dark:bg-slate-700 shadow-sm' : 'text-slate-500'}`}>Shares & Invested</button>
+                        <button onClick={() => setAssetInputMode('total')} className={`flex-1 py-1.5 text-xs font-bold rounded-lg ${assetInputMode === 'total' ? 'bg-white dark:bg-slate-700 shadow-sm' : 'text-slate-500'}`}>Total Value</button>
+                     </div>
+                   )}
+                   {!editingId && assetInputMode === 'shares' && (
+                     <div className="space-y-4">
+                     <div className="grid grid-cols-2 gap-4">
+                       <div>
+                          <label className="block text-xs font-medium text-slate-500 mb-1">Shares</label>
+                          <input 
+                            type="number" 
+                            value={newAsset.shares}
+                            onChange={(e) => setNewAsset({ ...newAsset, shares: e.target.value })}
+                            className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} 
+                            placeholder="0" 
+                          />
+                       </div>
+                       <div>
+                          <label className="block text-xs font-medium text-slate-500 mb-1">Total Invested ({getSymbol(newAsset.currency)})</label>
+                          <input 
+                            type="number" 
+                            value={newAsset.invested}
+                            onChange={(e) => setNewAsset({ ...newAsset, invested: e.target.value })}
+                            className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} 
+                            placeholder="0" 
+                          />
+                       </div>
+                       </div>
+                       <div>
+                          <label className="block text-xs font-medium text-slate-500 mb-1">Current Value ({getSymbol(newAsset.currency)})</label>
+                          <input 
+                            type="number" 
+                            value={newAsset.currentValue}
+                            onChange={(e) => setNewAsset({ ...newAsset, currentValue: e.target.value })}
+                            className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} 
+                            placeholder="0" 
+                          />
+                       </div>
+                     </div>
+                   )}
+                   {!editingId && assetInputMode === 'total' && (
+                     <div className="space-y-4">
+                       <div className="grid grid-cols-2 gap-4">
+                         <div>
+                            <label className="block text-xs font-medium text-slate-500 mb-1">Initial Invested Amount ({getSymbol(newAsset.currency)})</label>
+                            <input 
+                              type="number" 
+                              value={newAsset.invested}
+                              onChange={(e) => setNewAsset({ ...newAsset, invested: e.target.value })}
+                              className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} 
+                              placeholder="0" 
+                            />
+                         </div>
+                         <div>
+                            <label className="block text-xs font-medium text-slate-500 mb-1">Current Value ({getSymbol(newAsset.currency)})</label>
+                            <input 
+                              type="number" 
+                              value={newAsset.currentValue}
+                              onChange={(e) => setNewAsset({ ...newAsset, currentValue: e.target.value })}
+                              className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} 
+                              placeholder="0" 
+                            />
+                         </div>
+                       </div>
+                       <div className={`p-3 rounded-xl text-sm ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`}>
+                           <p className="text-slate-500 mb-1">Calculated Shares {fetchedPrice !== null ? `(Current Price: ${getSymbol(newAsset.currency)}${fetchedPrice.toLocaleString()})` : ''}</p>
+                           <p className="font-bold text-lg">
+                             {fetchedPrice !== null && parseFloat(newAsset.currentValue) > 0 
+                               ? `${(parseFloat(newAsset.currentValue) / fetchedPrice).toLocaleString(undefined, { maximumFractionDigits: 4 })} shares`
+                               : (fetchedPrice === null ? <span className="text-slate-400 text-xs font-normal">Enter a valid ticker and current value to auto-calculate</span> : '0 shares')}
+                           </p>
+                         </div>
+                     </div>
+                   )}
+                 </>
+               ) : (
+                 <>
+                   {!editingId && (
+                     <div>
+                        <label className="block text-xs font-medium text-slate-500 mb-1">Initial Invested Amount ({getSymbol(newAsset.currency)})</label>
+                        <input 
+                          type="number" 
+                          value={newAsset.invested}
+                          onChange={(e) => setNewAsset({ ...newAsset, invested: e.target.value })}
+                          className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} 
+                          placeholder="0" 
+                        />
+                     </div>
+                   )}
+                   <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Current Value ({getSymbol(newAsset.currency)})</label>
+                      <input 
+                        type="number" 
+                        value={newAsset.currentValue}
+                        onChange={(e) => setNewAsset({ ...newAsset, currentValue: e.target.value })}
+                        className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} 
+                        placeholder="0" 
+                      />
+                   </div>
+                 </>
+               )}
+
+               {editingId && (newAsset.type === 'Stocks' || newAsset.type === 'Cryptos') && (
                  <div>
                     <label className="block text-xs font-medium text-slate-500 mb-1">Current Value ({getSymbol(newAsset.currency)}) - Update manually for non-tracked assets</label>
                     <input 
