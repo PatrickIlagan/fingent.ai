@@ -25,6 +25,7 @@ export function Freelancing({ currentTab, onNavigate }: any) {
 
   // State for Profiles List
   const [profiles, setProfiles] = useState<any[]>([]);
+  const [portfolioOverview, setPortfolioOverview] = useState<any[]>([]);
     const [isAddProfileOpen, setIsAddProfileOpen] = useState(false);
   const [newProfile, setNewProfile] = useState({
     name: "",
@@ -58,9 +59,14 @@ export function Freelancing({ currentTab, onNavigate }: any) {
 
   const fetchProfiles = async () => {
     try {
-      const res = await fetch("/api/freelance_businesses");
+      const [res, overviewRes] = await Promise.all([
+        fetch("/api/freelance_businesses"),
+        fetch("/api/freelancing/overview"),
+      ]);
       const data = await res.json();
       setProfiles(data);
+      const overview = await overviewRes.json();
+      setPortfolioOverview(Array.isArray(overview) ? overview : []);
     } catch (e) {}
   };
 
@@ -110,6 +116,10 @@ export function Freelancing({ currentTab, onNavigate }: any) {
 
   // If no profile is selected, show the Profiles overview
   if (!selectedFreelance) {
+    const paidTotal = portfolioOverview.reduce((sum, item) => sum + Number(item.paid_total || 0), 0);
+    const outstandingTotal = portfolioOverview.reduce((sum, item) => sum + Number(item.outstanding_total || 0), 0);
+    const activeContracts = portfolioOverview.reduce((sum, item) => sum + Number(item.active_contracts || 0), 0);
+    const hoursLogged = portfolioOverview.reduce((sum, item) => sum + Number(item.seconds_logged || 0), 0) / 3600;
     return (
       <div className="space-y-6 pb-10 animate-in fade-in duration-300">
         <div className="flex justify-between items-end">
@@ -125,6 +135,28 @@ export function Freelancing({ currentTab, onNavigate }: any) {
           >
             <Plus size={16} /> New Service
           </button>
+        </div>
+
+        <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          {[
+            { label: "Paid income", value: `₱${paidTotal.toLocaleString()}`, accent: "text-emerald-500" },
+            { label: "Outstanding invoices", value: `₱${outstandingTotal.toLocaleString()}`, accent: "text-amber-500" },
+            { label: "Active contracts", value: activeContracts.toString(), accent: "text-blue-500" },
+            { label: "Hours logged", value: `${hoursLogged.toFixed(1)}h`, accent: "text-violet-500" },
+          ].map((metric) => (
+            <div key={metric.label} className={`p-5 rounded-3xl border shadow-sm ${isAdvanced ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{metric.label}</p>
+              <p className={`mt-2 text-2xl font-black ${metric.accent}`}>{metric.value}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-black">Your services</h2>
+            <p className="text-sm text-slate-500 mt-1">Open a service to manage its contracts, invoices, and billable time.</p>
+          </div>
+          <span className="text-sm font-bold text-slate-500">{profiles.length} service{profiles.length === 1 ? "" : "s"}</span>
         </div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -162,6 +194,15 @@ export function Freelancing({ currentTab, onNavigate }: any) {
               <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-2">
                 {p.description}
               </p>
+              {(() => {
+                const summary = portfolioOverview.find((item) => item.id === p.id);
+                return (
+                  <div className={`mt-5 grid grid-cols-2 gap-2 rounded-2xl p-3 ${isAdvanced ? "bg-slate-900/60" : "bg-slate-50"}`}>
+                    <div><p className="text-[10px] uppercase font-bold text-slate-500">Contracts</p><p className="font-black">{summary?.active_contracts || 0}</p></div>
+                    <div><p className="text-[10px] uppercase font-bold text-slate-500">Outstanding</p><p className="font-black text-amber-500">₱{Number(summary?.outstanding_total || 0).toLocaleString()}</p></div>
+                  </div>
+                );
+              })()}
             </div>
           ))}
           {profiles.length === 0 && (
@@ -257,6 +298,7 @@ export function Freelancing({ currentTab, onNavigate }: any) {
       invoices={invoices}
       timeLogs={timeLogs}
       fetchAll={fetchData}
+      onNavigate={onNavigate}
     />
   );
 }
@@ -268,6 +310,7 @@ function FreelanceDashboard({
   invoices,
   timeLogs,
   fetchAll,
+  onNavigate,
 }: any) {
   const { themeMode } = useStore();
   const isAdvanced = themeMode === "advanced";
@@ -335,6 +378,38 @@ function FreelanceDashboard({
             <p className="text-3xl font-black text-violet-500">
               {totalHours.toFixed(1)}h
             </p>
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-4">
+          {[
+            { label: "Manage contracts", detail: "Create, edit, and close client work", tab: "freelance-contracts", icon: Briefcase },
+            { label: "Invoice clients", detail: "Issue, export, and track payments", tab: "freelance-invoices", icon: FileText },
+            { label: "Track time", detail: "Run a timer or maintain work logs", tab: "freelance-time", icon: Clock },
+          ].map((action) => {
+            const Icon = action.icon;
+            return (
+              <button key={action.tab} onClick={() => onNavigate(action.tab)} className={`text-left rounded-3xl border p-5 transition-transform hover:-translate-y-0.5 hover:shadow-md ${isAdvanced ? "bg-slate-800 border-slate-700 hover:border-violet-500" : "bg-white border-slate-100 hover:border-emerald-400"}`}>
+                <Icon className={isAdvanced ? "text-violet-400" : "text-emerald-600"} size={22} />
+                <p className="mt-4 font-black">{action.label}</p>
+                <p className="mt-1 text-sm text-slate-500">{action.detail}</p>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="grid lg:grid-cols-2 gap-6">
+          <div className={`rounded-3xl border p-6 ${isAdvanced ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}>
+            <div className="flex items-center justify-between mb-4"><h2 className="font-black text-lg">Recent invoices</h2><button onClick={() => onNavigate("freelance-invoices")} className="text-sm font-bold text-emerald-600 dark:text-violet-400">View all</button></div>
+            {invoices.length === 0 ? <p className="py-5 text-sm text-slate-500">No invoices yet. Create one when a client is ready to be billed.</p> : (
+              <div className="space-y-3">{invoices.slice(0, 4).map((invoice: any) => <div key={invoice.id} className={`flex items-center justify-between rounded-2xl p-3 ${isAdvanced ? "bg-slate-900/60" : "bg-slate-50"}`}><div><p className="font-bold text-sm">{invoice.invoice_number}</p><p className="text-xs text-slate-500">{invoice.client_name || "No client"}</p></div><div className="text-right"><p className="font-bold">₱{Number(invoice.amount || 0).toLocaleString()}</p><p className="text-xs text-slate-500">{invoice.status}</p></div></div>)}</div>
+            )}
+          </div>
+          <div className={`rounded-3xl border p-6 ${isAdvanced ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}>
+            <div className="flex items-center justify-between mb-4"><h2 className="font-black text-lg">Recent work</h2><button onClick={() => onNavigate("freelance-time")} className="text-sm font-bold text-emerald-600 dark:text-violet-400">View all</button></div>
+            {timeLogs.length === 0 ? <p className="py-5 text-sm text-slate-500">Start the timer to record your first billable session.</p> : (
+              <div className="space-y-3">{timeLogs.slice(0, 4).map((log: any) => <div key={log.id} className={`flex items-center justify-between rounded-2xl p-3 ${isAdvanced ? "bg-slate-900/60" : "bg-slate-50"}`}><div><p className="font-bold text-sm">{services.find((service: any) => String(service.id) === String(log.service_id))?.name || "Unassigned work"}</p><p className="text-xs text-slate-500">{log.description || "Untitled session"}</p></div><p className="font-mono font-bold text-violet-500">{(Number(log.seconds || 0) / 3600).toFixed(1)}h</p></div>)}</div>
+            )}
           </div>
         </div>
       </div>
@@ -636,6 +711,8 @@ function InvoicesTab({
 
   const invoiceRef = useRef<HTMLDivElement>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editInvoice, setEditInvoice] = useState<any | null>(null);
 
   const handleAdd = async () => {
     try {
@@ -661,6 +738,21 @@ function InvoicesTab({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...inv, status: 'Paid' })
       });
+      fetchAll();
+    } catch (e) {}
+  };
+
+  const handleEdit = async () => {
+    if (!editInvoice) return;
+    try {
+      const response = await fetch(`/api/freelancing/invoices/${editInvoice.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...editInvoice, amount: Number(editInvoice.amount) || 0 }),
+      });
+      if (!response.ok) return;
+      setIsEditOpen(false);
+      setEditInvoice(null);
       fetchAll();
     } catch (e) {}
   };
@@ -763,6 +855,12 @@ function InvoicesTab({
                         <Download size={14} /> Export
                       </button>
                       <button
+                        className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 font-bold text-xs"
+                        onClick={() => { setEditInvoice({ ...i }); setIsEditOpen(true); }}
+                      >
+                        Edit
+                      </button>
+                      <button
                         className="text-red-500 hover:text-red-600 font-bold text-xs flex items-center gap-1"
                         onClick={() => handleDelete(i.id)}
                       >
@@ -845,9 +943,10 @@ function InvoicesTab({
                 </label>
                 <select
                   value={newInvoice.service_id}
-                  onChange={(e) =>
-                    setNewInvoice({ ...newInvoice, service_id: e.target.value })
-                  }
+                  onChange={(e) => {
+                    const service = services.find((item: any) => String(item.id) === e.target.value);
+                    setNewInvoice({ ...newInvoice, service_id: e.target.value, client_name: service?.client || newInvoice.client_name });
+                  }}
                   className={`w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200"}`}
                 >
                   <option value="">Select Contract</option>
@@ -887,6 +986,16 @@ function InvoicesTab({
                   className={`w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200"}`}
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 mb-1 block">Issue date</label>
+                  <input type="date" value={newInvoice.issue_date} onChange={(e) => setNewInvoice({ ...newInvoice, issue_date: e.target.value })} className={`w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200"}`} />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 mb-1 block">Due date</label>
+                  <input type="date" value={newInvoice.due_date} onChange={(e) => setNewInvoice({ ...newInvoice, due_date: e.target.value })} className={`w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200"}`} />
+                </div>
+              </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button
@@ -902,6 +1011,23 @@ function InvoicesTab({
                 Save
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {isEditOpen && editInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className={`w-full max-w-lg p-6 rounded-3xl ${isAdvanced ? "bg-slate-800" : "bg-white"}`}>
+            <div className="flex items-center justify-between mb-5"><div><h3 className="text-xl font-black">Edit Invoice</h3><p className="text-sm text-slate-500 mt-1">Update the billing record before exporting or marking it paid.</p></div><button onClick={() => { setIsEditOpen(false); setEditInvoice(null); }} className="p-2 text-slate-500"><X size={20} /></button></div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <label className="text-sm font-bold">Invoice number<input value={editInvoice.invoice_number || ""} onChange={(e) => setEditInvoice({ ...editInvoice, invoice_number: e.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`} /></label>
+              <label className="text-sm font-bold">Client<input value={editInvoice.client_name || ""} onChange={(e) => setEditInvoice({ ...editInvoice, client_name: e.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`} /></label>
+              <label className="text-sm font-bold">Amount<input type="number" min="0" value={editInvoice.amount ?? ""} onChange={(e) => setEditInvoice({ ...editInvoice, amount: e.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`} /></label>
+              <label className="text-sm font-bold">Status<select value={editInvoice.status || "Draft"} onChange={(e) => setEditInvoice({ ...editInvoice, status: e.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`}><option>Draft</option><option>Sent</option><option>Paid</option><option>Overdue</option></select></label>
+              <label className="text-sm font-bold">Issue date<input type="date" value={editInvoice.issue_date || ""} onChange={(e) => setEditInvoice({ ...editInvoice, issue_date: e.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`} /></label>
+              <label className="text-sm font-bold">Due date<input type="date" value={editInvoice.due_date || ""} onChange={(e) => setEditInvoice({ ...editInvoice, due_date: e.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`} /></label>
+              <label className="text-sm font-bold sm:col-span-2">Contract<select value={editInvoice.service_id || ""} onChange={(e) => setEditInvoice({ ...editInvoice, service_id: e.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`}><option value="">No contract</option>{services.map((service: any) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
+            </div>
+            <div className="flex justify-end gap-3 mt-6"><button onClick={() => { setIsEditOpen(false); setEditInvoice(null); }} className="px-5 py-2.5 font-bold text-sm text-slate-500">Cancel</button><button onClick={handleEdit} className={`px-5 py-2.5 rounded-xl font-bold text-sm text-white ${isAdvanced ? "bg-violet-600 hover:bg-violet-700" : "bg-slate-900 hover:bg-slate-800"}`}>Save changes</button></div>
           </div>
         </div>
       )}
@@ -921,9 +1047,13 @@ function TimeLogsTab({
     start: number;
   } | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [timerServiceId, setTimerServiceId] = useState("");
   
   const [isLogMessageOpen, setIsLogMessageOpen] = useState(false);
   const [logMessage, setLogMessage] = useState("");
+  const [isManualLogOpen, setIsManualLogOpen] = useState(false);
+  const [editingLog, setEditingLog] = useState<any | null>(null);
+  const [manualLog, setManualLog] = useState({ service_id: "", date: new Date().toISOString().split("T")[0], hours: "", description: "" });
 
   useEffect(() => {
     let interval: any;
@@ -938,6 +1068,11 @@ function TimeLogsTab({
   const startTimer = (serviceId: string) => {
     setActiveTimer({ service_id: serviceId, start: Date.now() });
   };
+
+  useEffect(() => {
+    const firstHourlyService = services.find((service: any) => service.type === "Hourly");
+    if (!timerServiceId && firstHourlyService) setTimerServiceId(String(firstHourlyService.id));
+  }, [services, timerServiceId]);
 
   const stopTimer = () => {
     if (!activeTimer) return;
@@ -966,10 +1101,45 @@ function TimeLogsTab({
     } catch (e) {}
   };
 
+  const saveManualLog = async () => {
+    const source = editingLog || manualLog;
+    const seconds = Math.round(Number(source.hours || 0) * 3600);
+    if (!source.service_id || seconds <= 0) return;
+    const endpoint = editingLog ? `/api/freelancing/time_logs/${editingLog.id}` : "/api/freelancing/time_logs";
+    const method = editingLog ? "PUT" : "POST";
+    try {
+      const response = await fetch(endpoint, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          business_id: businessId,
+          service_id: source.service_id,
+          date: source.date,
+          seconds,
+          description: source.description || "",
+        }),
+      });
+      if (!response.ok) return;
+      setIsManualLogOpen(false);
+      setEditingLog(null);
+      setManualLog({ service_id: "", date: new Date().toISOString().split("T")[0], hours: "", description: "" });
+      fetchAll();
+    } catch (e) {}
+  };
+
+  const deleteLog = async (id: number) => {
+    if (!confirm("Delete this time log?")) return;
+    try {
+      const response = await fetch(`/api/freelancing/time_logs/${id}`, { method: "DELETE" });
+      if (response.ok) fetchAll();
+    } catch (e) {}
+  };
+
   return (
     <div className="space-y-6 pb-10 animate-in fade-in duration-300">
-      <div className="flex justify-between items-end">
-        <h1 className="text-3xl font-black">Time Logs</h1>
+      <div className="flex justify-between items-end gap-4">
+        <div><h1 className="text-3xl font-black">Time Logs</h1><p className="text-sm text-slate-500 mt-1">Record billable work with a timer or a manual entry.</p></div>
+        <button onClick={() => setIsManualLogOpen(true)} className={`px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 ${isAdvanced ? "bg-violet-600 text-white hover:bg-violet-700" : "bg-slate-900 text-white hover:bg-slate-800"}`}><Plus size={16} /> Add time</button>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
@@ -999,7 +1169,8 @@ function TimeLogsTab({
           ) : (
             <div className="space-y-4">
               <select
-                id="timer-service"
+                value={timerServiceId}
+                onChange={(event) => setTimerServiceId(event.target.value)}
                 className={`w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200"}`}
               >
                 {services
@@ -1011,12 +1182,7 @@ function TimeLogsTab({
                   ))}
               </select>
               <button
-                onClick={() => {
-                  const val = (
-                    document.getElementById("timer-service") as HTMLSelectElement
-                  )?.value;
-                  if (val) startTimer(val);
-                }}
+                onClick={() => timerServiceId && startTimer(timerServiceId)}
                 className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 ${isAdvanced ? "bg-emerald-600 text-white hover:bg-emerald-700" : "bg-emerald-500 text-white hover:bg-emerald-600"}`}
               >
                 <Play fill="currentColor" size={16} /> Start Timer
@@ -1041,9 +1207,15 @@ function TimeLogsTab({
                   </p>
                   <p className="text-xs text-slate-500">{l.date} • {l.description}</p>
                 </div>
-                <div className="font-mono font-bold text-violet-500">
-                  {Math.floor(l.seconds / 3600)}h{" "}
-                  {Math.floor((l.seconds % 3600) / 60)}m
+                <div className="text-right">
+                  <div className="font-mono font-bold text-violet-500">
+                    {Math.floor(l.seconds / 3600)}h{" "}
+                    {Math.floor((l.seconds % 3600) / 60)}m
+                  </div>
+                  <div className="mt-1 flex justify-end gap-3">
+                    <button onClick={() => { setEditingLog({ ...l, hours: (Number(l.seconds || 0) / 3600).toString() }); setIsManualLogOpen(true); }} className="text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">Edit</button>
+                    <button onClick={() => deleteLog(l.id)} className="text-xs font-bold text-rose-500 hover:text-rose-600">Delete</button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -1054,6 +1226,24 @@ function TimeLogsTab({
         </div>
       </div>
       
+      {isManualLogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className={`w-full max-w-md p-6 rounded-3xl ${isAdvanced ? "bg-slate-800" : "bg-white"}`}>
+            <div className="flex items-center justify-between mb-5"><div><h3 className="text-xl font-black">{editingLog ? "Edit time log" : "Add time log"}</h3><p className="text-sm text-slate-500 mt-1">Manual entries update the contract's logged hours.</p></div><button onClick={() => { setIsManualLogOpen(false); setEditingLog(null); }} className="p-2 text-slate-500"><X size={20} /></button></div>
+            {(() => {
+              const draft = editingLog || manualLog;
+              const setDraft = (changes: any) => editingLog ? setEditingLog({ ...editingLog, ...changes }) : setManualLog({ ...manualLog, ...changes });
+              return <div className="space-y-4">
+                <label className="block text-sm font-bold">Contract<select value={draft.service_id || ""} onChange={(event) => setDraft({ service_id: event.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`}><option value="">Select contract</option>{services.map((service: any) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
+                <div className="grid grid-cols-2 gap-3"><label className="text-sm font-bold">Date<input type="date" value={draft.date || ""} onChange={(event) => setDraft({ date: event.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`} /></label><label className="text-sm font-bold">Hours<input type="number" min="0.01" step="0.25" value={draft.hours || ""} onChange={(event) => setDraft({ hours: event.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`} /></label></div>
+                <label className="block text-sm font-bold">Description<textarea rows={3} value={draft.description || ""} onChange={(event) => setDraft({ description: event.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none resize-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`} /></label>
+              </div>;
+            })()}
+            <div className="flex justify-end gap-3 mt-6"><button onClick={() => { setIsManualLogOpen(false); setEditingLog(null); }} className="px-5 py-2.5 text-sm font-bold text-slate-500">Cancel</button><button onClick={saveManualLog} className={`px-5 py-2.5 rounded-xl text-sm font-bold text-white ${isAdvanced ? "bg-violet-600 hover:bg-violet-700" : "bg-slate-900 hover:bg-slate-800"}`}>Save log</button></div>
+          </div>
+        </div>
+      )}
+
       {isLogMessageOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div

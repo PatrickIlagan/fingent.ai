@@ -18,6 +18,17 @@ function formatTicker(ticker: string, type: string) {
   return t;
 }
 
+async function recalculateFreelanceServiceHours(db: any, serviceId: string | number) {
+  const result = await db.get(
+    "SELECT COALESCE(SUM(seconds), 0) AS seconds FROM freelancing_time_logs WHERE service_id = ?",
+    [serviceId]
+  );
+  await db.run(
+    "UPDATE freelancing_services SET hours_logged = ? WHERE id = ?",
+    [Number(result?.seconds || 0) / 3600, serviceId]
+  );
+}
+
 
 async function startServer() {
   const app = express();
@@ -1026,7 +1037,7 @@ To run FinGent as a desktop application:
         'INSERT INTO freelance_businesses (name, type, description) VALUES (?, ?, ?)',
         [name, type, description]
       );
-      res.json({ id: result.lastID });
+      res.json({ id: result.lastInsertRowid });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -1047,8 +1058,34 @@ To run FinGent as a desktop application:
   app.delete("/api/freelance_businesses/:id", async (req, res) => {
     try {
       const db = await getDb();
+      await db.run('DELETE FROM freelancing_time_logs WHERE business_id = ?', [req.params.id]);
+      await db.run('DELETE FROM freelancing_invoices WHERE business_id = ?', [req.params.id]);
+      await db.run('DELETE FROM freelancing_services WHERE business_id = ?', [req.params.id]);
       await db.run('DELETE FROM freelance_businesses WHERE id = ?', [req.params.id]);
       res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/freelancing/overview", async (_req, res) => {
+    try {
+      const db = await getDb();
+      const rows = await db.all(`
+        SELECT
+          b.id,
+          b.name,
+          b.type,
+          b.description,
+          (SELECT COUNT(*) FROM freelancing_services s WHERE s.business_id = b.id AND s.status = 'Active') AS active_contracts,
+          (SELECT COUNT(*) FROM freelancing_invoices i WHERE i.business_id = b.id) AS invoice_count,
+          (SELECT COALESCE(SUM(i.amount), 0) FROM freelancing_invoices i WHERE i.business_id = b.id AND i.status = 'Paid') AS paid_total,
+          (SELECT COALESCE(SUM(i.amount), 0) FROM freelancing_invoices i WHERE i.business_id = b.id AND i.status != 'Paid') AS outstanding_total,
+          (SELECT COALESCE(SUM(l.seconds), 0) FROM freelancing_time_logs l WHERE l.business_id = b.id) AS seconds_logged
+        FROM freelance_businesses b
+        ORDER BY b.id DESC
+      `);
+      res.json(rows);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -1058,7 +1095,10 @@ To run FinGent as a desktop application:
   app.get("/api/freelancing/services", async (req, res) => {
     try {
       const db = await getDb();
-      const services = await db.all("SELECT * FROM freelancing_services");
+      const businessId = req.query.business_id as string | undefined;
+      const services = businessId
+        ? await db.all("SELECT * FROM freelancing_services WHERE business_id = ? ORDER BY id DESC", [businessId])
+        : await db.all("SELECT * FROM freelancing_services ORDER BY id DESC");
       res.json(services);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1070,9 +1110,9 @@ To run FinGent as a desktop application:
       const db = await getDb();
       const s = req.body;
       const result = await db.run(
-        `INSERT INTO freelancing_services (name, type, client, rate, status, progress, value, deadline, next_milestone, hours_logged, hours_total, cap, renew_date) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [s.name, s.type, s.client, s.rate||0, s.status||'Active', s.progress||0, s.value||0, s.deadline||'', s.next_milestone||'', s.hours_logged||0, s.hours_total||0, s.cap||0, s.renew_date||'']
+        `INSERT INTO freelancing_services (business_id, name, type, client, rate, status, progress, value, deadline, next_milestone, hours_logged, hours_total, cap, renew_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [s.business_id, s.name, s.type, s.client, s.rate||0, s.status||'Active', s.progress||0, s.value||0, s.deadline||'', s.next_milestone||'', s.hours_logged||0, s.hours_total||0, s.cap||0, s.renew_date||'']
       );
       res.json({ id: result.lastInsertRowid });
     } catch (e: any) {
@@ -1100,6 +1140,8 @@ To run FinGent as a desktop application:
   app.delete("/api/freelancing/services/:id", async (req, res) => {
     try {
       const db = await getDb();
+      await db.run("DELETE FROM freelancing_time_logs WHERE service_id = ?", [req.params.id]);
+      await db.run("DELETE FROM freelancing_invoices WHERE service_id = ?", [req.params.id]);
       await db.run("DELETE FROM freelancing_services WHERE id = ?", [req.params.id]);
       res.json({ success: true });
     } catch (e: any) {
@@ -1111,7 +1153,10 @@ To run FinGent as a desktop application:
   app.get("/api/freelancing/invoices", async (req, res) => {
     try {
       const db = await getDb();
-      const invoices = await db.all("SELECT * FROM freelancing_invoices");
+      const businessId = req.query.business_id as string | undefined;
+      const invoices = businessId
+        ? await db.all("SELECT * FROM freelancing_invoices WHERE business_id = ? ORDER BY issue_date DESC, id DESC", [businessId])
+        : await db.all("SELECT * FROM freelancing_invoices ORDER BY issue_date DESC, id DESC");
       res.json(invoices);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1123,9 +1168,9 @@ To run FinGent as a desktop application:
       const db = await getDb();
       const i = req.body;
       const result = await db.run(
-        `INSERT INTO freelancing_invoices (service_id, invoice_number, amount, issue_date, due_date, status, client_name, client_email, client_address, items, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [i.service_id, i.invoice_number, i.amount, i.issue_date, i.due_date, i.status||'Draft', i.client_name, i.client_email, i.client_address, JSON.stringify(i.items||[]), i.notes]
+        `INSERT INTO freelancing_invoices (business_id, service_id, invoice_number, amount, issue_date, due_date, status, client_name, client_email, client_address, items, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [i.business_id, i.service_id || null, i.invoice_number, i.amount, i.issue_date, i.due_date, i.status||'Draft', i.client_name, i.client_email, i.client_address, JSON.stringify(i.items||[]), i.notes]
       );
       res.json({ id: result.lastInsertRowid });
     } catch (e: any) {
@@ -1138,7 +1183,10 @@ To run FinGent as a desktop application:
     try {
       const db = await getDb();
       const i = req.body;
-      await db.run('UPDATE freelancing_invoices SET status = ? WHERE id = ?', [i.status, req.params.id]);
+      await db.run(
+        `UPDATE freelancing_invoices SET service_id = ?, invoice_number = ?, amount = ?, issue_date = ?, due_date = ?, status = ?, client_name = ?, client_email = ?, client_address = ?, items = ?, notes = ? WHERE id = ?`,
+        [i.service_id || null, i.invoice_number, i.amount, i.issue_date, i.due_date, i.status || 'Draft', i.client_name, i.client_email, i.client_address, JSON.stringify(i.items || []), i.notes || '', req.params.id]
+      );
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1159,7 +1207,10 @@ To run FinGent as a desktop application:
   app.get("/api/freelancing/time_logs", async (req, res) => {
     try {
       const db = await getDb();
-      const logs = await db.all("SELECT * FROM freelancing_time_logs");
+      const businessId = req.query.business_id as string | undefined;
+      const logs = businessId
+        ? await db.all("SELECT * FROM freelancing_time_logs WHERE business_id = ? ORDER BY date DESC, id DESC", [businessId])
+        : await db.all("SELECT * FROM freelancing_time_logs ORDER BY date DESC, id DESC");
       res.json(logs);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1171,14 +1222,44 @@ To run FinGent as a desktop application:
       const db = await getDb();
       const l = req.body;
       const result = await db.run(
-        `INSERT INTO freelancing_time_logs (service_id, date, seconds, description) VALUES (?, ?, ?, ?)`,
-        [l.service_id, l.date, l.seconds, l.description]
+        `INSERT INTO freelancing_time_logs (business_id, service_id, date, seconds, description) VALUES (?, ?, ?, ?, ?)`,
+        [l.business_id, l.service_id || null, l.date, l.seconds, l.description]
       );
       if (l.service_id) {
-        const h = l.seconds / 3600;
-        await db.run(`UPDATE freelancing_services SET hours_logged = hours_logged + ? WHERE id = ?`, [h, l.service_id]);
+        await recalculateFreelanceServiceHours(db, l.service_id);
       }
       res.json({ id: result.lastInsertRowid });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/freelancing/time_logs/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const existing = await db.get("SELECT service_id FROM freelancing_time_logs WHERE id = ?", [req.params.id]);
+      if (!existing) return res.status(404).json({ error: "Time log not found" });
+      const log = req.body;
+      await db.run(
+        "UPDATE freelancing_time_logs SET service_id = ?, date = ?, seconds = ?, description = ? WHERE id = ?",
+        [log.service_id || null, log.date, log.seconds, log.description || '', req.params.id]
+      );
+      if (existing.service_id) await recalculateFreelanceServiceHours(db, existing.service_id);
+      if (log.service_id && log.service_id !== existing.service_id) await recalculateFreelanceServiceHours(db, log.service_id);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/freelancing/time_logs/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const existing = await db.get("SELECT service_id FROM freelancing_time_logs WHERE id = ?", [req.params.id]);
+      if (!existing) return res.status(404).json({ error: "Time log not found" });
+      await db.run("DELETE FROM freelancing_time_logs WHERE id = ?", [req.params.id]);
+      if (existing.service_id) await recalculateFreelanceServiceHours(db, existing.service_id);
+      res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
