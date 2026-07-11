@@ -7,21 +7,23 @@ import { format } from 'date-fns';
 export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) => void, toggleChat?: () => void }) {
   const { shouldRefresh, themeMode } = useStore();
   const isAdvanced = themeMode === 'advanced';
-  const [data, setData] = useState<{ accounts: any[], transactions: any[], wealth: any } | null>(null);
+  const [data, setData] = useState<{ accounts: any[], transactions: any[], goals: any[], wealth: any } | null>(null);
   const [chartTab, setChartTab] = useState<'Cash Flow' | 'Expenses' | 'Income' | 'Credits' | 'Dues'>('Cash Flow');
   const [balanceType, setBalanceType] = useState<'Total Balance' | 'Digital Wallets' | 'Cash on Hand' | 'Bank Accounts'>('Total Balance');
   const [isBalanceDropdownOpen, setIsBalanceDropdownOpen] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
-      const [accRes, txRes, wealthRes] = await Promise.all([
+      const [accRes, txRes, goalsRes, wealthRes] = await Promise.all([
         fetch('/api/accounts').then(r => r.json()).catch(() => []),
         fetch('/api/transactions').then(r => r.json()).catch(() => []),
+        fetch('/api/goals').then(r => r.json()).catch(() => []),
         fetch('/api/wealth').then(r => r.json()).catch(() => ({}))
       ]);
       setData({ 
         accounts: Array.isArray(accRes) ? accRes : [], 
         transactions: Array.isArray(txRes) ? txRes : [], 
+        goals: Array.isArray(goalsRes) ? goalsRes : [],
         wealth: wealthRes || {} 
       });
     }
@@ -65,25 +67,24 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
     { name: 'Remaining', value: Math.max(0, totalBudgetLimit - totalBudgetSpent), color: isAdvanced ? '#334155' : '#e2e8f0' }
   ];
 
-  const cashFlowData = [
-    { name: 'Mon', Income: 0, Expenses: 120, Credits: 0, Dues: 50 },
-    { name: 'Tue', Income: 0, Expenses: 300, Credits: 150, Dues: 0 },
-    { name: 'Wed', Income: 3000, Expenses: 50, Credits: 0, Dues: 200 },
-    { name: 'Thu', Income: 0, Expenses: 800, Credits: 0, Dues: 100 },
-    { name: 'Fri', Income: 0, Expenses: 400, Credits: 500, Dues: 0 },
-    { name: 'Sat', Income: 0, Expenses: 600, Credits: 0, Dues: 300 },
-    { name: 'Sun', Income: 0, Expenses: 200, Credits: 100, Dues: 0 },
-  ];
+  const cashFlowData = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() - (6 - index));
+    const dayKey = format(date, 'yyyy-MM-dd');
+    const dayTransactions = data.transactions.filter((transaction) => String(transaction.date).startsWith(dayKey));
+    return {
+      name: format(date, 'EEE'),
+      Income: dayTransactions.filter((transaction) => transaction.type === 'income').reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0),
+      Expenses: dayTransactions.filter((transaction) => transaction.type === 'expense').reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0),
+      Credits: 0,
+      Dues: 0,
+    };
+  });
 
   const mockBills = [
     { id: 1, name: 'Rent', amount: 15000, date: '2026-07-08', paid: false },
     { id: 2, name: 'Netflix', amount: 500, date: '2026-07-12', paid: false },
     { id: 3, name: 'Electricity', amount: 2500, date: '2026-07-15', paid: false }
-  ];
-
-  const mockGoals = [
-    { id: 1, name: 'Emergency Fund', target: 100000, current: 45000, color: 'emerald' },
-    { id: 2, name: 'Japan Trip', target: 80000, current: 15000, color: 'violet' }
   ];
 
   return (
@@ -156,8 +157,10 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
              <span className="text-sm text-emerald-500 dark:text-violet-400 font-medium">View All</span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-             {mockGoals.map(goal => {
-               const progress = Math.round((goal.current / goal.target) * 100);
+             {data.goals.length === 0 ? (
+               <p className="text-sm text-slate-500 dark:text-slate-400">No financial goals yet. Create one in Plans to track it here.</p>
+             ) : data.goals.slice(0, 2).map(goal => {
+               const progress = goal.target > 0 ? Math.round((goal.saved / goal.target) * 100) : 0;
                return (
                  <div key={goal.id} className="w-full">
                    <div className="flex justify-between text-sm mb-2">
@@ -170,8 +173,8 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
                        style={{ width: `${progress}%` }} 
                      />
                    </div>
-                   <p className="text-xs text-slate-500 dark:text-slate-400 text-right">
-                     ₱{goal.current.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / ₱{goal.target.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                     <p className="text-xs text-slate-500 dark:text-slate-400 text-right">
+                     ₱{Number(goal.saved || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / ₱{Number(goal.target || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                    </p>
                  </div>
                );
