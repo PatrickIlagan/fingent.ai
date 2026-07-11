@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { Briefcase, Lightbulb, CheckCircle2, ChevronRight, TrendingUp } from 'lucide-react';
 
@@ -7,6 +7,7 @@ export function Career() {
   const isAdvanced = themeMode === 'advanced';
 
   const [newSkill, setNewSkill] = useState('');
+  const [career, setCareer] = useState<any>({ current_role: 'Current role', target_role: 'Target role', current_salary: 0, target_salary: 0 });
   const [skills, setSkills] = useState([
     { id: 1, name: 'React Advanced Patterns', completed: true },
     { id: 2, name: 'System Design', completed: false },
@@ -25,6 +26,31 @@ export function Career() {
   const toggleSkill = (id: number) => {
     setSkills(skills.map(s => s.id === id ? { ...s, completed: !s.completed } : s));
   };
+
+  useEffect(() => {
+    fetch('/api/career')
+      .then((response) => response.ok ? response.json() : null)
+      .then((savedCareer) => {
+        if (!savedCareer) return;
+        setCareer(savedCareer);
+        const savedSkills = JSON.parse(savedCareer.skills_needed || '[]');
+        if (Array.isArray(savedSkills) && savedSkills.length > 0) {
+          setSkills(savedSkills.map((skill, index) => ({ id: index + 1, name: typeof skill === 'string' ? skill : skill.name, completed: typeof skill === 'object' ? Boolean(skill.completed) : false })));
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!career.id) return;
+    fetch(`/api/career/${career.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...career, skills_needed: JSON.stringify(skills) }),
+    }).catch(() => undefined);
+  }, [career, skills]);
+
+  const progress = career.target_salary > career.current_salary ? Math.min(100, Math.round((career.current_salary / career.target_salary) * 100)) : 0;
 
   const sideHustles = [
     { name: 'Freelance Web Development', potential: '₱20k - ₱50k/mo', effort: 'Medium', tags: ['Coding', 'Remote'] },
@@ -55,8 +81,8 @@ export function Career() {
             <div className="grid md:grid-cols-2 gap-6 relative">
               <div className={`p-6 rounded-2xl border ${isAdvanced ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
                 <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Current Role</p>
-                <p className="font-black text-2xl mb-1">Junior Dev</p>
-                <p className={`${isAdvanced ? 'text-violet-400' : 'text-emerald-600'} font-bold`}>₱60,000 / mo</p>
+                <p className="font-black text-2xl mb-1">{career.current_role}</p>
+                <p className={`${isAdvanced ? 'text-violet-400' : 'text-emerald-600'} font-bold`}>₱{Number(career.current_salary || 0).toLocaleString()} / mo</p>
               </div>
               
               <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 w-10 h-10 items-center justify-center rounded-full bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 shadow-sm text-slate-400">
@@ -65,18 +91,18 @@ export function Career() {
               
               <div className={`p-6 rounded-2xl border ${isAdvanced ? 'bg-slate-900 border-violet-500/30' : 'bg-white border-emerald-500/30'} shadow-sm`}>
                 <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Target Role</p>
-                <p className="font-black text-2xl mb-1">Senior Dev</p>
-                <p className={`${isAdvanced ? 'text-violet-500' : 'text-emerald-500'} font-bold`}>₱120,000 / mo</p>
+                <p className="font-black text-2xl mb-1">{career.target_role}</p>
+                <p className={`${isAdvanced ? 'text-violet-500' : 'text-emerald-500'} font-bold`}>₱{Number(career.target_salary || 0).toLocaleString()} / mo</p>
               </div>
             </div>
             
             <div className="mt-8">
               <div className="flex justify-between items-center mb-2 text-sm font-bold">
                 <span className="text-slate-500">Progress to Goal</span>
-                <span className={isAdvanced ? 'text-violet-400' : 'text-emerald-600'}>40% Complete</span>
+                <span className={isAdvanced ? 'text-violet-400' : 'text-emerald-600'}>{progress}% Complete</span>
               </div>
               <div className="h-3 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                <div className={`h-full bg-gradient-to-r transition-all duration-1000 ${isAdvanced ? 'from-violet-500 to-fuchsia-500' : 'from-emerald-400 to-teal-500'}`} style={{ width: '40%' }} />
+                <div className={`h-full bg-gradient-to-r transition-all duration-1000 ${isAdvanced ? 'from-violet-500 to-fuchsia-500' : 'from-emerald-400 to-teal-500'}`} style={{ width: `${progress}%` }} />
               </div>
             </div>
           </div>

@@ -295,6 +295,21 @@ To run FinGent as a desktop application:
      }
   });
 
+  app.put("/api/career/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { id } = req.params;
+      const { current_role, target_role, current_salary, target_salary, skills_needed } = req.body;
+      await db.run(
+        "UPDATE career SET current_role = ?, target_role = ?, current_salary = ?, target_salary = ?, skills_needed = ? WHERE id = ?",
+        [current_role, target_role, current_salary, target_salary, skills_needed, id]
+      );
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/accounts", async (req, res) => {
     try {
       const db = await getDb();
