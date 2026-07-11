@@ -26,6 +26,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
            ticker: d.ticker,
            currentPrice: d.current_price,
            currency: d.currency || 'USD',
+           platform: d.platform || '',
            history: d.history || [],
            color: d.type === 'Stocks' ? '#10B981' : d.type === 'Cryptos' ? '#F59E0B' : d.type === 'Real Estate' ? '#3B82F6' : '#8B5CF6',
            iconColor: d.type === 'Stocks' ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/20' : d.type === 'Cryptos' ? 'text-amber-500 bg-amber-50 dark:bg-amber-500/20' : d.type === 'Real Estate' ? 'text-blue-500 bg-blue-50 dark:bg-blue-500/20' : 'text-violet-500 bg-violet-50 dark:bg-violet-500/20'
@@ -86,7 +87,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
   const timeframes = ['1W', '1M', '6M', '1Y', '5Y', 'YTD', 'All'];
 
   const [newAsset, setNewAsset] = useState({
-    name: '', type: 'Stocks', shares: '', avgPrice: '', currentValue: '', invested: '', ticker: '', currency: 'USD'
+    name: '', type: 'Stocks', shares: '', avgPrice: '', currentValue: '', invested: '', ticker: '', currency: 'USD', platform: ''
   });
 
   const [txInputMode, setTxInputMode] = useState<'total'|'shares'>('shares');
@@ -265,7 +266,8 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
             shares: finalShares,
             avg_price: finalAvgPrice,
             ticker: newAsset.ticker || '',
-            currency: newAsset.currency
+            currency: newAsset.currency,
+            platform: newAsset.platform || ''
           })
         });
       }
@@ -372,7 +374,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
             </div>
             <div>
               <h2 className="text-2xl sm:text-3xl font-bold">{selectedHolding.name}</h2>
-              <p className="text-slate-500 dark:text-slate-400 font-medium">{selectedHolding.type}</p>
+              <p className="text-slate-500 dark:text-slate-400 font-medium">{selectedHolding.type}{selectedHolding.platform ? ` • ${selectedHolding.platform}` : ''}</p>
             </div>
           </div>
           <div className="text-left sm:text-right w-full sm:w-auto">
@@ -591,7 +593,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
           </button>
           <button 
             onClick={() => {
-              setNewAsset({ name: '', type: activeCategory !== 'All' ? activeCategory : 'Stocks', shares: '', avgPrice: '', currentValue: '', invested: '', ticker: '', currency: displayCurrency });
+              setNewAsset({ name: '', type: activeCategory !== 'All' ? activeCategory : 'Stocks', shares: '', avgPrice: '', currentValue: '', invested: '', ticker: '', currency: displayCurrency, platform: '' });
               setEditingId(null);
               setIsModalOpen(true);
             }}
@@ -713,7 +715,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
                   </div>
                   <div>
                     <div className="flex items-center gap-3 flex-wrap">
-                      <p className="font-bold text-base">{inv.name}</p>
+                      <p className="font-bold text-base">{inv.name} {inv.platform && <span className="text-xs font-normal text-slate-400 ml-1">({inv.platform})</span>}</p>
                       {inv.shares && inv.value ? (
                         <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-bold ${gain >= 0 ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400' : 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400'}`}>
                            <span className="opacity-70 font-medium">Avg: {getSymbol(inv.currency)}{inv.avgPrice.toLocaleString()}</span>
@@ -928,6 +930,16 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
                     />
                  </div>
                )}
+               <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Platform or Shop (Optional)</label>
+                  <input 
+                    type="text" 
+                    value={newAsset.platform}
+                    onChange={(e) => setNewAsset({ ...newAsset, platform: e.target.value })}
+                    className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} 
+                    placeholder="e.g. Binance, Gotrade, Local Shop" 
+                  />
+               </div>
             </div>
 
             <button 

@@ -62,9 +62,12 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
             name: newAccount.name,
             type: newAccount.type,
             balance: parseFloat(newAccount.balance),
+            interest_rate_pa: newAccount.interest_rate_pa ? parseFloat(newAccount.interest_rate_pa) / 100 : 0,
             color: newAccount.color,
             purpose: newAccount.purpose,
-            credit_limit: newAccount.credit_limit || null
+            credit_limit: newAccount.credit_limit || null,
+            statement_date: newAccount.statement_date || null,
+            due_date: newAccount.due_date || null
           })
         });
       } else {
@@ -79,13 +82,15 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
             image_logo_name: 'bank',
             color: newAccount.color,
             purpose: newAccount.purpose,
-            credit_limit: newAccount.credit_limit || null
+            credit_limit: newAccount.credit_limit || null,
+            statement_date: newAccount.statement_date || null,
+            due_date: newAccount.due_date || null
           })
         });
       }
       triggerRefresh();
       setIsAddAccountModalOpen(false);
-      setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '' }); setEditingAccount(null);
+      setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '', statement_date: '', due_date: '' }); setEditingAccount(null);
     } catch (err) {
       console.error(err);
     }
@@ -222,6 +227,17 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
 
   const totalBalance = filteredAccounts.reduce((acc, curr) => acc + curr.balance, 0);
 
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const totalIncome30d = filteredAccounts.reduce((acc, curr) => {
+    return acc + (curr.transactions || []).filter((t: any) => t.type === 'income' && new Date(t.date) >= thirtyDaysAgo).reduce((s: number, t: any) => s + t.amount, 0);
+  }, 0);
+
+  const totalExpenses30d = filteredAccounts.reduce((acc, curr) => {
+    return acc + (curr.transactions || []).filter((t: any) => t.type === 'expense' && new Date(t.date) >= thirtyDaysAgo).reduce((s: number, t: any) => s + t.amount, 0);
+  }, 0);
+
   if (selectedAccount) {
     return (
       <div className="space-y-6">
@@ -242,7 +258,9 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                 color: selectedAccount.color || '',
                 purpose: selectedAccount.purpose || '',
                 credit_limit: selectedAccount.credit_limit ? selectedAccount.credit_limit.toString() : '',
-                interest_rate_pa: selectedAccount.interest_rate_pa ? (selectedAccount.interest_rate_pa * 100).toString() : ''
+                interest_rate_pa: selectedAccount.interest_rate_pa ? (selectedAccount.interest_rate_pa * 100).toString() : '',
+                statement_date: selectedAccount.statement_date ? selectedAccount.statement_date.toString() : '',
+                due_date: selectedAccount.due_date ? selectedAccount.due_date.toString() : ''
               });
               setIsAddAccountModalOpen(true);
             }} className={`p-2.5 rounded-xl transition-colors ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-400' : 'bg-white hover:bg-slate-50 text-slate-500 border border-slate-200 shadow-sm'}`}><Edit2 size={18} /></button>
@@ -374,7 +392,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
         <button onClick={handleAccrueInterest} className={`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 border transition-colors ${isAdvanced ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'}`}>
              Simulate Next Day (Accrue Interest)
         </button>
-        <button onClick={() => { setEditingAccount(null); setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '' }); setIsAddAccountModalOpen(true); }} className={`px-4 py-2.5 rounded-xl font-bold text-sm ${isAdvanced ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}>
+        <button onClick={() => { setEditingAccount(null); setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '', statement_date: '', due_date: '' }); setIsAddAccountModalOpen(true); }} className={`px-4 py-2.5 rounded-xl font-bold text-sm ${isAdvanced ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}>
           + Add Account
         </button>
         </div>
@@ -392,11 +410,11 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
             <div className="flex gap-4 sm:border-l sm:pl-6 border-slate-100 dark:border-slate-700">
                <div>
                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1"><ArrowDownRight size={14} className="text-emerald-500" /> Income (30d)</p>
-                 <p className="text-xl font-bold">₱45,500</p>
+                 <p className="text-xl font-bold">₱{totalIncome30d.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                </div>
                <div>
                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1"><ArrowUpRight size={14} className="text-rose-500" /> Expenses (30d)</p>
-                 <p className="text-xl font-bold">₱18,200</p>
+                 <p className="text-xl font-bold">₱{totalExpenses30d.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                </div>
             </div>
           )}
@@ -441,6 +459,44 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                   </div>
               </div>
 
+              {acc.type === 'Card' && (acc.statement_date || acc.due_date) && (() => {
+                 let stmtDay = acc.statement_date ? acc.statement_date.toString() : '';
+                 if (stmtDay.includes('-')) stmtDay = stmtDay.split('-')[2];
+                 
+                 let txAfter = 0;
+                 if (stmtDay) {
+                    const currentDate = new Date();
+                    const stmtDateObj = new Date(`${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${stmtDay.padStart(2, '0')}`);
+                    (acc.transactions || []).forEach((tx: any) => {
+                       if (new Date(tx.date) > stmtDateObj) {
+                          txAfter += (tx.type === 'income' ? tx.amount : -tx.amount);
+                       }
+                    });
+                 }
+                 const balanceAsOfStmt = acc.balance - txAfter;
+                 const amountOwed = balanceAsOfStmt < 0 ? Math.abs(balanceAsOfStmt) : 0;
+                 
+                 return (
+                   <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 text-xs">
+                     <div className="flex justify-between items-center mb-1">
+                        <span className="text-slate-500 font-medium">Statement Balance</span>
+                        <span className="font-bold text-rose-500">₱{amountOwed.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                     </div>
+                     {acc.due_date && (
+                        <div className="flex justify-between items-center">
+                           <span className="text-slate-500">Due Date</span>
+                           <span className="font-medium">{acc.due_date}</span>
+                        </div>
+                     )}
+                     {acc.statement_date && (
+                        <div className="flex justify-between items-center mt-1">
+                           <span className="text-slate-500">Next Statement</span>
+                           <span className="font-medium">{acc.statement_date}</span>
+                        </div>
+                     )}
+                   </div>
+                 );
+              })()}
               {acc.credit_limit && (
                 <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
                   <div className="flex justify-between text-xs mb-1.5">
@@ -462,14 +518,14 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
     
       {/* Add Account Modal */}
       {isAddAccountModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => { setIsAddAccountModalOpen(false); setEditingAccount(null); setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '' }); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => { setIsAddAccountModalOpen(false); setEditingAccount(null); setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '', statement_date: '', due_date: '' }); }}>
           <div 
             className={`w-full max-w-md rounded-3xl shadow-xl flex flex-col p-6 ${isAdvanced ? 'bg-slate-800 border border-slate-700 text-white' : 'bg-white border border-slate-100'}`}
             onClick={e => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-bold">{editingAccount ? 'Edit Account' : 'Add Account'}</h3>
-              <button onClick={() => { setIsAddAccountModalOpen(false); setEditingAccount(null); setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '' }); }} className={`p-2 rounded-full ${isAdvanced ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}>
+              <button onClick={() => { setIsAddAccountModalOpen(false); setEditingAccount(null); setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '', statement_date: '', due_date: '' }); }} className={`p-2 rounded-full ${isAdvanced ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}>
                 <X size={20} />
               </button>
             </div>
@@ -498,7 +554,6 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                     <option value="Digital">Digital Wallet</option>
                     <option value="Card">Credit Card</option>
                     <option value="Cash">Cash on Hand</option>
-                    <option value="Investments">Investments</option>
                   </select>
                 </div>
                 <div>
@@ -524,14 +579,50 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                 />
               </div>
               {newAccount.type === 'Card' && (
+                <div className="space-y-4">
+                   <div>
+                     <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Credit Limit</label>
+                     <input 
+                       type="number"
+                       value={newAccount.credit_limit}
+                       onChange={(e) => setNewAccount(prev => ({ ...prev, credit_limit: e.target.value }))}
+                       className={`w-full px-4 py-3 rounded-xl text-sm outline-none transition-colors ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
+                       placeholder="e.g. 50000"
+                     />
+                   </div>
+                   <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Statement Date</label>
+                        <input 
+                          type="date"
+                          value={newAccount.statement_date}
+                          onChange={(e) => setNewAccount(prev => ({ ...prev, statement_date: e.target.value }))}
+                          className={`w-full px-4 py-3 rounded-xl text-sm outline-none transition-colors ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Due Date</label>
+                        <input 
+                          type="date"
+                          value={newAccount.due_date}
+                          onChange={(e) => setNewAccount(prev => ({ ...prev, due_date: e.target.value }))}
+                          className={`w-full px-4 py-3 rounded-xl text-sm outline-none transition-colors ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
+                        />
+                      </div>
+                   </div>
+                </div>
+              )}
+              
+              {(newAccount.type === 'Bank' || newAccount.type === 'Digital') && (
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Credit Limit</label>
+                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Interest Rate (PA %)</label>
                   <input 
                     type="number"
-                    value={newAccount.credit_limit}
-                    onChange={(e) => setNewAccount(prev => ({ ...prev, credit_limit: e.target.value }))}
+                    step="0.01"
+                    value={newAccount.interest_rate_pa}
+                    onChange={(e) => setNewAccount(prev => ({ ...prev, interest_rate_pa: e.target.value }))}
                     className={`w-full px-4 py-3 rounded-xl text-sm outline-none transition-colors ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
-                    placeholder="e.g. 50000"
+                    placeholder="e.g. 4.5 for 4.5% PA"
                   />
                 </div>
               )}

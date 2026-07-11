@@ -15,24 +15,48 @@ export function Calendar() {
 
   const fetchEvents = async () => {
     try {
-      const [liabilitiesRes, accountsRes, calendarEventsRes] = await Promise.all([
+      const year = currentDate.getFullYear();
+      const month = (currentDate.getMonth() + 1).toString().padStart(2, '0');
+      
+      const [liabilitiesRes, accountsRes, calendarEventsRes, incomeFlowsRes] = await Promise.all([
         fetch('/api/liabilities'),
         fetch('/api/accounts'),
-        fetch('/api/calendar_events')
+        fetch('/api/calendar_events'),
+        fetch('/api/income_flows')
       ]);
-      const [liabilities, accounts, calendarEvents] = await Promise.all([
+      const [liabilities, accounts, calendarEvents, incomeFlows] = await Promise.all([
         liabilitiesRes.json().catch(() => []),
         accountsRes.json().catch(() => []),
-        calendarEventsRes.json().catch(() => [])
+        calendarEventsRes.json().catch(() => []),
+        incomeFlowsRes.json().catch(() => [])
       ]);
 
       const formattedEvents: any[] = [];
       
       (Array.isArray(liabilities) ? liabilities : []).forEach((d: any) => {
-         let dateStr = '2026-07-15';
-         if (d.date && d.date.includes('th')) {
-            const day = d.date.split('th')[0];
-            dateStr = `2026-07-${day.padStart(2, '0')}`;
+         let dateStr = `${year}-${month}-15`;
+         
+         if (d.date) {
+            if (d.date.includes('-')) {
+               // It's a YYYY-MM-DD format
+               if (d.is_recurring) {
+                  // Only take the day part for recurring
+                  const day = d.date.split('-')[2];
+                  dateStr = `${year}-${month}-${day}`;
+               } else {
+                  // Specific date
+                  dateStr = d.date;
+               }
+            } else {
+               let dayStr = '15';
+               if (d.date.includes('th')) dayStr = d.date.split('th')[0];
+               else if (d.date.includes('st')) dayStr = d.date.split('st')[0];
+               else if (d.date.includes('nd')) dayStr = d.date.split('nd')[0];
+               else if (d.date.includes('rd')) dayStr = d.date.split('rd')[0];
+               else if (!isNaN(parseInt(d.date))) dayStr = d.date;
+               
+               dateStr = `${year}-${month}-${dayStr.padStart(2, '0')}`;
+            }
          }
          formattedEvents.push({
            id: `l-${d.id}`,
@@ -44,6 +68,22 @@ export function Calendar() {
            color: d.type === 'Bills' ? 'text-amber-500 bg-amber-50 dark:bg-amber-500/20' : 'text-rose-500 bg-rose-50 dark:bg-rose-500/20',
            provider: d.provider || d.merchant || 'Unknown'
          });
+      });
+      
+      (Array.isArray(incomeFlows) ? incomeFlows : []).forEach((flow: any) => {
+         if (flow.is_recurring) {
+            const dateStr = `${year}-${month}-${flow.date.toString().padStart(2, '0')}`;
+            formattedEvents.push({
+              id: `inc-${flow.id}`,
+              date: dateStr,
+              type: 'inflow',
+              name: flow.name,
+              amount: flow.amount,
+              icon: ArrowDownToLine,
+              color: 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/20',
+              provider: 'Income Flow'
+            });
+         }
       });
 
       (Array.isArray(accounts) ? accounts : []).forEach((acc: any) => {
@@ -64,6 +104,86 @@ export function Calendar() {
             });
           } catch(e) {}
         }
+        
+        if (acc.type === 'Card' && acc.statement_date && acc.due_date) {
+            let stmtDay = acc.statement_date.toString();
+            if (stmtDay.includes('-')) stmtDay = stmtDay.split('-')[2];
+            
+            let dueDay = acc.due_date.toString();
+            if (dueDay.includes('-')) dueDay = dueDay.split('-')[2];
+
+            // Calculate statement balance: transactions up to the next statement date
+            let stmtDateString = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${stmtDay.padStart(2, '0')}`;
+            const stmtDateObj = new Date(stmtDateString);
+            
+            let txAfter = 0;
+            (acc.transactions || []).forEach((tx: any) => {
+               if (new Date(tx.date) > stmtDateObj) {
+                  txAfter += (tx.type === 'income' ? tx.amount : -tx.amount);
+               }
+            });
+            
+            const balanceAsOfStmt = acc.balance - txAfter;
+            const amountOwed = balanceAsOfStmt < 0 ? Math.abs(balanceAsOfStmt) : 0;
+
+            formattedEvents.push({
+              id: `stmt-${acc.id}`,
+              date: stmtDateString,
+              type: 'note',
+              name: `${acc.name} Statement`,
+              amount: 0,
+              icon: CalendarIcon,
+              color: 'text-violet-500 bg-violet-50 dark:bg-violet-500/20',
+              provider: 'Credit Card'
+            });
+
+            // Due date is usually next month after statement, but for display let's put it on the calendar's current month due date or next month depending.
+            // Actually, we can just log it on the `dueDay` of the current view month.
+            let dueDateString = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${dueDay.padStart(2, '0')}`;
+
+            // If due day is less than statement day, the due date for THIS statement is NEXT month.
+            // But we just place the event on the calendar's due date for visibility.
+            
+            formattedEvents.push({
+              id: `due-${acc.id}`,
+              date: dueDateString,
+              type: 'bill',
+              name: `${acc.name} Due`,
+              amount: amountOwed,
+              icon: Wallet,
+              color: 'text-rose-500 bg-rose-50 dark:bg-rose-500/20',
+              provider: 'Credit Card'
+            });
+        } else {
+           if (acc.type === 'Card' && acc.statement_date) {
+               let stmtDay = acc.statement_date.toString();
+               if (stmtDay.includes('-')) stmtDay = stmtDay.split('-')[2];
+               formattedEvents.push({
+                 id: `stmt-${acc.id}`,
+                 date: `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${stmtDay.padStart(2, '0')}`,
+                 type: 'note',
+                 name: `${acc.name} Statement`,
+                 amount: 0,
+                 icon: CalendarIcon,
+                 color: 'text-violet-500 bg-violet-50 dark:bg-violet-500/20',
+                 provider: 'Credit Card'
+               });
+           }
+           if (acc.type === 'Card' && acc.due_date) {
+               let dueDay = acc.due_date.toString();
+               if (dueDay.includes('-')) dueDay = dueDay.split('-')[2];
+               formattedEvents.push({
+                 id: `due-${acc.id}`,
+                 date: `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${dueDay.padStart(2, '0')}`,
+                 type: 'bill',
+                 name: `${acc.name} Due`,
+                 amount: 0,
+                 icon: Wallet,
+                 color: 'text-rose-500 bg-rose-50 dark:bg-rose-500/20',
+                 provider: 'Credit Card'
+               });
+           }
+        }
       });
 
       (Array.isArray(calendarEvents) ? calendarEvents : []).forEach((ce: any) => {
@@ -73,8 +193,8 @@ export function Calendar() {
           type: ce.type,
           name: ce.name,
           amount: ce.amount || 0,
-          icon: ce.type === 'pin' ? Pin : StickyNote,
-          color: ce.type === 'pin' ? 'text-violet-500 bg-violet-50 dark:bg-violet-500/20' : 'text-blue-500 bg-blue-50 dark:bg-blue-500/20'
+          icon: ce.type === 'income' ? ArrowDownToLine : ce.type === 'pin' ? Pin : StickyNote,
+          color: ce.type === 'income' ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/20' : ce.type === 'pin' ? 'text-violet-500 bg-violet-50 dark:bg-violet-500/20' : 'text-blue-500 bg-blue-50 dark:bg-blue-500/20'
         });
       });
 
@@ -86,7 +206,7 @@ export function Calendar() {
 
   useEffect(() => {
     fetchEvents();
-  }, []);
+  }, [currentDate]);
 
   const [selectedEvent, setSelectedEvent] = useState<any | null>(null);
 

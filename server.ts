@@ -7,8 +7,7 @@ import { createServer as createViteServer } from "vite";
 import { getDb } from "./server/db";
 import { handleAgentChat } from "./server/agent";
 import YahooFinance from 'yahoo-finance2';
-
-const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+const yahooFinance = new YahooFinance();
 
 function formatTicker(ticker: string, type: string) {
   if (!ticker) return ticker;
@@ -22,7 +21,7 @@ function formatTicker(ticker: string, type: string) {
 
 async function startServer() {
   const app = express();
-  const upload = multer({ dest: 'data/uploads/' });
+const upload = multer({ dest: 'data/uploads/' });
 
   const PORT = 3000;
 
@@ -30,11 +29,7 @@ async function startServer() {
 
   // API Routes
   app.get("/api/system/desktop-wrapper", async (req, res) => {
-    const createArchive = (await import("archiver")) as unknown as (
-      format: string,
-      options?: import("archiver").ArchiverOptions,
-    ) => import("archiver").Archiver;
-    const archive = createArchive('zip', {
+    const archiverModule = (await import('archiver')) as any; const archive = (archiverModule.default || archiverModule)('zip', {
       zlib: { level: 9 }
     });
 
@@ -288,35 +283,46 @@ To run FinGent as a desktop application:
   app.get("/api/career", async (req, res) => {
      try {
        const db = await getDb();
-       const career = await db.get("SELECT * FROM career LIMIT 1");
+       let career = await db.get("SELECT * FROM career LIMIT 1");
+       if (!career) {
+          await db.run("INSERT INTO career (current_role, target_role, current_salary, target_salary, skills_needed) VALUES ('', '', 0, 0, '[]')");
+          career = await db.get("SELECT * FROM career LIMIT 1");
+       }
        res.json(career);
      } catch(error: any) {
        res.status(500).json({ error: error.message });
      }
   });
 
-  app.put("/api/career/:id", async (req, res) => {
-    try {
-      const db = await getDb();
-      const { id } = req.params;
-      const { current_role, target_role, current_salary, target_salary, skills_needed } = req.body;
-      await db.run(
-        "UPDATE career SET current_role = ?, target_role = ?, current_salary = ?, target_salary = ?, skills_needed = ? WHERE id = ?",
-        [current_role, target_role, current_salary, target_salary, skills_needed, id]
-      );
-      res.json({ success: true });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
+  app.put("/api/career", async (req, res) => {
+     try {
+       const db = await getDb();
+       const { current_role, target_role, current_salary, target_salary, skills_needed } = req.body;
+       const career = await db.get("SELECT id FROM career LIMIT 1");
+       if (career) {
+          await db.run(
+            "UPDATE career SET current_role = ?, target_role = ?, current_salary = ?, target_salary = ?, skills_needed = ? WHERE id = ?",
+            [current_role, target_role, current_salary, target_salary, JSON.stringify(skills_needed || []), career.id]
+          );
+       } else {
+          await db.run(
+            "INSERT INTO career (current_role, target_role, current_salary, target_salary, skills_needed) VALUES (?, ?, ?, ?, ?)",
+            [current_role, target_role, current_salary, target_salary, JSON.stringify(skills_needed || [])]
+          );
+       }
+       res.json({ success: true });
+     } catch(error: any) {
+       res.status(500).json({ error: error.message });
+     }
   });
 
   app.post("/api/accounts", async (req, res) => {
     try {
       const db = await getDb();
-      const { name, type, balance, interest_rate_pa = 0, image_logo_name = 'bank', color = '', purpose = '' } = req.body;
+      const { name, type, balance, interest_rate_pa = 0, image_logo_name = 'bank', color = '', purpose = '', credit_limit = null, statement_date = null, due_date = null } = req.body;
       const result = await db.run(
-        "INSERT INTO accounts (name, type, balance, interest_rate_pa, image_logo_name, color, purpose, credit_limit) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [name, type, balance, interest_rate_pa, image_logo_name, color, purpose, req.body.credit_limit || null]
+        "INSERT INTO accounts (name, type, balance, interest_rate_pa, image_logo_name, color, purpose, credit_limit, statement_date, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [name, type, balance, interest_rate_pa, image_logo_name, color, purpose, credit_limit, statement_date, due_date]
       );
       res.json({ id: result.lastInsertRowid });
     } catch (error: any) {
@@ -585,7 +591,7 @@ To run FinGent as a desktop application:
   app.post("/api/portfolios", async (req, res) => {
     try {
       const db = await getDb();
-      let { type, name, invested, current_value, shares = null, avg_price = null, ticker = null, currency = "USD" } = req.body;
+      let { type, name, invested, current_value, shares = null, avg_price = null, ticker = null, currency = "USD", platform = null } = req.body;
       
       if (ticker) { ticker = formatTicker(ticker, type);
         try {
@@ -605,8 +611,8 @@ To run FinGent as a desktop application:
       }
 
       const result = await db.run(
-        "INSERT INTO portfolios (type, name, invested, current_value, shares, avg_price, ticker, currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [type, name, invested, current_value, shares, avg_price, ticker, currency]
+        "INSERT INTO portfolios (type, name, invested, current_value, shares, avg_price, ticker, currency, platform) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [type, name, invested, current_value, shares, avg_price, ticker, currency, platform]
       );
       
       const newId = result.lastInsertRowid;
@@ -751,9 +757,428 @@ To run FinGent as a desktop application:
     }
   });
 
+  app.get("/api/income_flows", async (req, res) => {
+    try {
+      const db = await getDb();
+      const rows = await db.all("SELECT * FROM income_flows");
+      res.json(rows);
+    } catch(err: any) { res.status(500).json({error: err.message}); }
+  });
+  app.post("/api/income_flows", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { name, amount, date, is_recurring, budget_preset_id, account_id } = req.body;
+      const result = await db.run("INSERT INTO income_flows (name, amount, date, is_recurring, budget_preset_id, account_id) VALUES (?, ?, ?, ?, ?, ?)", [name, amount, date, is_recurring ? 1 : 0, budget_preset_id, account_id]);
+      
+      // Also add to calendar_events
+      await db.run("INSERT INTO calendar_events (name, type, amount, date, color, icon, provider, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [name, 'income', amount, date, 'emerald', 'ArrowDown', 'Manual', 'income_flow']);
+      
+      if (budget_preset_id) {
+         const preset = await db.get("SELECT * FROM budget_presets WHERE id = ?", [budget_preset_id]);
+         if (preset) {
+            const allocs = JSON.parse(preset.allocations || '[]');
+            const categories = allocs.map((a: any, i: number) => ({
+               id: Date.now() + i,
+               name: a.name,
+               limit: amount * (a.percentage / 100),
+               spent: 0,
+               color: a.color || 'emerald',
+               categories: a.categories || [],
+               transactions: []
+            }));
+            
+            const budgetData = {
+               id: Date.now(),
+               name: `Auto Budget: ${name} (${preset.name})`,
+               type: is_recurring ? 'recurring' : 'specific',
+               isGrouped: true,
+               startDate: date,
+               endDate: date,
+               totalLimit: amount,
+               groups: categories
+            };
+            
+            await db.run("INSERT INTO budgets (name, total_amount, categories, month) VALUES (?, ?, ?, ?)", [budgetData.name, amount, JSON.stringify(budgetData), date]);
+         }
+      }
+      
+      
+      res.json({ id: result.lastInsertRowid });
+    } catch(err: any) { res.status(500).json({error: err.message}); }
+  });
+  app.delete("/api/income_flows/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      await db.run("DELETE FROM income_flows WHERE id = ?", [req.params.id]);
+      res.json({ success: true });
+    } catch(err: any) { res.status(500).json({error: err.message}); }
+  });
+
+  app.get("/api/budget_presets", async (req, res) => {
+    try {
+      const db = await getDb();
+      const rows = await db.all("SELECT * FROM budget_presets");
+      res.json(rows);
+    } catch(err: any) { res.status(500).json({error: err.message}); }
+  });
+  app.post("/api/budget_presets", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { name, allocations } = req.body;
+      const result = await db.run("INSERT INTO budget_presets (name, allocations) VALUES (?, ?)", [name, JSON.stringify(allocations)]);
+      res.json({ id: result.lastInsertRowid });
+    } catch(err: any) { res.status(500).json({error: err.message}); }
+  });
+  app.delete("/api/budget_presets/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      await db.run("DELETE FROM budget_presets WHERE id = ?", [req.params.id]);
+      res.json({ success: true });
+    } catch(err: any) { res.status(500).json({error: err.message}); }
+  });
+
+  app.get("/api/budgets", async (req, res) => {
+    try {
+      const db = await getDb();
+      const rows = await db.all("SELECT * FROM budgets");
+      res.json(rows);
+    } catch(err: any) { res.status(500).json({error: err.message}); }
+  });
+  app.post("/api/budgets", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { name, total_amount, categories, month } = req.body;
+      const result = await db.run("INSERT INTO budgets (name, total_amount, categories, month) VALUES (?, ?, ?, ?)", [name, total_amount, JSON.stringify(categories), month]);
+      res.json({ id: result.lastInsertRowid });
+    } catch(err: any) { res.status(500).json({error: err.message}); }
+  });
+  app.delete("/api/budgets/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      await db.run("DELETE FROM budgets WHERE id = ?", [req.params.id]);
+      res.json({ success: true });
+    } catch(err: any) { res.status(500).json({error: err.message}); }
+  });
+
   app.post("/api/chat", handleAgentChat);
 
   // Vite middleware for development
+    app.get("/api/businesses", async (req, res) => {
+    try {
+      const db = await getDb();
+      const businesses = await db.all("SELECT * FROM businesses");
+      // For each business, calculate mrr and customers
+      for (const b of businesses) {
+         const transactions = await db.all("SELECT * FROM business_transactions WHERE business_id = ?", [b.id]);
+         const items = await db.all("SELECT * FROM business_items WHERE business_id = ?", [b.id]);
+         
+         if (b.type === 'Store') {
+            const orders = transactions.filter((t:any) => t.type === 'income');
+            b.mrr = orders.reduce((sum:any, t:any) => sum + t.amount, 0);
+            b.customers = orders.length; // rough estimate
+         } else if (b.type === 'SaaS') {
+            const users = items.filter((i:any) => i.type === 'user');
+            b.customers = users.length;
+            // value is MRR for users
+            b.mrr = users.reduce((sum:any, u:any) => sum + (u.value || 0), 0);
+         } else if (b.type === 'Agency') {
+            const clients = items.filter((i:any) => i.type === 'client');
+            b.customers = clients.length;
+            // Use clients revenue or invoices for MRR
+            b.mrr = clients.reduce((sum:any, c:any) => sum + (c.value || 0), 0);
+         } else {
+            b.mrr = 0;
+            b.customers = 0;
+         }
+         b.growth = 0;
+      }
+      res.json(businesses);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/businesses", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { name, type, status, target } = req.body;
+      const result = await db.run("INSERT INTO businesses (name, type, status, target) VALUES (?, ?, ?, ?)", [name, type, status, target]);
+      res.json({ id: result.lastInsertRowid });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/business_deals", async (req, res) => {
+    try {
+      const db = await getDb();
+      // Fetch leads and proposals from business_items as deals
+      const items = await db.all("SELECT i.*, b.name as venture FROM business_items i LEFT JOIN businesses b ON i.business_id = b.id WHERE i.type IN ('lead', 'proposal')");
+      const deals = items.map((i:any) => ({
+        id: i.id,
+        title: i.name,
+        venture: i.venture,
+        stage: i.status,
+        value: i.value,
+        probability: i.type === 'proposal' ? 80 : 30, // rough estimate based on type
+        closing: 'TBD',
+        contact: 'N/A',
+        notes: ''
+      }));
+      res.json(deals);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/business_deals", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { business_id, title, stage, value, probability, closing, contact, notes } = req.body;
+      const result = await db.run("INSERT INTO business_deals (business_id, title, stage, value, probability, closing, contact, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
+        [business_id, title, stage, value, probability, closing, contact, notes]);
+      res.json({ id: result.lastInsertRowid });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/business_deals/:id", async (req, res) => {
+     try {
+        const db = await getDb();
+        const { stage, notes } = req.body;
+        await db.run("UPDATE business_deals SET stage = ?, notes = ? WHERE id = ?", [stage, notes, req.params.id]);
+        res.json({ success: true });
+     } catch(e: any) {
+        res.status(500).json({ error: e.message });
+     }
+  });
+
+  app.get("/api/businesses/:id/items", async (req, res) => {
+    try {
+      const db = await getDb();
+      const items = await db.all("SELECT * FROM business_items WHERE business_id = ?", [req.params.id]);
+      res.json(items);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/businesses/:id/items", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { type, name, status, value, extra_info } = req.body;
+      const result = await db.run("INSERT INTO business_items (business_id, type, name, status, value, extra_info) VALUES (?, ?, ?, ?, ?, ?)",
+        [req.params.id, type, name, status, value, extra_info ? JSON.stringify(extra_info) : null]);
+      res.json({ id: result.lastInsertRowid });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/businesses/:id/transactions", async (req, res) => {
+    try {
+      const db = await getDb();
+      const transactions = await db.all("SELECT * FROM business_transactions WHERE business_id = ?", [req.params.id]);
+      res.json(transactions);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/businesses/:id/transactions", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { type, amount, date, description, status, category } = req.body;
+      const result = await db.run("INSERT INTO business_transactions (business_id, type, amount, date, description, status, category) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [req.params.id, type, amount, date, description, status, category]);
+      res.json({ id: result.lastInsertRowid });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+
+
+  
+  // Freelance Businesses
+  app.get("/api/freelance_businesses", async (req, res) => {
+    try {
+      const db = await getDb();
+      const businesses = await db.all('SELECT * FROM freelance_businesses ORDER BY id DESC');
+      res.json(businesses);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/freelance_businesses", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { name, type, description } = req.body;
+      const result = await db.run(
+        'INSERT INTO freelance_businesses (name, type, description) VALUES (?, ?, ?)',
+        [name, type, description]
+      );
+      res.json({ id: result.lastID });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+
+  app.put("/api/freelance_businesses/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { name, type, description } = req.body;
+      await db.run('UPDATE freelance_businesses SET name = ?, type = ?, description = ? WHERE id = ?', [name, type, description, req.params.id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/freelance_businesses/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      await db.run('DELETE FROM freelance_businesses WHERE id = ?', [req.params.id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Freelancing Services
+  app.get("/api/freelancing/services", async (req, res) => {
+    try {
+      const db = await getDb();
+      const services = await db.all("SELECT * FROM freelancing_services");
+      res.json(services);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/freelancing/services", async (req, res) => {
+    try {
+      const db = await getDb();
+      const s = req.body;
+      const result = await db.run(
+        `INSERT INTO freelancing_services (name, type, client, rate, status, progress, value, deadline, next_milestone, hours_logged, hours_total, cap, renew_date) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [s.name, s.type, s.client, s.rate||0, s.status||'Active', s.progress||0, s.value||0, s.deadline||'', s.next_milestone||'', s.hours_logged||0, s.hours_total||0, s.cap||0, s.renew_date||'']
+      );
+      res.json({ id: result.lastInsertRowid });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/freelancing/services/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { id } = req.params;
+      const s = req.body;
+      await db.run(
+        `UPDATE freelancing_services SET 
+          name = ?, type = ?, client = ?, rate = ?, status = ?, progress = ?, value = ?, deadline = ?, next_milestone = ?, hours_logged = ?, hours_total = ?, cap = ?, renew_date = ?
+         WHERE id = ?`,
+        [s.name, s.type, s.client, s.rate||0, s.status||'Active', s.progress||0, s.value||0, s.deadline||'', s.next_milestone||'', s.hours_logged||0, s.hours_total||0, s.cap||0, s.renew_date||'', id]
+      );
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/freelancing/services/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      await db.run("DELETE FROM freelancing_services WHERE id = ?", [req.params.id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Freelancing Invoices
+  app.get("/api/freelancing/invoices", async (req, res) => {
+    try {
+      const db = await getDb();
+      const invoices = await db.all("SELECT * FROM freelancing_invoices");
+      res.json(invoices);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/freelancing/invoices", async (req, res) => {
+    try {
+      const db = await getDb();
+      const i = req.body;
+      const result = await db.run(
+        `INSERT INTO freelancing_invoices (service_id, invoice_number, amount, issue_date, due_date, status, client_name, client_email, client_address, items, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [i.service_id, i.invoice_number, i.amount, i.issue_date, i.due_date, i.status||'Draft', i.client_name, i.client_email, i.client_address, JSON.stringify(i.items||[]), i.notes]
+      );
+      res.json({ id: result.lastInsertRowid });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+
+  app.put("/api/freelancing/invoices/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const i = req.body;
+      await db.run('UPDATE freelancing_invoices SET status = ? WHERE id = ?', [i.status, req.params.id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+  
+  app.delete("/api/freelancing/invoices/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      await db.run('DELETE FROM freelancing_invoices WHERE id = ?', [req.params.id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Freelancing Time Logs
+  app.get("/api/freelancing/time_logs", async (req, res) => {
+    try {
+      const db = await getDb();
+      const logs = await db.all("SELECT * FROM freelancing_time_logs");
+      res.json(logs);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/freelancing/time_logs", async (req, res) => {
+    try {
+      const db = await getDb();
+      const l = req.body;
+      const result = await db.run(
+        `INSERT INTO freelancing_time_logs (service_id, date, seconds, description) VALUES (?, ?, ?, ?)`,
+        [l.service_id, l.date, l.seconds, l.description]
+      );
+      if (l.service_id) {
+        const h = l.seconds / 3600;
+        await db.run(`UPDATE freelancing_services SET hours_logged = hours_logged + ? WHERE id = ?`, [h, l.service_id]);
+      }
+      res.json({ id: result.lastInsertRowid });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -774,3 +1199,4 @@ To run FinGent as a desktop application:
 }
 
 startServer();
+

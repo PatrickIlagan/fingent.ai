@@ -4,59 +4,32 @@ import fs from 'fs';
 
 let dbInstance: any = null;
 
-function createDbClient(databasePath: string) {
-  const sqliteDb = new Database(databasePath);
-
-  return {
-    get: async (sql: string, params: any[] = []) => sqliteDb.prepare(sql).get(...params),
-    all: async (sql: string, params: any[] = []) => sqliteDb.prepare(sql).all(...params),
-    run: async (sql: string, params: any[] = []) => sqliteDb.prepare(sql).run(...params),
-    exec: async (sql: string) => sqliteDb.exec(sql),
-    close: () => sqliteDb.close(),
-  };
-}
-
-function isCorruptDatabaseError(error: unknown) {
-  return error instanceof Error && /database disk image is malformed|file is not a database/i.test(error.message);
-}
-
 export async function getDb() {
-  if (dbInstance) {
-    return dbInstance;
-  }
-
-  const dataDir = path.join(process.cwd(), 'data');
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-
-  const databasePath = path.join(dataDir, 'fingent.db');
-  let client = createDbClient(databasePath);
-
-  try {
-    await client.get('PRAGMA integrity_check');
-    await initDb(client);
-  } catch (error) {
-    client.close();
-
-    if (!isCorruptDatabaseError(error)) {
-      throw error;
+  if (!dbInstance) {
+    const dataDir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
     }
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupPath = path.join(dataDir, `fingent.corrupt-${timestamp}.db`);
-    fs.renameSync(databasePath, backupPath);
-    console.warn(`The FinGent database was corrupted and has been preserved at ${backupPath}. A new database was created.`);
-
-    client = createDbClient(databasePath);
-    await initDb(client);
+    const sqliteDb = new Database(path.join(dataDir, 'fingent.db'));
+    
+    dbInstance = {
+      get: async (sql: string, params: any[] = []) => sqliteDb.prepare(sql).get(...params),
+      all: async (sql: string, params: any[] = []) => sqliteDb.prepare(sql).all(...params),
+      run: async (sql: string, params: any[] = []) => sqliteDb.prepare(sql).run(...params),
+      exec: async (sql: string) => sqliteDb.exec(sql)
+    };
+    
+    await initDb(dbInstance);
   }
-
-  dbInstance = client;
   return dbInstance;
 }
 
 async function initDb(db: any) {
+
+  await db.exec(`ALTER TABLE income_flows ADD COLUMN is_recurring BOOLEAN DEFAULT 0;`).catch(() => {});
+  await db.exec(`ALTER TABLE income_flows ADD COLUMN budget_preset_id INTEGER;`).catch(() => {});
+  await db.exec(`ALTER TABLE income_flows ADD COLUMN account_id INTEGER;`).catch(() => {});
+
   await db.exec(`
     CREATE TABLE IF NOT EXISTS portfolio_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,17 +45,26 @@ async function initDb(db: any) {
   await db.exec(`ALTER TABLE portfolios ADD COLUMN ticker TEXT;`).catch(() => {});
   await db.exec(`ALTER TABLE portfolios ADD COLUMN current_price REAL;`).catch(() => {});
   await db.exec(`ALTER TABLE portfolios ADD COLUMN currency TEXT DEFAULT 'USD';`).catch(() => {});
+  await db.exec(`ALTER TABLE portfolios ADD COLUMN platform TEXT;`).catch(() => {});
+  await db.exec(`ALTER TABLE accounts ADD COLUMN credit_limit REAL;`).catch(() => {});
+  await db.exec(`ALTER TABLE accounts ADD COLUMN statement_date INTEGER;`).catch(() => {});
+  await db.exec(`ALTER TABLE accounts ADD COLUMN due_date INTEGER;`).catch(() => {});
+
   
   await db.exec(`
     CREATE TABLE IF NOT EXISTS accounts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
       name TEXT NOT NULL,
       type TEXT NOT NULL,
       balance REAL NOT NULL,
       interest_rate_pa REAL,
       image_logo_name TEXT,
       color TEXT,
-      purpose TEXT
+      purpose TEXT,
+      credit_limit REAL,
+      statement_date INTEGER,
+      due_date INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS transactions (
@@ -98,6 +80,7 @@ async function initDb(db: any) {
 
     CREATE TABLE IF NOT EXISTS goals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
       name TEXT NOT NULL,
       target REAL NOT NULL,
       saved REAL NOT NULL,
@@ -111,6 +94,7 @@ async function initDb(db: any) {
     CREATE TABLE IF NOT EXISTS portfolios (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       type TEXT NOT NULL,
+      business_id INTEGER,
       name TEXT NOT NULL,
       invested REAL NOT NULL,
       current_value REAL NOT NULL,
@@ -123,6 +107,7 @@ async function initDb(db: any) {
 
     CREATE TABLE IF NOT EXISTS liabilities (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
       name TEXT NOT NULL,
       type TEXT NOT NULL,
       amount REAL NOT NULL,
@@ -150,6 +135,7 @@ async function initDb(db: any) {
 
     CREATE TABLE IF NOT EXISTS calendar_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
       name TEXT NOT NULL,
       type TEXT NOT NULL,
       amount REAL,
@@ -159,31 +145,124 @@ async function initDb(db: any) {
       provider TEXT,
       source TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS income_flows (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
+      name TEXT NOT NULL,
+      amount REAL NOT NULL,
+      date TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS budget_presets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
+      name TEXT NOT NULL,
+      allocations TEXT NOT NULL
+    );
+
+        CREATE TABLE IF NOT EXISTS businesses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      status TEXT DEFAULT 'Active',
+      target REAL
+    );
+    CREATE TABLE IF NOT EXISTS business_deals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
+      title TEXT NOT NULL,
+      stage TEXT NOT NULL,
+      value REAL NOT NULL,
+      probability INTEGER,
+      closing TEXT,
+      contact TEXT,
+      notes TEXT,
+      FOREIGN KEY(business_id) REFERENCES businesses(id)
+    );
+    CREATE TABLE IF NOT EXISTS business_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
+      type TEXT NOT NULL,
+      business_id INTEGER,
+      name TEXT NOT NULL,
+      status TEXT,
+      value REAL,
+      extra_info TEXT,
+      FOREIGN KEY(business_id) REFERENCES businesses(id)
+    );
+    CREATE TABLE IF NOT EXISTS business_transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
+      type TEXT NOT NULL,
+      amount REAL NOT NULL,
+      date TEXT NOT NULL,
+      description TEXT,
+      status TEXT,
+      category TEXT,
+      FOREIGN KEY(business_id) REFERENCES businesses(id)
+    );
+    
+    CREATE TABLE IF NOT EXISTS freelance_businesses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      description TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS freelancing_services (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      client TEXT,
+      rate REAL,
+      status TEXT DEFAULT 'Active',
+      progress INTEGER,
+      value REAL,
+      deadline TEXT,
+      next_milestone TEXT,
+      hours_logged REAL,
+      hours_total REAL,
+      cap INTEGER,
+      renew_date TEXT
+    );
+    CREATE TABLE IF NOT EXISTS freelancing_invoices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
+      service_id INTEGER,
+      invoice_number TEXT NOT NULL,
+      amount REAL NOT NULL,
+      issue_date TEXT NOT NULL,
+      due_date TEXT NOT NULL,
+      status TEXT DEFAULT 'Draft',
+      client_name TEXT,
+      client_email TEXT,
+      client_address TEXT,
+      items TEXT,
+      notes TEXT,
+      FOREIGN KEY(service_id) REFERENCES freelancing_services(id)
+    );
+    CREATE TABLE IF NOT EXISTS freelancing_time_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
+      service_id INTEGER,
+      date TEXT NOT NULL,
+      seconds INTEGER NOT NULL,
+      description TEXT,
+      FOREIGN KEY(service_id) REFERENCES freelancing_services(id)
+    );
+    CREATE TABLE IF NOT EXISTS budgets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER,
+      name TEXT NOT NULL,
+      total_amount REAL NOT NULL,
+      categories TEXT NOT NULL,
+      month TEXT
+    );
   `);
 
-  // Seed data if empty
-  const accountCount = await db.get('SELECT COUNT(*) as count FROM accounts');
-  if (accountCount.count === 0) {
-    await db.run(`INSERT INTO accounts (name, type, balance, interest_rate_pa, image_logo_name) VALUES 
-      ('BDO Savings', 'bank', 50000, 0.0025, 'bdo'),
-      ('GCash', 'wallet', 15000, 0, 'gcash'),
-      ('Maya', 'wallet', 20000, 0.04, 'maya'),
-      ('BPI Credit', 'credit', -5000, 0.03, 'bpi')
-    `);
-    await db.run(`INSERT INTO transactions (account_id, type, amount, category, description, date) VALUES 
-      (2, 'expense', 150, 'food', 'Coffee', datetime('now', '-1 day')),
-      (1, 'income', 30000, 'salary', 'Paycheck', datetime('now', '-3 days')),
-      (3, 'expense', 1200, 'bills', 'Internet', datetime('now', '-5 days'))
-    `);
-    await db.run(`INSERT INTO portfolios (type, name, invested, current_value, shares, avg_price, ticker, currency) VALUES 
-      ('Real Estate', 'Apartment Unit 1', 2000000, 2500000, 1, 2000000, NULL, 'USD'),
-      ('Stocks', 'AAPL', 1500, 8500, 50, 150, 'AAPL', 'USD'),
-      ('Cryptos', 'BTC', 30000, 31000, 0.5, 60000, 'BTC-USD', 'USD'),
-      ('Stocks', 'TSLA', 4000, 4200, 20, 200, 'TSLA', 'USD'),
-      ('Others', 'Rolex Watch', 450000, 500000, 1, 450000, NULL, 'USD')
-    `);
-    await db.run(`INSERT INTO career (current_role, target_role, current_salary, target_salary, skills_needed) VALUES 
-      ('Junior Developer', 'Senior Developer', 60000, 120000, '["React", "Node.js", "System Design"]')
-    `);
-  }
 }

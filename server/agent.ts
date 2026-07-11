@@ -1,8 +1,6 @@
 import { GoogleGenAI, Type, FunctionDeclaration, GenerateContentResponse } from "@google/genai";
 import { getDb } from "./db";
-import YahooFinance from "yahoo-finance2";
-
-const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+import yahooFinance from "yahoo-finance2";
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,

@@ -7,24 +7,28 @@ import { format } from 'date-fns';
 export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) => void, toggleChat?: () => void }) {
   const { shouldRefresh, themeMode } = useStore();
   const isAdvanced = themeMode === 'advanced';
-  const [data, setData] = useState<{ accounts: any[], transactions: any[], goals: any[], wealth: any } | null>(null);
+  const [data, setData] = useState<{ accounts: any[], transactions: any[], wealth: any, liabilities: any[], goals: any[], portfolios: any[] } | null>(null);
   const [chartTab, setChartTab] = useState<'Cash Flow' | 'Expenses' | 'Income' | 'Credits' | 'Dues'>('Cash Flow');
   const [balanceType, setBalanceType] = useState<'Total Balance' | 'Digital Wallets' | 'Cash on Hand' | 'Bank Accounts'>('Total Balance');
   const [isBalanceDropdownOpen, setIsBalanceDropdownOpen] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
-      const [accRes, txRes, goalsRes, wealthRes] = await Promise.all([
+      const [accRes, txRes, wealthRes, liabRes, goalsRes, portRes] = await Promise.all([
         fetch('/api/accounts').then(r => r.json()).catch(() => []),
         fetch('/api/transactions').then(r => r.json()).catch(() => []),
+        fetch('/api/wealth').then(r => r.json()).catch(() => ({})),
+        fetch('/api/liabilities').then(r => r.json()).catch(() => []),
         fetch('/api/goals').then(r => r.json()).catch(() => []),
-        fetch('/api/wealth').then(r => r.json()).catch(() => ({}))
+        fetch('/api/portfolios').then(r => r.json()).catch(() => [])
       ]);
       setData({ 
         accounts: Array.isArray(accRes) ? accRes : [], 
         transactions: Array.isArray(txRes) ? txRes : [], 
+        wealth: wealthRes || {},
+        liabilities: Array.isArray(liabRes) ? liabRes : [],
         goals: Array.isArray(goalsRes) ? goalsRes : [],
-        wealth: wealthRes || {} 
+        portfolios: Array.isArray(portRes) ? portRes : []
       });
     }
     fetchData();
@@ -36,28 +40,35 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
     <div className="h-64 bg-slate-200 dark:bg-slate-800 rounded-3xl" />
   </div>;
 
-  const totalCash = Array.isArray(data.accounts) ? data.accounts.reduce((sum, a) => sum + (a.balance || 0), 0) : 0;
-  const currentMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-  const monthlyTransactions = data.transactions.filter((transaction) => new Date(transaction.date) >= currentMonthStart);
-  const monthlyIncome = monthlyTransactions
-    .filter((transaction) => transaction.type === 'income')
-    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-  const monthlyExpenses = monthlyTransactions
-    .filter((transaction) => transaction.type === 'expense')
-    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-  const balanceByType = {
-    'Total Balance': totalCash,
-    'Digital Wallets': data.accounts.filter((account) => account.type === 'wallet').reduce((sum, account) => sum + Number(account.balance || 0), 0),
-    'Cash on Hand': data.accounts.filter((account) => account.type === 'cash').reduce((sum, account) => sum + Number(account.balance || 0), 0),
-    'Bank Accounts': data.accounts.filter((account) => account.type === 'bank').reduce((sum, account) => sum + Number(account.balance || 0), 0),
-  };
-  const displayedBalance = balanceByType[balanceType];
+  let totalCash = 0;
+  if (balanceType === 'Total Balance') {
+    totalCash = data.accounts.reduce((sum, a) => sum + (a.balance || 0), 0);
+  } else if (balanceType === 'Digital Wallets') {
+    totalCash = data.accounts.filter(a => a.type === 'wallet').reduce((sum, a) => sum + (a.balance || 0), 0);
+  } else if (balanceType === 'Bank Accounts') {
+    totalCash = data.accounts.filter(a => a.type === 'bank').reduce((sum, a) => sum + (a.balance || 0), 0);
+  } else if (balanceType === 'Cash on Hand') {
+    totalCash = data.accounts.filter(a => a.type === 'cash').reduce((sum, a) => sum + (a.balance || 0), 0);
+  }
 
-  const mockBudgets = [
-    { id: 1, name: 'Food & Dining', spent: 4500, limit: 10000, color: '#10B981' },
-    { id: 2, name: 'Transportation', spent: 1500, limit: 4000, color: '#8B5CF6' },
-    { id: 3, name: 'Entertainment', spent: 2000, limit: 5000, color: '#F59E0B' }
-  ];
+  const expensesByCategory: Record<string, number> = {};
+  data.transactions.forEach(tx => {
+    if (tx.type === 'expense') {
+      expensesByCategory[tx.category || 'Other'] = (expensesByCategory[tx.category || 'Other'] || 0) + tx.amount;
+    }
+  });
+  
+  const colors = ['#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#3B82F6', '#EC4899', '#14B8A6'];
+  const mockBudgets = Object.entries(expensesByCategory).map(([name, spent], i) => ({
+    id: i,
+    name,
+    spent,
+    limit: Math.max(spent * 1.2, 5000),
+    color: colors[i % colors.length]
+  }));
+  if (mockBudgets.length === 0) {
+    mockBudgets.push({ id: 0, name: 'General', spent: 0, limit: 10000, color: '#10B981' });
+  }
 
   const totalBudgetSpent = mockBudgets.reduce((sum, b) => sum + b.spent, 0);
   const totalBudgetLimit = mockBudgets.reduce((sum, b) => sum + b.limit, 0);
@@ -67,25 +78,95 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
     { name: 'Remaining', value: Math.max(0, totalBudgetLimit - totalBudgetSpent), color: isAdvanced ? '#334155' : '#e2e8f0' }
   ];
 
-  const cashFlowData = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (6 - index));
-    const dayKey = format(date, 'yyyy-MM-dd');
-    const dayTransactions = data.transactions.filter((transaction) => String(transaction.date).startsWith(dayKey));
-    return {
-      name: format(date, 'EEE'),
-      Income: dayTransactions.filter((transaction) => transaction.type === 'income').reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0),
-      Expenses: dayTransactions.filter((transaction) => transaction.type === 'expense').reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0),
-      Credits: 0,
-      Dues: 0,
-    };
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const cashFlowByDay: Record<string, any> = {};
+  days.forEach(d => cashFlowByDay[d] = { name: d, Income: 0, Expenses: 0, Credits: 0, Dues: 0 });
+  
+  data.transactions.forEach(tx => {
+    if (tx.date) {
+      const d = new Date(tx.date);
+      if (!isNaN(d.getTime())) {
+         const dayName = days[d.getDay()];
+         if (tx.type === 'income') cashFlowByDay[dayName].Income += tx.amount;
+         if (tx.type === 'expense') cashFlowByDay[dayName].Expenses += tx.amount;
+      }
+    }
+  });
+  const cashFlowData = days.map(d => cashFlowByDay[d]);
+
+  const mockBills = data.liabilities.filter(l => l.status !== 'Paid').map(l => ({
+    id: l.id,
+    name: l.name,
+    amount: l.amount || l.remaining_amount || 0,
+    date: l.date || new Date().toISOString(),
+    paid: false
+  }));
+
+  // Append credit card statement balances as bills
+  const cards = data.accounts.filter(a => a.type === 'Card' && a.statement_date && a.due_date);
+  cards.forEach(card => {
+     let stmtDay = card.statement_date.toString();
+     if (stmtDay.includes('-')) stmtDay = stmtDay.split('-')[2];
+     let dueDay = card.due_date.toString();
+     if (dueDay.includes('-')) dueDay = dueDay.split('-')[2];
+
+     const currentDate = new Date();
+     const stmtDateObj = new Date(`${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${stmtDay.padStart(2, '0')}`);
+     
+     let txAfter = 0;
+     const cardTxs = data.transactions.filter(t => t.account_id === card.id);
+     cardTxs.forEach((tx: any) => {
+        if (new Date(tx.date) > stmtDateObj) {
+           txAfter += (tx.type === 'income' ? tx.amount : -tx.amount);
+        }
+     });
+     
+     const balanceAsOfStmt = card.balance - txAfter;
+     const amountOwed = balanceAsOfStmt < 0 ? Math.abs(balanceAsOfStmt) : 0;
+     
+     if (amountOwed > 0) {
+       mockBills.push({
+         id: `card-stmt-${card.id}`,
+         name: `${card.name} Statement`,
+         amount: amountOwed,
+         date: `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${dueDay.padStart(2, '0')}`,
+         paid: false
+       });
+     }
   });
 
-  const mockBills = [
-    { id: 1, name: 'Rent', amount: 15000, date: '2026-07-08', paid: false },
-    { id: 2, name: 'Netflix', amount: 500, date: '2026-07-12', paid: false },
-    { id: 3, name: 'Electricity', amount: 2500, date: '2026-07-15', paid: false }
-  ];
+  // Sort bills by date closest to today
+  mockBills.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  const mockGoals = data.goals.map(g => ({
+    id: g.id,
+    name: g.name,
+    target: g.target || 0,
+    current: g.saved || 0,
+    color: g.color || 'emerald'
+  }));
+
+  const monthlyIncome = data.transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const monthlyExpenses = data.transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+
+  const totalInvestments = data.portfolios.reduce((sum, p) => sum + (p.current_value || 0), 0);
+  const totalNetWorth = totalCash + totalInvestments;
+  const stocksValue = data.portfolios.filter(p => p.type === 'Stocks').reduce((sum, p) => sum + (p.current_value || 0), 0);
+  const cryptoValue = data.portfolios.filter(p => p.type === 'Cryptos').reduce((sum, p) => sum + (p.current_value || 0), 0);
+  
+  const estimatedIncomeTax = monthlyIncome * 12 * 0.12;
+  const estimatedCapitalGains = totalInvestments * 0.05;
+  const estimatedTaxLiability = estimatedIncomeTax + estimatedCapitalGains;
+  const effectiveRate = ((estimatedTaxLiability) / ((monthlyIncome * 12) || 1)) * 100;
+  
+  let healthScore = 50;
+  if (totalCash > 5000) healthScore += 10;
+  if (totalInvestments > 10000) healthScore += 15;
+  if (monthlyIncome > monthlyExpenses && monthlyIncome > 0) healthScore += 15;
+  if (data.liabilities.filter(l => l.status !== 'Paid').length === 0) healthScore += 10;
+  const healthLetter = healthScore >= 90 ? 'A+' : healthScore >= 80 ? 'A' : healthScore >= 70 ? 'B' : healthScore >= 60 ? 'C' : 'D';
+  const healthLabel = healthScore >= 80 ? 'Excellent' : healthScore >= 70 ? 'Good' : 'Fair';
+
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -117,18 +198,18 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
                 </div>
               )}
             </div>
-            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight truncate">₱{displayedBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h1>
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight truncate">₱{totalCash.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h1>
           </div>
           
           <div className="relative z-10 flex flex-col gap-3 w-full md:w-auto">
              <div className="flex gap-3">
                <div className={`flex-1 md:flex-none px-4 py-3 rounded-2xl ${isAdvanced ? 'bg-slate-700/50' : 'bg-white/20 backdrop-blur-md'}`}>
                  <p className={`text-[10px] uppercase tracking-wider mb-1 ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Monthly Income</p>
-                 <p className="font-bold text-base">₱{monthlyIncome.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p>
+                 <p className="font-bold text-base">₱{monthlyIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                </div>
                <div className={`flex-1 md:flex-none px-4 py-3 rounded-2xl ${isAdvanced ? 'bg-slate-700/50' : 'bg-white/20 backdrop-blur-md'}`}>
                  <p className={`text-[10px] uppercase tracking-wider mb-1 ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Monthly Expenses</p>
-                 <p className="font-bold text-base">₱{monthlyExpenses.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p>
+                 <p className="font-bold text-base">₱{monthlyExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                </div>
              </div>
              <div className="flex gap-2">
@@ -157,10 +238,8 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
              <span className="text-sm text-emerald-500 dark:text-violet-400 font-medium">View All</span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-             {data.goals.length === 0 ? (
-               <p className="text-sm text-slate-500 dark:text-slate-400">No financial goals yet. Create one in Plans to track it here.</p>
-             ) : data.goals.slice(0, 2).map(goal => {
-               const progress = goal.target > 0 ? Math.round((goal.saved / goal.target) * 100) : 0;
+             {mockGoals.map(goal => {
+               const progress = Math.round((goal.current / goal.target) * 100);
                return (
                  <div key={goal.id} className="w-full">
                    <div className="flex justify-between text-sm mb-2">
@@ -173,8 +252,8 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
                        style={{ width: `${progress}%` }} 
                      />
                    </div>
-                     <p className="text-xs text-slate-500 dark:text-slate-400 text-right">
-                     ₱{Number(goal.saved || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / ₱{Number(goal.target || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                   <p className="text-xs text-slate-500 dark:text-slate-400 text-right">
+                     ₱{goal.current.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / ₱{goal.target.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                    </p>
                  </div>
                );
@@ -242,17 +321,17 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
               </div>
               <div className="mb-4">
                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Total Net Worth</p>
-                <p className="text-2xl font-bold">₱{(totalCash + 1250000).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                <p className="text-xs text-emerald-500 font-medium mt-1">+2.4% this week</p>
+                <p className="text-2xl font-bold">₱{totalNetWorth.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                <p className="text-xs text-emerald-500 font-medium mt-1">Updated via Portfolios</p>
               </div>
               <div className="flex gap-2">
                 <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-xl p-3 text-center cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors" onClick={() => onNavigate?.('investments-stocks')}>
                   <div className="flex items-center justify-center gap-1 mb-1 text-slate-500 dark:text-slate-400"><TrendingUp className="w-3 h-3" /><p className="text-xs">Stocks</p></div>
-                  <p className="font-bold text-sm">₱850k</p>
+                  <p className="font-bold text-sm">₱{(stocksValue/1000).toFixed(1)}k</p>
                 </div>
                 <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-xl p-3 text-center cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors" onClick={() => onNavigate?.('investments-cryptos')}>
                   <div className="flex items-center justify-center gap-1 mb-1 text-slate-500 dark:text-slate-400"><Bitcoin className="w-3 h-3" /><p className="text-xs">Crypto</p></div>
-                  <p className="font-bold text-sm">₱400k</p>
+                  <p className="font-bold text-sm">₱{(cryptoValue/1000).toFixed(1)}k</p>
                 </div>
               </div>
             </div>
@@ -286,17 +365,17 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
               </div>
               <div className="mb-4">
                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Estimated Liability</p>
-                <p className="text-2xl font-bold">₱85,400</p>
-                <p className="text-xs text-emerald-500 font-medium mt-1">Effective Rate: 12.4%</p>
+                <p className="text-2xl font-bold">₱{estimatedTaxLiability.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                <p className="text-xs text-emerald-500 font-medium mt-1">Effective Rate: {effectiveRate.toFixed(1)}%</p>
               </div>
               <div className="flex gap-2">
                 <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-xl p-3 text-center">
                   <div className="flex items-center justify-center gap-1 mb-1 text-slate-500 dark:text-slate-400"><FileText className="w-3 h-3" /><p className="text-xs">Income Tax</p></div>
-                  <p className="font-bold text-sm">₱62,100</p>
+                  <p className="font-bold text-sm">₱{estimatedIncomeTax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                 </div>
                 <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-xl p-3 text-center">
                   <div className="flex items-center justify-center gap-1 mb-1 text-slate-500 dark:text-slate-400"><Activity className="w-3 h-3" /><p className="text-xs">Capital Gains</p></div>
-                  <p className="font-bold text-sm">₱23,300</p>
+                  <p className="font-bold text-sm">₱{estimatedCapitalGains.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                 </div>
               </div>
             </div>
@@ -341,18 +420,18 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
             FinGent Insights
           </h3>
           <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed mb-4">
-            Good morning! You're on track with your budget this week. You have 3 upcoming bills due in the next 14 days. Don't forget to log your latest side hustle revenue.
+            Good morning! You're on track with your budget this week. You have {mockBills.length} upcoming bills due in the next 14 days. Don't forget to log your latest side hustle revenue.
           </p>
           <div className={`p-4 rounded-2xl flex items-center justify-between ${isAdvanced ? 'bg-slate-900/50' : 'bg-white/60'}`}>
              <div>
                 <p className="text-xs font-bold text-slate-500 mb-1">Financial Health Score</p>
                 <div className="flex items-center gap-2">
-                   <p className="text-2xl font-black text-emerald-500">84<span className="text-sm text-slate-400">/100</span></p>
-                   <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider">Excellent</span>
+                   <p className="text-2xl font-black text-emerald-500">{healthScore}<span className="text-sm text-slate-400">/100</span></p>
+                   <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider">{healthLabel}</span>
                 </div>
              </div>
              <div className="w-12 h-12 rounded-full border-4 border-emerald-500 flex items-center justify-center font-bold text-slate-400">
-                A
+                {healthLetter}
              </div>
           </div>
         </div>
@@ -366,8 +445,8 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
                    <Receipt className="w-4 h-4" />
                 </div>
                 <div>
-                   <p className="text-sm font-bold text-slate-800 dark:text-slate-200">Pay Rent by Tomorrow</p>
-                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">₱15,000 due to BPI Checking</p>
+                   <p className="text-sm font-bold text-slate-800 dark:text-slate-200">Review Unpaid Bills</p>
+                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{mockBills.length} bills pending payment</p>
                 </div>
              </div>
              <div className={`p-3 rounded-2xl border ${isAdvanced ? 'bg-slate-700/30 border-slate-700' : 'bg-amber-50 border-amber-100'} flex gap-3`}>
@@ -375,8 +454,8 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
                    <Sparkles className="w-4 h-4" />
                 </div>
                 <div>
-                   <p className="text-sm font-bold text-slate-800 dark:text-slate-200">Review Streaming Subscriptions</p>
-                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">You have 3 inactive services costing ₱1,200/mo.</p>
+                   <p className="text-sm font-bold text-slate-800 dark:text-slate-200">Update Goals</p>
+                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">You have {mockGoals.length} active financial goals.</p>
                 </div>
              </div>
           </div>

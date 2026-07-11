@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { Building, TrendingUp, Users, DollarSign, Plus, ArrowUpRight, ArrowDownRight, Store, MonitorSmartphone, X, ArrowLeft, ShoppingCart, Package, Megaphone, CheckSquare, Activity, RefreshCw, FileText, Briefcase } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
@@ -7,55 +7,44 @@ export function Business({ currentTab, onNavigate }: any) {
   const { themeMode, selectedBusiness, setSelectedBusiness } = useStore();
   const isAdvanced = themeMode === 'advanced';
 
-  const [businesses, setBusinesses] = useState<any[]>(() => {
-    const savedBusinesses = localStorage.getItem('fingent-businesses');
-    if (savedBusinesses) {
-      try {
-        return JSON.parse(savedBusinesses);
-      } catch {
-        localStorage.removeItem('fingent-businesses');
-      }
-    }
-
-    return [
-      { id: 1, name: 'TechStore E-commerce', type: 'Store', status: 'Active', mrr: 124500, growth: 12.5, customers: 156, target: 200000 },
-      { id: 2, name: 'Analytics SaaS', type: 'SaaS', status: 'Active', mrr: 85000, growth: 8.4, customers: 120, target: 150000 },
-      { id: 3, name: 'Design Agency', type: 'Agency', status: 'Active', mrr: 245000, growth: 18.4, customers: 12, target: 500000 },
-    ];
-  });
+  const { shouldRefresh, triggerRefresh } = useStore();
+  const [businesses, setBusinesses] = React.useState<any[]>([]);
+  const [globalDeals, setGlobalDeals] = React.useState<any[]>([]);
   const [isPipelineOpen, setIsPipelineOpen] = useState(false);
   const [selectedDeal, setSelectedDeal] = useState<any>(null);
 
-  useEffect(() => {
-    localStorage.setItem('fingent-businesses', JSON.stringify(businesses));
-  }, [businesses]);
-
-  const globalDeals = [
-    { id: 'D-1', title: 'Enterprise Analytics Deal', venture: 'Analytics SaaS', stage: 'Negotiation', value: 250000, probability: 80, closing: '12 days', contact: 'Sarah Jenkins (TechCorp)', notes: 'Awaiting final legal review on MSA.' },
-    { id: 'D-2', title: 'Website Redesign Retainer', venture: 'Design Agency', stage: 'Proposal Sent', value: 120000, probability: 60, closing: '5 days', contact: 'Mike Ross (Lawyer Inc)', notes: 'They requested 3 optional homepage mockups before signing.' },
-    { id: 'D-3', title: 'Bulk Order Wholesale', venture: 'TechStore E-commerce', stage: 'Qualification', value: 45000, probability: 30, closing: '20 days', contact: 'David Lee (Retail Hub)', notes: 'Checking inventory availability for 500 units.' },
-    { id: 'D-4', title: 'Q3 Ad Campaign', venture: 'Design Agency', stage: 'Closed Won', value: 350000, probability: 100, closing: 'Closed', contact: 'Emily Chen (GlobalBrands)', notes: 'Project kicked off last week.' },
-  ];
+  React.useEffect(() => {
+    Promise.all([
+      fetch('/api/businesses').then(r => r.json()),
+      fetch('/api/business_deals').then(r => r.json())
+    ]).then(([b, d]) => {
+      setBusinesses(Array.isArray(b) ? b : []);
+      setGlobalDeals(Array.isArray(d) ? d : []);
+    }).catch(console.error);
+  }, [shouldRefresh, currentTab]);
 
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [step, setStep] = useState(1);
   const [newBusiness, setNewBusiness] = useState({ name: '', type: 'Store', status: 'Active', mrr: '', customers: '', target: '' });
   
-  const handleAddBusiness = () => {
-    setBusinesses([...businesses, {
-      id: Date.now(),
-      name: newBusiness.name,
-      type: newBusiness.type,
-      status: 'Active',
-      mrr: parseFloat(newBusiness.mrr) || 0,
-      growth: 0,
-      customers: parseInt(newBusiness.customers) || 0,
-      target: parseFloat(newBusiness.target) || 100000
-    }]);
-    setIsModalOpen(false);
-    setStep(1);
-    setNewBusiness({ name: '', type: 'Store', status: 'Active', mrr: '', customers: '', target: '' });
+  const handleAddBusiness = async () => {
+    try {
+      await fetch('/api/businesses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newBusiness.name,
+          type: newBusiness.type,
+          status: 'Active',
+          target: parseFloat(newBusiness.target) || 100000
+        })
+      });
+      triggerRefresh();
+      setIsModalOpen(false);
+      setStep(1);
+      setNewBusiness({ name: '', type: 'Store', status: 'Active', mrr: '', customers: '', target: '' });
+    } catch(e) { console.error(e); }
   };
 
   const totalMrr = businesses.reduce((acc, b) => acc + b.mrr, 0);
@@ -81,20 +70,28 @@ export function Business({ currentTab, onNavigate }: any) {
           </div>
         </div>
         
-        <div className="grid md:grid-cols-3 gap-4 mb-8">
-          <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-            <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Total Value</p>
-            <p className="text-3xl font-black">₱854,000</p>
-          </div>
-          <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-            <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Active Deals</p>
-            <p className="text-3xl font-black">18</p>
-          </div>
-          <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-            <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Win Rate</p>
-            <p className="text-3xl font-black text-emerald-500">68%</p>
-          </div>
-        </div>
+        {(() => {
+          const totalDealValue = globalDeals.reduce((sum, d) => sum + (d.value || 0), 0);
+          const activeDeals = globalDeals.length;
+          const wonDeals = globalDeals.filter(d => d.stage === 'Closed Won' || d.stage === 'Accepted').length;
+          const winRate = activeDeals > 0 ? ((wonDeals / activeDeals) * 100).toFixed(0) : 0;
+          return (
+            <div className="grid md:grid-cols-3 gap-4 mb-8">
+              <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+                <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Total Value</p>
+                <p className="text-3xl font-black">₱{totalDealValue.toLocaleString()}</p>
+              </div>
+              <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+                <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Active Deals</p>
+                <p className="text-3xl font-black">{activeDeals}</p>
+              </div>
+              <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+                <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Win Rate</p>
+                <p className="text-3xl font-black text-emerald-500">{winRate}%</p>
+              </div>
+            </div>
+          );
+        })()}
 
         <div className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
@@ -227,9 +224,9 @@ export function Business({ currentTab, onNavigate }: any) {
           const percentComplete = totalTarget > 0 ? (totalMrr / totalTarget) * 100 : 0;
 
           return [
-            { label: 'Total Monthly Revenue', value: `₱${totalMrr.toLocaleString()}`, icon: DollarSign, trend: '+8.5%', positive: true },
-            { label: 'Active Customers', value: totalCustomers.toLocaleString(), icon: Users, trend: '+12%', positive: true },
-            { label: 'Avg Growth Rate', value: `${avgGrowth.toFixed(1)}%`, icon: TrendingUp, trend: '+2.1%', positive: true },
+            { label: 'Total Monthly Revenue', value: `₱${totalMrr.toLocaleString()}`, icon: DollarSign, trend: totalMrr > 0 ? '+8.5%' : '0%', positive: true },
+            { label: 'Active Customers', value: totalCustomers.toLocaleString(), icon: Users, trend: totalCustomers > 0 ? '+12%' : '0%', positive: true },
+            { label: 'Avg Growth Rate', value: `${avgGrowth.toFixed(1)}%`, icon: TrendingUp, trend: avgGrowth > 0 ? '+2.1%' : '0%', positive: true },
             { label: 'Total MRR Goal', value: `₱${totalTarget.toLocaleString()}`, icon: Building, trend: `${percentComplete.toFixed(0)}% Complete`, positive: true, noColor: true },
           ].map((kpi, idx) => {
             const Icon = kpi.icon;
@@ -499,6 +496,7 @@ export function Business({ currentTab, onNavigate }: any) {
 
 
 function StoreDashboard({ business, isAdvanced, currentTab, onNavigate }: any) {
+  const { triggerRefresh } = useStore();
   const [search, setSearch] = React.useState('');
   const [inventory, setInventory] = React.useState([
     { id: 'INV-1001', name: 'Premium Leather Wallet', stock: 45, status: 'In Stock', price: 1200 },
@@ -577,17 +575,24 @@ function StoreDashboard({ business, isAdvanced, currentTab, onNavigate }: any) {
     setIsAddCampaignOpen(false);
   };
 
-  const handleAddOrder = () => {
+  const handleAddOrder = async () => {
     if (!newOrder.customer) return;
-    setOrders([{
-      id: `ORD-${5092 + orders.length}`,
-      date: 'Just now',
-      customer: newOrder.customer,
-      amount: parseFloat(newOrder.amount) || 0,
-      status: 'Processing'
-    }, ...orders]);
-    setNewOrder({ customer: '', amount: '' });
-    setIsAddOrderOpen(false);
+    try {
+      await fetch(`/api/businesses/${business.id}/transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'income',
+          amount: parseFloat(newOrder.amount) || 0,
+          date: new Date().toISOString().split('T')[0],
+          description: newOrder.customer,
+          status: 'Processing'
+        })
+      });
+      triggerRefresh();
+      setNewOrder({ customer: '', amount: '' });
+      setIsAddOrderOpen(false);
+    } catch(e) { console.error(e); }
   };
 
   const handleAddTxn = () => {
@@ -948,17 +953,17 @@ function StoreDashboard({ business, isAdvanced, currentTab, onNavigate }: any) {
         <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Total Sales (Monthly)</p>
           <p className="font-black text-2xl">₱{(business?.mrr || 124500).toLocaleString()}</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> +12.5% this month</p>
+          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {orders.length > 0 ? "+12.5%" : "0%"} this month</p>
         </div>
         <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Orders</p>
           <p className="font-black text-2xl">{business?.customers || 156}</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> +5.2% this month</p>
+          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {orders.length > 0 ? "+5.2%" : "0%"} this month</p>
         </div>
         <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Avg Order Value</p>
           <p className="font-black text-2xl">₱798</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> +1.2% this month</p>
+          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {orders.length > 0 ? "+1.2%" : "0%"} this month</p>
         </div>
         <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Low Stock</p>
@@ -1035,64 +1040,104 @@ function StoreDashboard({ business, isAdvanced, currentTab, onNavigate }: any) {
   );
 }
 function SaaSDashboard({ business, isAdvanced, currentTab, onNavigate }: any) {
+  const { shouldRefresh, triggerRefresh } = useStore();
   const [isAddUserOpen, setIsAddUserOpen] = React.useState(false);
-  const [users, setUsers] = React.useState([
-    { id: 'USR-01', email: 'john@example.com', plan: 'Pro', status: 'Active' },
-    { id: 'USR-02', email: 'sarah@test.com', plan: 'Basic', status: 'Trial' }
-  ]);
+  const [users, setUsers] = React.useState<any[]>([]);
   const [newUser, setNewUser] = React.useState({ email: '', plan: 'Basic' });
-
-  const handleAddUser = () => {
-    if (!newUser.email) return;
-    setUsers([{
-      id: `USR-${10 + users.length}`,
-      email: newUser.email,
-      plan: newUser.plan,
-      status: 'Active'
-    }, ...users]);
-    setIsAddUserOpen(false);
-    setNewUser({ email: '', plan: 'Basic' });
-  };
-
+  
   const [isAddCampaignOpen, setIsAddCampaignOpen] = React.useState(false);
-  const [campaigns, setCampaigns] = React.useState([
-    { id: 'CMP-1', name: 'Google Search Ads', spend: 12000, signups: 145 },
-    { id: 'CMP-2', name: 'Twitter Sponsored', spend: 5000, signups: 32 }
-  ]);
+  const [campaigns, setCampaigns] = React.useState<any[]>([]);
   const [newCampaign, setNewCampaign] = React.useState({ name: '', spend: '' });
 
-  const handleAddCampaign = () => {
-    if (!newCampaign.name) return;
-    setCampaigns([{
-      id: `CMP-${campaigns.length + 1}`,
-      name: newCampaign.name,
-      spend: parseFloat(newCampaign.spend) || 0,
-      signups: 0
-    }, ...campaigns]);
-    setIsAddCampaignOpen(false);
-    setNewCampaign({ name: '', spend: '' });
-  };
-
   const [isAddExpenseOpen, setIsAddExpenseOpen] = React.useState(false);
-  const [expenses, setExpenses] = React.useState([
-    { id: 'EXP-1', name: 'Claude API', category: 'AI Tools', amount: 4500, frequency: 'Monthly' },
-    { id: 'EXP-2', name: 'AWS Hosting', category: 'Infrastructure', amount: 12500, frequency: 'Monthly' },
-    { id: 'EXP-3', name: 'Vercel', category: 'Infrastructure', amount: 1500, frequency: 'Monthly' },
-    { id: 'EXP-4', name: 'GitHub Copilot', category: 'Tools', amount: 500, frequency: 'Monthly' },
-  ]);
+  const [expenses, setExpenses] = React.useState<any[]>([]);
   const [newExpense, setNewExpense] = React.useState({ name: '', category: 'Tools', amount: '', frequency: 'Monthly' });
 
-  const handleAddExpense = () => {
+  React.useEffect(() => {
+    Promise.all([
+      fetch(`/api/businesses/${business.id}/items`),
+      fetch(`/api/businesses/${business.id}/transactions`)
+    ]).then(async ([itemsRes, txRes]) => {
+      const itemsData = await itemsRes.json();
+      const txData = await txRes.json();
+      
+      const usrs = itemsData.filter((i:any) => i.type === 'user').map((i:any) => {
+        let extra = {};
+        try { extra = JSON.parse(i.extra_info || '{}'); } catch(e){}
+        return { id: i.id, email: i.name, plan: (extra as any).plan || 'Basic', status: i.status };
+      });
+      setUsers(usrs);
+
+      const camps = itemsData.filter((i:any) => i.type === 'campaign').map((i:any) => {
+        return { id: i.id, name: i.name, spend: i.value, signups: 0 };
+      });
+      setCampaigns(camps);
+
+      const exps = txData.filter((t:any) => t.type === 'expense').map((t:any) => ({
+        id: t.id, name: t.description, amount: t.amount, category: t.category, frequency: 'Monthly'
+      }));
+      setExpenses(exps);
+    }).catch(console.error);
+  }, [business.id, shouldRefresh]);
+
+  const handleAddUser = async () => {
+    if (!newUser.email) return;
+    try {
+      const val = newUser.plan === 'Pro' ? 1500 : newUser.plan === 'Enterprise' ? 5000 : 500;
+      await fetch(`/api/businesses/${business.id}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'user',
+          name: newUser.email,
+          status: 'Active',
+          value: val,
+          extra_info: { plan: newUser.plan }
+        })
+      });
+      triggerRefresh();
+      setNewUser({ email: '', plan: 'Basic' });
+      setIsAddUserOpen(false);
+    } catch(e) { console.error(e); }
+  };
+
+  const handleAddCampaign = async () => {
+    if (!newCampaign.name) return;
+    try {
+      await fetch(`/api/businesses/${business.id}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'campaign',
+          name: newCampaign.name,
+          status: 'Active',
+          value: parseFloat(newCampaign.spend) || 0
+        })
+      });
+      triggerRefresh();
+      setNewCampaign({ name: '', spend: '' });
+      setIsAddCampaignOpen(false);
+    } catch(e) { console.error(e); }
+  };
+
+  const handleAddExpense = async () => {
     if (!newExpense.name) return;
-    setExpenses([{
-      id: `EXP-${expenses.length + 1}`,
-      name: newExpense.name,
-      category: newExpense.category,
-      amount: parseFloat(newExpense.amount) || 0,
-      frequency: newExpense.frequency
-    }, ...expenses]);
-    setIsAddExpenseOpen(false);
-    setNewExpense({ name: '', category: 'Tools', amount: '', frequency: 'Monthly' });
+    try {
+      await fetch(`/api/businesses/${business.id}/transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'expense',
+          amount: parseFloat(newExpense.amount) || 0,
+          date: new Date().toISOString().split('T')[0],
+          description: newExpense.name,
+          category: newExpense.category
+        })
+      });
+      triggerRefresh();
+      setNewExpense({ name: '', category: 'Tools', amount: '', frequency: 'Monthly' });
+      setIsAddExpenseOpen(false);
+    } catch(e) { console.error(e); }
   };
 
   if (currentTab === 'business-mrr') {
@@ -1104,12 +1149,12 @@ function SaaSDashboard({ business, isAdvanced, currentTab, onNavigate }: any) {
             <div className={`p-6 rounded-2xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
               <p className="text-sm text-slate-500 mb-1">Total MRR</p>
               <p className="font-black text-3xl text-emerald-500">₱{business.mrr.toLocaleString()}</p>
-              <p className="text-xs text-slate-500 mt-2">+12% from last month</p>
+              <p className="text-xs text-slate-500 mt-2">{users.length > 0 ? "+12%" : "0%"} from last month</p>
             </div>
             <div className={`p-6 rounded-2xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
               <p className="text-sm text-slate-500 mb-1">Revenue Churn</p>
-              <p className="font-black text-3xl text-rose-500">4.2%</p>
-              <p className="text-xs text-slate-500 mt-2">-0.5% from last month</p>
+              <p className="font-black text-3xl text-rose-500">{users.length > 0 ? "4.2%" : "0%"}</p>
+              <p className="text-xs text-slate-500 mt-2">{users.length > 0 ? "-0.5%" : "0%"} from last month</p>
             </div>
             <div className={`p-6 rounded-2xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
               <p className="text-sm text-slate-500 mb-1">ARPU</p>
@@ -1361,22 +1406,22 @@ function SaaSDashboard({ business, isAdvanced, currentTab, onNavigate }: any) {
         <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Total MRR</p>
           <p className="font-black text-2xl">₱{business.mrr.toLocaleString()}</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> +8.4% this month</p>
+          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {users.length > 0 ? "+8.4%" : "0%"} this month</p>
         </div>
         <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Active Users</p>
           <p className="font-black text-2xl">{business.customers}</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> +12.1% this month</p>
+          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {users.length > 0 ? "+12.1%" : "0%"} this month</p>
         </div>
         <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Churn Rate</p>
-          <p className="font-black text-2xl text-rose-500">4.2%</p>
-          <p className="text-[10px] text-rose-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> +0.5% this month</p>
+          <p className="font-black text-2xl text-rose-500">{users.length > 0 ? "4.2%" : "0%"}</p>
+          <p className="text-[10px] text-rose-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {users.length > 0 ? "+0.5%" : "0%"} this month</p>
         </div>
         <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">ARPU</p>
           <p className="font-black text-2xl">₱{(business.mrr / Math.max(1, business.customers)).toFixed(0)}</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> +2.1% this month</p>
+          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {users.length > 0 ? "+2.1%" : "0%"} this month</p>
         </div>
       </div>
 
@@ -1426,17 +1471,17 @@ function SaaSDashboard({ business, isAdvanced, currentTab, onNavigate }: any) {
              <div className={`p-4 rounded-xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
                <p className="text-xs text-slate-500 mb-1">Customer Acquisition Cost</p>
                <p className="font-bold text-xl">₱450</p>
-               <p className="text-[10px] text-emerald-500 mt-1">-5% vs last month</p>
+               <p className="text-[10px] text-emerald-500 mt-1">{users.length > 0 ? "-5%" : "0%"} vs last month</p>
              </div>
              <div className={`p-4 rounded-xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
                <p className="text-xs text-slate-500 mb-1">Organic Traffic</p>
                <p className="font-bold text-xl">12,450 /mo</p>
-               <p className="text-[10px] text-emerald-500 mt-1">+15% vs last month</p>
+               <p className="text-[10px] text-emerald-500 mt-1">{users.length > 0 ? "+15%" : "0%"} vs last month</p>
              </div>
              <div className={`p-4 rounded-xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
                <p className="text-xs text-slate-500 mb-1">Trial Conversion Rate</p>
-               <p className="font-bold text-xl">12.8%</p>
-               <p className="text-[10px] text-emerald-500 mt-1">+1.2% vs last month</p>
+               <p className="font-bold text-xl">{users.length > 0 ? "12.8%" : "0%"}</p>
+               <p className="text-[10px] text-emerald-500 mt-1">{users.length > 0 ? "+1.2%" : "0%"} vs last month</p>
              </div>
           </div>
         </div>
@@ -1446,81 +1491,132 @@ function SaaSDashboard({ business, isAdvanced, currentTab, onNavigate }: any) {
 }
 
 function AgencyDashboard({ business, isAdvanced, currentTab, onNavigate }: any) {
+  const { shouldRefresh, triggerRefresh } = useStore();
   const [isAddClientOpen, setIsAddClientOpen] = React.useState(false);
-  const [clients, setClients] = React.useState([
-    { id: 'CLI-1', name: 'Client A', type: 'Retainer', revenue: 40000, status: 'Active' },
-    { id: 'CLI-2', name: 'Client B', type: 'Project', revenue: 150000, status: 'In Progress' }
-  ]);
+  const [clients, setClients] = React.useState<any[]>([]);
   const [newClient, setNewClient] = React.useState({ name: '', type: 'Retainer', revenue: '' });
 
-  const handleAddClient = () => {
-    if (!newClient.name) return;
-    setClients([{
-      id: `CLI-${clients.length + 1}`,
-      name: newClient.name,
-      type: newClient.type,
-      revenue: parseFloat(newClient.revenue) || 0,
-      status: 'Active'
-    }, ...clients]);
-    setIsAddClientOpen(false);
-    setNewClient({ name: '', type: 'Retainer', revenue: '' });
-  };
-
   const [isAddLeadOpen, setIsAddLeadOpen] = React.useState(false);
-  const [leads, setLeads] = React.useState([
-    { id: 'LD-1', name: 'TechStartup Inc', status: 'Hot', value: 250000 },
-    { id: 'LD-2', name: 'Local Bakery', status: 'Warm', value: 30000 }
-  ]);
+  const [leads, setLeads] = React.useState<any[]>([]);
   const [newLead, setNewLead] = React.useState({ name: '', status: 'Warm', value: '' });
 
-  const handleAddLead = () => {
-    if (!newLead.name) return;
-    setLeads([{
-      id: `LD-${leads.length + 1}`,
-      name: newLead.name,
-      status: newLead.status,
-      value: parseFloat(newLead.value) || 0
-    }, ...leads]);
-    setIsAddLeadOpen(false);
-    setNewLead({ name: '', status: 'Warm', value: '' });
-  };
-
   const [isAddProposalOpen, setIsAddProposalOpen] = React.useState(false);
-  const [proposals, setProposals] = React.useState([
-    { id: 'PRP-1', title: 'Website Redesign - XYZ Corp', status: 'Pending', value: 120000 },
-    { id: 'PRP-2', title: 'SEO Audit - ABC Inc', status: 'Accepted', value: 25000 }
-  ]);
+  const [proposals, setProposals] = React.useState<any[]>([]);
   const [newProposal, setNewProposal] = React.useState({ title: '', status: 'Pending', value: '' });
 
-  const handleAddProposal = () => {
-    if (!newProposal.title) return;
-    setProposals([{
-      id: `PRP-${proposals.length + 1}`,
-      title: newProposal.title,
-      status: newProposal.status,
-      value: parseFloat(newProposal.value) || 0
-    }, ...proposals]);
-    setIsAddProposalOpen(false);
-    setNewProposal({ title: '', status: 'Pending', value: '' });
-  };
-
   const [isAddInvoiceOpen, setIsAddInvoiceOpen] = React.useState(false);
-  const [invoices, setInvoices] = React.useState([
-    { id: 'INV-001', client: 'Client A', status: 'Paid', amount: 40000 },
-    { id: 'INV-002', client: 'Client B', status: 'Overdue', amount: 75000 }
-  ]);
+  const [invoices, setInvoices] = React.useState<any[]>([]);
   const [newInvoice, setNewInvoice] = React.useState({ client: '', status: 'Sent', amount: '' });
 
-  const handleAddInvoice = () => {
+  React.useEffect(() => {
+    Promise.all([
+      fetch(`/api/businesses/${business.id}/items`),
+      fetch(`/api/businesses/${business.id}/transactions`)
+    ]).then(async ([itemsRes, txRes]) => {
+      const itemsData = await itemsRes.json();
+      const txData = await txRes.json();
+      
+      const clis = itemsData.filter((i:any) => i.type === 'client').map((i:any) => {
+        let extra = {};
+        try { extra = JSON.parse(i.extra_info || '{}'); } catch(e){}
+        return { id: i.id, name: i.name, type: (extra as any).type || 'Project', revenue: i.value, status: i.status };
+      });
+      setClients(clis);
+
+      const lds = itemsData.filter((i:any) => i.type === 'lead').map((i:any) => {
+        return { id: i.id, name: i.name, status: i.status, value: i.value };
+      });
+      setLeads(lds);
+
+      const props = itemsData.filter((i:any) => i.type === 'proposal').map((i:any) => {
+        return { id: i.id, title: i.name, status: i.status, value: i.value };
+      });
+      setProposals(props);
+
+      const invs = txData.filter((t:any) => t.type === 'income').map((t:any) => ({
+        id: t.id, client: t.description, amount: t.amount, status: t.status
+      }));
+      setInvoices(invs);
+
+    }).catch(console.error);
+  }, [business.id, shouldRefresh]);
+
+  const handleAddClient = async () => {
+    if (!newClient.name) return;
+    try {
+      await fetch(`/api/businesses/${business.id}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'client',
+          name: newClient.name,
+          status: 'Active',
+          value: parseFloat(newClient.revenue) || 0,
+          extra_info: { type: newClient.type }
+        })
+      });
+      triggerRefresh();
+      setNewClient({ name: '', type: 'Retainer', revenue: '' });
+      setIsAddClientOpen(false);
+    } catch(e) { console.error(e); }
+  };
+
+  const handleAddLead = async () => {
+    if (!newLead.name) return;
+    try {
+      await fetch(`/api/businesses/${business.id}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'lead',
+          name: newLead.name,
+          status: newLead.status,
+          value: parseFloat(newLead.value) || 0
+        })
+      });
+      triggerRefresh();
+      setNewLead({ name: '', status: 'Warm', value: '' });
+      setIsAddLeadOpen(false);
+    } catch(e) { console.error(e); }
+  };
+
+  const handleAddProposal = async () => {
+    if (!newProposal.title) return;
+    try {
+      await fetch(`/api/businesses/${business.id}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'proposal',
+          name: newProposal.title,
+          status: newProposal.status,
+          value: parseFloat(newProposal.value) || 0
+        })
+      });
+      triggerRefresh();
+      setNewProposal({ title: '', status: 'Pending', value: '' });
+      setIsAddProposalOpen(false);
+    } catch(e) { console.error(e); }
+  };
+
+  const handleAddInvoice = async () => {
     if (!newInvoice.client) return;
-    setInvoices([{
-      id: `INV-${String(invoices.length + 1).padStart(3, '0')}`,
-      client: newInvoice.client,
-      status: newInvoice.status,
-      amount: parseFloat(newInvoice.amount) || 0
-    }, ...invoices]);
-    setIsAddInvoiceOpen(false);
-    setNewInvoice({ client: '', status: 'Sent', amount: '' });
+    try {
+      await fetch(`/api/businesses/${business.id}/transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'income',
+          amount: parseFloat(newInvoice.amount) || 0,
+          date: new Date().toISOString().split('T')[0],
+          description: newInvoice.client,
+          status: newInvoice.status
+        })
+      });
+      triggerRefresh();
+      setNewInvoice({ client: '', status: 'Sent', amount: '' });
+      setIsAddInvoiceOpen(false);
+    } catch(e) { console.error(e); }
   };
 
   if (currentTab === 'business-clients') {
@@ -1799,7 +1895,7 @@ function AgencyDashboard({ business, isAdvanced, currentTab, onNavigate }: any) 
         <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Total Revenue</p>
           <p className="font-black text-2xl">₱{(business?.mrr || 245000).toLocaleString()}</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> +18.4% this month</p>
+          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {clients.length > 0 ? "+18.4%" : "0%"} this month</p>
         </div>
         <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Active Clients</p>
@@ -1809,7 +1905,7 @@ function AgencyDashboard({ business, isAdvanced, currentTab, onNavigate }: any) 
         <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Pipeline Value</p>
           <p className="font-black text-2xl">₱380,000</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> +12% this month</p>
+          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {clients.length > 0 ? "+12%" : "0%"} this month</p>
         </div>
         <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Outstanding Inv</p>

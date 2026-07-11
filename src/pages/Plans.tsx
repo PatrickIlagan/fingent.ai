@@ -10,6 +10,38 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
   const isBudget = category === 'budget';
   const showAll = !category;
 
+  const [dbBudgets, setDbBudgets] = useState<any[]>([]);
+  const [dbIncomeFlows, setDbIncomeFlows] = useState<any[]>([]);
+  const [dbPresets, setDbPresets] = useState<any[]>([]);
+
+  useEffect(() => {
+    async function fetchData() {
+      const [b, inc, p] = await Promise.all([
+        fetch('/api/budgets').then(r => r.json()).catch(() => []),
+        fetch('/api/income_flows').then(r => r.json()).catch(() => []),
+        fetch('/api/budget_presets').then(r => r.json()).catch(() => [])
+      ]);
+      setDbBudgets(Array.isArray(b) ? b : []);
+      setDbIncomeFlows(Array.isArray(inc) ? inc : []);
+      setDbPresets(Array.isArray(p) ? p : []);
+      if (Array.isArray(b) && b.length > 0) {
+         setBudgetPlans(prev => {
+            const newPlans = b.map(dbB => {
+               try {
+                  const data = JSON.parse(dbB.categories);
+                  return { ...data, id: dbB.id };
+               } catch(e) { return null; }
+            }).filter(Boolean);
+            
+            const existingIds = prev.map(p => p.id);
+            const toAdd = newPlans.filter(np => !existingIds.includes(np.id));
+            return [...toAdd, ...prev];
+         });
+      }
+    }
+    fetchData();
+  }, [shouldRefresh]);
+
   const [budgetPlans, setBudgetPlans] = useState([
     {
       id: 1,
@@ -87,6 +119,9 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
   }, [shouldRefresh]);
 
   const [isBudgetBuilderOpen, setIsBudgetBuilderOpen] = useState(false);
+  const [isModelBuilderOpen, setIsModelBuilderOpen] = useState(false);
+  const [modelName, setModelName] = useState('');
+  const [modelAllocations, setModelAllocations] = useState<any[]>([]);
   const [budgetStep, setBudgetStep] = useState(1);
   const [totalBudgetLimit, setTotalBudgetLimit] = useState('');
   const [budgetType, setBudgetType] = useState<'recurring' | 'specific'>('recurring');
@@ -216,7 +251,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
     }
   };
 
-  const handleAddBudget = () => {
+  const handleAddBudget = async () => {
     const allocatedItems = allocations.map(a => ({
       id: Date.now() + a.id,
       name: a.name,
@@ -251,6 +286,17 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
       }]
     };
     
+    
+    await fetch('/api/budgets', {
+       method: 'POST', headers: {'Content-Type': 'application/json'},
+       body: JSON.stringify({
+          name: budgetPlanName,
+          total_amount: newBudgetPlan.totalLimit,
+          categories: newBudgetPlan,
+          month: newBudgetPlan.startDate || new Date().toISOString()
+       })
+    });
+    
     setBudgetPlans([...budgetPlans, newBudgetPlan]);
     setIsBudgetBuilderOpen(false);
     setBudgetStep(1);
@@ -260,6 +306,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
     setBudgetEndDate('');
     setBudgetType('recurring');
     setIsGroupedBudget(true);
+    window.location.reload();
   };
 
   const handleNextStep = () => {
@@ -662,6 +709,20 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                         </div>
                       </div>
 
+                      {budgetType === 'recurring' && (
+                        <div className="animate-in slide-in-from-top-2 duration-300">
+                           <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Recurring Date (Day of Month)</label>
+                           <input 
+                             type="number" 
+                             min="1" max="31"
+                             value={budgetDateRange}
+                             onChange={(e) => setBudgetDateRange(e.target.value)}
+                             className={`w-full px-5 py-4 rounded-xl text-base outline-none font-bold shadow-sm transition-all ${isAdvanced ? 'bg-slate-900 border-2 border-slate-700 focus:border-violet-500' : 'bg-slate-50 border-2 border-slate-200 focus:border-emerald-500'}`} 
+                             placeholder="e.g. 15 for the 15th of every month"
+                           />
+                        </div>
+                      )}
+                      
                       {budgetType === 'specific' && (
                         <div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-2 duration-300">
                           <div>
@@ -717,6 +778,26 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
 
                       <div>
                         <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Total Monthly Budget</label>
+                        
+                        <div className="flex gap-2 mb-3">
+                           <select onChange={(e) => {
+                              if (e.target.value) {
+                                 const flow = dbIncomeFlows.find(f => f.id.toString() === e.target.value);
+                                 if (flow) {
+                                    setTotalBudgetLimit(flow.amount.toString());
+                                    if (flow.budget_preset_id) {
+                                       // they could also apply the preset automatically but that's handled in step 2 usually
+                                    }
+                                 }
+                              }
+                           }} className={`px-4 py-2 rounded-xl text-sm font-bold border transition-all ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                              <option value="">Select an Income Flow...</option>
+                              {dbIncomeFlows.map(flow => (
+                                 <option key={flow.id} value={flow.id}>{flow.name} (₱{parseFloat(flow.amount).toLocaleString()})</option>
+                              ))}
+                           </select>
+                        </div>
+                        
                         <div className="relative">
                           <span className="absolute left-5 top-1/2 -translate-y-1/2 font-black text-slate-400 text-2xl">₱</span>
                           <input 
@@ -749,7 +830,48 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                           Edit Total
                        </button>
                     </div>
-                    <p className="text-sm font-medium text-slate-500 mb-6">We've suggested a 50/30/20 split based on ₱{parseFloat(totalBudgetLimit).toLocaleString()}. Adjust to your liking.</p>
+                    <p className="text-sm font-medium text-slate-500 mb-4">We've suggested a 50/30/20 split based on ₱{parseFloat(totalBudgetLimit).toLocaleString()}. Adjust to your liking.</p>
+                    
+                    <div className="flex gap-2 overflow-x-auto pb-4 mb-2 no-scrollbar">
+                       {dbPresets.map(preset => (
+                          <button 
+                             key={preset.id}
+                             onClick={() => {
+                                let allocs = []; try { allocs = JSON.parse(preset.allocations || '[]'); } catch(e) {} if (!Array.isArray(allocs)) allocs = [];
+                                const total = parseFloat(totalBudgetLimit) || 0;
+                                const newAllocations = allocs.map((a: any, i: number) => ({
+                                   id: Date.now() + i,
+                                   name: a.name,
+                                   percentage: a.percentage,
+                                   amount: (total * (a.percentage / 100)).toString(),
+                                   color: a.color || 'emerald',
+                                   categories: a.categories || []
+                                }));
+                                setAllocations(newAllocations);
+                             }}
+                             className={`px-4 py-2 whitespace-nowrap rounded-xl text-xs font-bold border transition-all ${isAdvanced ? 'bg-slate-900 border-slate-700 hover:border-violet-500' : 'bg-white border-slate-200 hover:border-emerald-500'}`}
+                          >
+                             Apply {preset.name}
+                          </button>
+                       ))}
+                       <button 
+                          onClick={async () => {
+                             const name = prompt("Enter a name for this preset:");
+                             if (!name) return;
+                             const toSave = allocations.map(a => ({
+                                name: a.name, percentage: a.percentage, color: a.color, categories: a.categories
+                             }));
+                             await fetch('/api/budget_presets', {
+                                method: 'POST', headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({name, allocations: toSave})
+                             });
+                             window.location.reload();
+                          }}
+                          className={`px-4 py-2 whitespace-nowrap rounded-xl text-xs font-bold border border-dashed transition-all ${isAdvanced ? 'bg-slate-900 border-slate-700 hover:border-violet-500' : 'bg-slate-50 border-slate-300 hover:border-emerald-500'}`}
+                       >
+                          + Save Current as Preset
+                       </button>
+                    </div>
                     
                     <div className="space-y-4 mb-6">
                       {allocations.map((alloc, idx) => (
@@ -811,7 +933,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                           {isGroupedBudget && (
                             <div className="space-y-3 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
                               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Categories</label>
-                              {alloc.categories.map((cat: any, catIdx: number) => (
+                              { (alloc.categories || []).map((cat: any, catIdx: number) => (
                                 <div key={catIdx} className="flex gap-2">
                                   <input 
                                     type="text"
@@ -868,7 +990,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                     </div>
 
                     <button 
-                      onClick={() => setAllocations([...allocations, { id: Date.now(), name: isGroupedBudget ? 'New Group' : 'New Category', amount: '', percentage: 0, color: 'blue' }])}
+                      onClick={() => setAllocations([...allocations, { id: Date.now(), name: isGroupedBudget ? 'New Group' : 'New Category', amount: '', percentage: 0, color: 'blue', categories: [] }])}
                       className={`w-full mb-8 py-4 rounded-xl font-bold text-sm border-2 border-dashed transition-colors ${isAdvanced ? 'border-slate-700 text-slate-400 hover:text-violet-400 hover:border-violet-500' : 'border-slate-300 text-slate-500 hover:text-emerald-600 hover:border-emerald-500'}`}
                     >
                       <Plus className="inline w-4 h-4 mr-2" /> Add {isGroupedBudget ? 'Group' : 'Category'}
@@ -970,40 +1092,37 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
         </div>
       </div>
 
-      {(showAll || isBudget) && (
+            {(showAll || isBudget) && (
         <div className="space-y-8">
-          <div className="flex justify-between items-end">
-            <h3 className="font-bold text-lg flex items-center">
-              <PieChart className="w-5 h-5 mr-2" /> Budget Plans
-            </h3>
-            <span className="text-xs font-bold text-slate-500">{daysLeft} days left in month</span>
-          </div>
-          
-          <div className="space-y-8">
-            {!selectedPlan ? (
-              <div className="grid md:grid-cols-2 gap-6">
-                {budgetPlans.map((plan) => {
-                  const totalSpent = plan.groups.reduce((sum, g) => sum + g.categories.reduce((s, c) => s + c.spent, 0), 0);
-                  const planProgress = (totalSpent / plan.totalLimit) * 100;
-                  const planIsOver = planProgress > 100;
-                  const planIsWarning = planProgress > 85 && !planIsOver;
-                  
-                  return (
-                    <div 
-                      key={plan.id} 
-                      onClick={() => setSelectedPlan(plan)}
-                      className={`cursor-pointer rounded-3xl shadow-sm border p-6 hover:-translate-y-1 hover:shadow-md transition-all ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}
-                    >
-                      <div className="flex justify-between items-start mb-4">
+          {!selectedPlan && (
+             <div className="space-y-8">
+                {budgetPlans.length === 0 ? (
+             <div className="text-center py-12 rounded-3xl border border-dashed border-slate-200 dark:border-slate-700">
+               <p className="text-slate-500 mb-4">No budget plans yet.</p>
+               <button onClick={() => setIsBudgetBuilderOpen(true)} className="px-5 py-2.5 rounded-xl font-bold text-sm bg-slate-900 text-white hover:bg-slate-800">Create one</button>
+             </div>
+          ) : (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {budgetPlans.map(plan => {
+                 const totalSpent = plan.isGrouped 
+                    ? (plan.groups || []).reduce((sum: number, g: any) => sum + (g.spent || 0), 0)
+                    : (plan.groups?.[0]?.categories || []).reduce((sum: number, c: any) => sum + (c.spent || 0), 0) || 0;
+                 const planProgress = (totalSpent / plan.totalLimit) * 100;
+                 const planIsWarning = planProgress > 85;
+                 const planIsOver = planProgress >= 100;
+
+                 return (
+                    <div key={plan.id} className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 hover:border-emerald-500/50 cursor-pointer transition-all" onClick={() => setSelectedPlan(plan)}>
+                      <div className="flex justify-between items-start mb-6">
                          <div>
-                           <h4 className="text-xl font-black mb-1">{plan.name}</h4>
-                           <div className="text-xs font-bold text-slate-500">
-                             {plan.type === 'recurring' ? 'Recurring Monthly' : `${new Date(plan.startDate).toLocaleDateString()} - ${new Date(plan.endDate).toLocaleDateString()}`}
-                           </div>
+                            <h3 className="font-bold text-lg">{plan.name}</h3>
+                            <p className="text-xs font-bold text-slate-500 mt-1">
+                               {plan.type === 'recurring' ? 'Recurring Monthly' : `${new Date(plan.startDate).toLocaleDateString()} - ${new Date(plan.endDate).toLocaleDateString()}`}
+                            </p>
                          </div>
                          <div className="text-right">
-                            <span className={`font-black text-lg ${planIsOver ? 'text-rose-500' : ''}`}>₱{totalSpent.toLocaleString()}</span>
-                            <div className="text-xs font-bold text-slate-500">of ₱{plan.totalLimit.toLocaleString()}</div>
+                            <p className="font-black text-xl">₱{plan.totalLimit.toLocaleString()}</p>
+                            <p className="text-xs font-bold text-slate-500 mt-1">{totalSpent > 0 ? `₱${totalSpent.toLocaleString()} spent` : 'No spending yet'}</p>
                          </div>
                       </div>
                       
@@ -1020,7 +1139,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
 
                       <div className="space-y-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
                         {plan.isGrouped ? (
-                          plan.groups.slice(0, 3).map((g: any, i: number) => (
+                          (plan.groups || []).slice(0, 3).map((g: any, i: number) => (
                             <div key={i} className="flex justify-between text-xs">
                               <span className="font-bold flex items-center gap-1.5">
                                 <div className={`w-2 h-2 rounded-full ${g.color === 'emerald' ? 'bg-emerald-500' : g.color === 'blue' ? 'bg-blue-500' : g.color === 'violet' ? 'bg-violet-500' : g.color === 'amber' ? 'bg-amber-500' : g.color === 'rose' ? 'bg-rose-500' : 'bg-fuchsia-500'}`} />
@@ -1030,7 +1149,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                             </div>
                           ))
                         ) : (
-                          plan.groups[0]?.categories.slice(0, 3).map((c: any, i: number) => (
+                          (plan.groups?.[0]?.categories || []).slice(0, 3).map((c: any, i: number) => (
                             <div key={i} className="flex justify-between text-xs">
                               <span className="font-bold flex items-center gap-1.5">
                                 <div className={`w-2 h-2 rounded-full ${c.color === 'emerald' ? 'bg-emerald-500' : c.color === 'blue' ? 'bg-blue-500' : c.color === 'violet' ? 'bg-violet-500' : c.color === 'amber' ? 'bg-amber-500' : c.color === 'rose' ? 'bg-rose-500' : 'bg-fuchsia-500'}`} />
@@ -1047,10 +1166,52 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                         )}
                       </div>
                     </div>
-                  );
-                })}
+                  );                })}
               </div>
-            ) : (
+            )}
+            </div>
+          )}
+            
+          {!selectedPlan && (
+              <div className="space-y-6 mt-12 pt-12 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-xl font-bold">Budget Models</h3>
+                  <button onClick={() => { setIsModelBuilderOpen(true); setModelName(''); setModelAllocations([{ id: Date.now(), name: 'Housing', percentage: 30, color: 'emerald', categories: [] }]); }} className="text-sm font-bold text-emerald-500 hover:text-emerald-600 transition-colors bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1.5 rounded-lg">+ New Model</button>
+                </div>
+                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+                   {dbPresets.length === 0 && <p className="text-sm text-slate-500 col-span-full">No budget models created yet. Save a budget plan as a preset to create one.</p>}
+                   {dbPresets.map(preset => {
+                      let allocs = []; try { allocs = JSON.parse(preset.allocations || '[]'); } catch(e) {} if (!Array.isArray(allocs)) allocs = [];
+                      return (
+                         <div key={preset.id} className={`p-5 rounded-2xl border ${isAdvanced ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+                            <div className="flex justify-between items-start mb-4">
+                               <h4 className="font-bold">{preset.name}</h4>
+                               <button onClick={async () => {
+                                  if (confirm('Delete this budget model?')) {
+                                     await fetch(`/api/budget_presets/${preset.id}`, { method: 'DELETE' });
+                                     window.location.reload();
+                                  }
+                               }} className="text-slate-400 hover:text-rose-500"><X className="w-4 h-4"/></button>
+                            </div>
+                            <div className="space-y-2">
+                               {allocs.map((a: any, i: number) => (
+                                  <div key={i} className="flex items-center justify-between text-xs">
+                                     <span className="font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                                        <div className={`w-2 h-2 rounded-full ${a.color === 'emerald' ? 'bg-emerald-500' : a.color === 'blue' ? 'bg-blue-500' : a.color === 'violet' ? 'bg-violet-500' : a.color === 'amber' ? 'bg-amber-500' : a.color === 'rose' ? 'bg-rose-500' : 'bg-fuchsia-500'}`} />
+                                        {a.name}
+                                     </span>
+                                     <span className="font-bold text-slate-700 dark:text-slate-300">{a.percentage}%</span>
+                                  </div>
+                               ))}
+                            </div>
+                         </div>
+                      );
+                   })}
+                </div>
+              </div>
+            )}
+            
+            {selectedPlan && (
               <div className={`rounded-3xl shadow-sm border p-6 sm:p-8 ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
                 <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-8">
                   <div>
@@ -1216,7 +1377,6 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                 </div>
               </div>
             )}
-          </div>
         </div>
       )}
 

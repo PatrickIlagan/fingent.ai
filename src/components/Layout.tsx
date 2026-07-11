@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Home, Calendar, Briefcase, Bot, PieChart, Settings, CreditCard, Receipt, Target, ChevronDown, ChevronRight, Building, FileText, Download, ArrowLeft, Megaphone, Package, ShoppingCart, Activity, Users, DollarSign } from 'lucide-react';
+import { Home, Calendar, Briefcase, Bot, PieChart, Settings, CreditCard, Clock, Receipt, Target, ChevronDown, ChevronRight, Building, FileText, Download, ArrowLeft, Megaphone, Package, ShoppingCart, Activity, Users, DollarSign } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any) {
-  const { themeMode, setThemeMode, selectedBusiness, setSelectedBusiness } = useStore();
+  const { themeMode, setThemeMode, selectedBusiness, setSelectedBusiness, selectedFreelance, setSelectedFreelance } = useStore();
   const [expandedTabs, setExpandedTabs] = useState<Record<string, boolean>>({});
 
   const isAdvanced = themeMode === 'advanced';
@@ -69,6 +69,13 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
         { id: 'business-invoices', icon: DollarSign, label: 'Invoices' },
       ];
     }
+  } else if (selectedFreelance) {
+    tabs = [
+      { id: 'freelance-dashboard', icon: Building, label: 'Dashboard' },
+      { id: 'freelance-contracts', icon: Briefcase, label: 'Contracts' },
+      { id: 'freelance-invoices', icon: DollarSign, label: 'Invoices' },
+      { id: 'freelance-time', icon: Clock, label: 'Time Logs' },
+    ];
   }
 
 
@@ -111,6 +118,16 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-colors w-full ${isAdvanced ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'}`}
               >
                 <ArrowLeft size={16} /> Back to Portfolio
+              </button>
+            </div>
+          )}
+          {selectedFreelance && (
+            <div className="mb-4">
+              <button 
+                onClick={() => { setSelectedFreelance(null); setCurrentTab('freelancing'); }}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-colors w-full ${isAdvanced ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'}`}
+              >
+                <ArrowLeft size={16} /> Back to Services
               </button>
             </div>
           )}

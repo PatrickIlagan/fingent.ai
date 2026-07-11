@@ -1,0 +1,6 @@
+{
+  "name": "FinGent",
+  "description": "An AI-powered mobile-first personal finance application with a responsive dashboard, advanced asset tracking, and a built-in copilot.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
