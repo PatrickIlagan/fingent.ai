@@ -4,23 +4,55 @@ import fs from 'fs';
 
 let dbInstance: any = null;
 
+function createDbClient(databasePath: string) {
+  const sqliteDb = new Database(databasePath);
+
+  return {
+    get: async (sql: string, params: any[] = []) => sqliteDb.prepare(sql).get(...params),
+    all: async (sql: string, params: any[] = []) => sqliteDb.prepare(sql).all(...params),
+    run: async (sql: string, params: any[] = []) => sqliteDb.prepare(sql).run(...params),
+    exec: async (sql: string) => sqliteDb.exec(sql),
+    close: () => sqliteDb.close(),
+  };
+}
+
+function isCorruptDatabaseError(error: unknown) {
+  return error instanceof Error && /database disk image is malformed|file is not a database/i.test(error.message);
+}
+
 export async function getDb() {
-  if (!dbInstance) {
-    const dataDir = path.join(process.cwd(), 'data');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-    const sqliteDb = new Database(path.join(dataDir, 'fingent.db'));
-    
-    dbInstance = {
-      get: async (sql: string, params: any[] = []) => sqliteDb.prepare(sql).get(...params),
-      all: async (sql: string, params: any[] = []) => sqliteDb.prepare(sql).all(...params),
-      run: async (sql: string, params: any[] = []) => sqliteDb.prepare(sql).run(...params),
-      exec: async (sql: string) => sqliteDb.exec(sql)
-    };
-    
-    await initDb(dbInstance);
+  if (dbInstance) {
+    return dbInstance;
   }
+
+  const dataDir = path.join(process.cwd(), 'data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+
+  const databasePath = path.join(dataDir, 'fingent.db');
+  let client = createDbClient(databasePath);
+
+  try {
+    await client.get('PRAGMA integrity_check');
+    await initDb(client);
+  } catch (error) {
+    client.close();
+
+    if (!isCorruptDatabaseError(error)) {
+      throw error;
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = path.join(dataDir, `fingent.corrupt-${timestamp}.db`);
+    fs.renameSync(databasePath, backupPath);
+    console.warn(`The FinGent database was corrupted and has been preserved at ${backupPath}. A new database was created.`);
+
+    client = createDbClient(databasePath);
+    await initDb(client);
+  }
+
+  dbInstance = client;
   return dbInstance;
 }
 

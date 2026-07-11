@@ -10,6 +10,13 @@ export function Freelancing({ currentTab, onNavigate }: any) {
   const [activeTab, setActiveTab] = useState('overview');
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(0);
+  const [timeLogs, setTimeLogs] = useState<any[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('fingent-time-logs') || '[]');
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
     let interval: any = null;
@@ -29,6 +36,29 @@ export function Freelancing({ currentTab, onNavigate }: any) {
     const s = totalSeconds % 60;
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
+
+  const handleTimer = () => {
+    if (!isTimerRunning) {
+      setIsTimerRunning(true);
+      return;
+    }
+
+    setIsTimerRunning(false);
+    if (timerSeconds > 0) {
+      const description = window.prompt('What did you work on during this session?')?.trim();
+      setTimeLogs((logs) => [{
+        id: Date.now(),
+        description: description || 'Untitled work session',
+        duration: timerSeconds,
+        date: new Date().toISOString(),
+      }, ...logs]);
+    }
+    setTimerSeconds(0);
+  };
+
+  useEffect(() => {
+    localStorage.setItem('fingent-time-logs', JSON.stringify(timeLogs));
+  }, [timeLogs]);
 
   const incomeData = [
     { month: 'Jan', hourly: 25000, fixed: 45000, retainer: 30000 },
@@ -90,7 +120,7 @@ export function Freelancing({ currentTab, onNavigate }: any) {
               </div>
               <div className="flex gap-3">
                 <button 
-                  onClick={() => setIsTimerRunning(!isTimerRunning)} 
+                  onClick={handleTimer}
                   className={`flex-1 py-3 rounded-xl font-bold flex justify-center items-center gap-2 transition-transform active:scale-95 ${
                     isTimerRunning 
                       ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-lg shadow-rose-500/20' 
@@ -145,6 +175,27 @@ export function Freelancing({ currentTab, onNavigate }: any) {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+          </div>
+          <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-lg flex items-center gap-2"><Clock size={20} /> Recent Time Logs</h3>
+              <span className="text-xs font-bold text-slate-500">{timeLogs.length} saved</span>
+            </div>
+            {timeLogs.length === 0 ? (
+              <p className="text-sm text-slate-500">Start the timer and stop it with a note to save your first work session.</p>
+            ) : (
+              <div className="space-y-3">
+                {timeLogs.slice(0, 5).map((log) => (
+                  <div key={log.id} className={`flex items-center justify-between gap-4 p-4 rounded-2xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
+                    <div>
+                      <p className="font-bold text-sm">{log.description}</p>
+                      <p className="text-xs text-slate-500 mt-1">{new Date(log.date).toLocaleDateString()}</p>
+                    </div>
+                    <p className="font-mono font-bold">{formatTime(log.duration)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

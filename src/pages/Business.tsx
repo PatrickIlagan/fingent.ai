@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { Building, TrendingUp, Users, DollarSign, Plus, ArrowUpRight, ArrowDownRight, Store, MonitorSmartphone, X, ArrowLeft, ShoppingCart, Package, Megaphone, CheckSquare, Activity, RefreshCw, FileText, Briefcase } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
@@ -7,13 +7,28 @@ export function Business({ currentTab, onNavigate }: any) {
   const { themeMode, selectedBusiness, setSelectedBusiness } = useStore();
   const isAdvanced = themeMode === 'advanced';
 
-  const [businesses, setBusinesses] = useState<any[]>([
-    { id: 1, name: 'TechStore E-commerce', type: 'Store', status: 'Active', mrr: 124500, growth: 12.5, customers: 156, target: 200000 },
-    { id: 2, name: 'Analytics SaaS', type: 'SaaS', status: 'Active', mrr: 85000, growth: 8.4, customers: 120, target: 150000 },
-    { id: 3, name: 'Design Agency', type: 'Agency', status: 'Active', mrr: 245000, growth: 18.4, customers: 12, target: 500000 },
-  ]);
+  const [businesses, setBusinesses] = useState<any[]>(() => {
+    const savedBusinesses = localStorage.getItem('fingent-businesses');
+    if (savedBusinesses) {
+      try {
+        return JSON.parse(savedBusinesses);
+      } catch {
+        localStorage.removeItem('fingent-businesses');
+      }
+    }
+
+    return [
+      { id: 1, name: 'TechStore E-commerce', type: 'Store', status: 'Active', mrr: 124500, growth: 12.5, customers: 156, target: 200000 },
+      { id: 2, name: 'Analytics SaaS', type: 'SaaS', status: 'Active', mrr: 85000, growth: 8.4, customers: 120, target: 150000 },
+      { id: 3, name: 'Design Agency', type: 'Agency', status: 'Active', mrr: 245000, growth: 18.4, customers: 12, target: 500000 },
+    ];
+  });
   const [isPipelineOpen, setIsPipelineOpen] = useState(false);
   const [selectedDeal, setSelectedDeal] = useState<any>(null);
+
+  useEffect(() => {
+    localStorage.setItem('fingent-businesses', JSON.stringify(businesses));
+  }, [businesses]);
 
   const globalDeals = [
     { id: 'D-1', title: 'Enterprise Analytics Deal', venture: 'Analytics SaaS', stage: 'Negotiation', value: 250000, probability: 80, closing: '12 days', contact: 'Sarah Jenkins (TechCorp)', notes: 'Awaiting final legal review on MSA.' },

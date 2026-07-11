@@ -61,13 +61,13 @@ Open [http://localhost:3000](http://localhost:3000).
 ```text
 src/                React UI, pages, components, and client state
 server.ts           Express server and API routes
-server/             SQLite connection and AI copilot implementation
-data/fingent.db     Local SQLite database
+server/             SQLite connection and optional AI copilot implementation
+data/fingent.db     Local SQLite database, created automatically at runtime
 ```
 
 ## Data and security notes
 
-FinGent stores application data in `data/fingent.db`. Treat it as private financial data: back it up before major changes and do not share it publicly. The Firebase client configuration is intentionally separate from private server secrets; configure provider access and authorized domains in Firebase before using Google sign-in in production.
+FinGent stores application data in `data/fingent.db`, which is intentionally excluded from Git. Treat it as private financial data: back it up before major changes and do not share it publicly. If SQLite detects a corrupted database, FinGent preserves it as a timestamped `data/fingent.corrupt-*.db` backup and creates a clean database instead. The Firebase client configuration is intentionally separate from private server secrets; configure provider access and authorized domains in Firebase before using Google sign-in in production.
 
 ## Production build
 

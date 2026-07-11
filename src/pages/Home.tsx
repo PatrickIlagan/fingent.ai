@@ -35,6 +35,21 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
   </div>;
 
   const totalCash = Array.isArray(data.accounts) ? data.accounts.reduce((sum, a) => sum + (a.balance || 0), 0) : 0;
+  const currentMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const monthlyTransactions = data.transactions.filter((transaction) => new Date(transaction.date) >= currentMonthStart);
+  const monthlyIncome = monthlyTransactions
+    .filter((transaction) => transaction.type === 'income')
+    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  const monthlyExpenses = monthlyTransactions
+    .filter((transaction) => transaction.type === 'expense')
+    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  const balanceByType = {
+    'Total Balance': totalCash,
+    'Digital Wallets': data.accounts.filter((account) => account.type === 'wallet').reduce((sum, account) => sum + Number(account.balance || 0), 0),
+    'Cash on Hand': data.accounts.filter((account) => account.type === 'cash').reduce((sum, account) => sum + Number(account.balance || 0), 0),
+    'Bank Accounts': data.accounts.filter((account) => account.type === 'bank').reduce((sum, account) => sum + Number(account.balance || 0), 0),
+  };
+  const displayedBalance = balanceByType[balanceType];
 
   const mockBudgets = [
     { id: 1, name: 'Food & Dining', spent: 4500, limit: 10000, color: '#10B981' },
@@ -101,18 +116,18 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
                 </div>
               )}
             </div>
-            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight truncate">₱{totalCash.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h1>
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight truncate">₱{displayedBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h1>
           </div>
           
           <div className="relative z-10 flex flex-col gap-3 w-full md:w-auto">
              <div className="flex gap-3">
                <div className={`flex-1 md:flex-none px-4 py-3 rounded-2xl ${isAdvanced ? 'bg-slate-700/50' : 'bg-white/20 backdrop-blur-md'}`}>
                  <p className={`text-[10px] uppercase tracking-wider mb-1 ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Monthly Income</p>
-                 <p className="font-bold text-base">₱30,000</p>
+                 <p className="font-bold text-base">₱{monthlyIncome.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p>
                </div>
                <div className={`flex-1 md:flex-none px-4 py-3 rounded-2xl ${isAdvanced ? 'bg-slate-700/50' : 'bg-white/20 backdrop-blur-md'}`}>
                  <p className={`text-[10px] uppercase tracking-wider mb-1 ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Monthly Expenses</p>
-                 <p className="font-bold text-base">₱1,350</p>
+                 <p className="font-bold text-base">₱{monthlyExpenses.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p>
                </div>
              </div>
              <div className="flex gap-2">

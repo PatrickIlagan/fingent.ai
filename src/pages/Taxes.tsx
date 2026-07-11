@@ -61,7 +61,7 @@ export function Taxes() {
               <Globe size={16} /> US
             </button>
           </div>
-          <button className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-colors border ${isAdvanced ? 'border-slate-700 hover:bg-slate-800 text-slate-300' : 'border-slate-200 hover:bg-slate-50 text-slate-600'}`}>
+          <button onClick={() => window.print()} className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-colors border ${isAdvanced ? 'border-slate-700 hover:bg-slate-800 text-slate-300' : 'border-slate-200 hover:bg-slate-50 text-slate-600'}`}>
             <Download className="w-4 h-4" /> Export PDF
           </button>
         </div>
@@ -205,6 +205,7 @@ export function Taxes() {
           </div>
         </div>
       </div>
+      <p className="px-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">Planning estimates only — verify filing dates, deductions, and tax obligations with the relevant tax authority or a qualified professional.</p>
     </div>
   );
 }

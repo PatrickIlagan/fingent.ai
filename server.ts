@@ -6,7 +6,9 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { getDb } from "./server/db";
 import { handleAgentChat } from "./server/agent";
-import yahooFinance from 'yahoo-finance2';
+import YahooFinance from 'yahoo-finance2';
+
+const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
 function formatTicker(ticker: string, type: string) {
   if (!ticker) return ticker;
@@ -449,9 +451,9 @@ To run FinGent as a desktop application:
 
   app.get("/api/rates", async (req, res) => {
     try {
-      const phpQuote: any = await yahooFinance.quote("PHP=X");
-      const eurQuote: any = await yahooFinance.quote("EURUSD=X");
-      const gbpQuote: any = await yahooFinance.quote("GBPUSD=X");
+      const phpQuote = await yahooFinance.quote("PHP=X");
+      const eurQuote = await yahooFinance.quote("EURUSD=X");
+      const gbpQuote = await yahooFinance.quote("GBPUSD=X");
       res.json({
         PHP: phpQuote?.regularMarketPrice || 58.5,
         EUR: eurQuote?.regularMarketPrice ? 1 / eurQuote.regularMarketPrice : 0.92,
