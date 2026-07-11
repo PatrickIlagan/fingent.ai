@@ -12,6 +12,7 @@ export function Business({ currentTab, onNavigate }: any) {
   const [globalDeals, setGlobalDeals] = React.useState<any[]>([]);
   const [isPipelineOpen, setIsPipelineOpen] = useState(false);
   const [selectedDeal, setSelectedDeal] = useState<any>(null);
+  const [isEditingDeal, setIsEditingDeal] = useState(false);
 
   React.useEffect(() => {
     Promise.all([
@@ -47,6 +48,29 @@ export function Business({ currentTab, onNavigate }: any) {
     } catch(e) { console.error(e); }
   };
 
+  const updateDeal = async (changes: { stage?: string; notes?: string }) => {
+    if (!selectedDeal) return;
+    const updated = { ...selectedDeal, ...changes };
+    const response = await fetch(`/api/business_deals/${selectedDeal.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage: updated.stage, notes: updated.notes })
+    });
+    if (!response.ok) return;
+    setSelectedDeal(updated);
+    setGlobalDeals((deals) => deals.map((deal) => deal.id === updated.id ? updated : deal));
+  };
+
+  const advanceDealStage = () => {
+    if (!selectedDeal || ['Closed Won', 'Closed Lost'].includes(selectedDeal.stage)) return;
+    const stages: Record<string, string> = {
+      Qualification: 'Proposal Sent',
+      'Proposal Sent': 'Negotiation',
+      Negotiation: 'Closed Won'
+    };
+    updateDeal({ stage: stages[selectedDeal.stage] || 'Qualification' });
+  };
+
   const totalMrr = businesses.reduce((acc, b) => acc + b.mrr, 0);
   const revenueData = [
     { name: 'Jan', value: totalMrr * 0.72 },
@@ -72,9 +96,10 @@ export function Business({ currentTab, onNavigate }: any) {
         
         {(() => {
           const totalDealValue = globalDeals.reduce((sum, d) => sum + (d.value || 0), 0);
-          const activeDeals = globalDeals.length;
-          const wonDeals = globalDeals.filter(d => d.stage === 'Closed Won' || d.stage === 'Accepted').length;
-          const winRate = activeDeals > 0 ? ((wonDeals / activeDeals) * 100).toFixed(0) : 0;
+          const activeDeals = globalDeals.filter(d => !['Closed Won', 'Closed Lost', 'Accepted'].includes(d.stage));
+          const closedDeals = globalDeals.filter(d => ['Closed Won', 'Closed Lost', 'Accepted'].includes(d.stage));
+          const wonDeals = closedDeals.filter(d => d.stage === 'Closed Won' || d.stage === 'Accepted').length;
+          const winRate = closedDeals.length > 0 ? ((wonDeals / closedDeals.length) * 100).toFixed(0) : 0;
           return (
             <div className="grid md:grid-cols-3 gap-4 mb-8">
               <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
@@ -83,7 +108,7 @@ export function Business({ currentTab, onNavigate }: any) {
               </div>
               <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
                 <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Active Deals</p>
-                <p className="text-3xl font-black">{activeDeals}</p>
+                <p className="text-3xl font-black">{activeDeals.length}</p>
               </div>
               <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
                 <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Win Rate</p>
@@ -99,7 +124,7 @@ export function Business({ currentTab, onNavigate }: any) {
             {globalDeals.map((deal) => (
               <div 
                 key={deal.id} 
-                onClick={() => setSelectedDeal(deal)}
+                onClick={() => { setSelectedDeal(deal); setIsEditingDeal(false); }}
                 className={`p-5 rounded-2xl border flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer transition-all hover:scale-[1.01] shadow-sm ${selectedDeal?.id === deal.id ? (isAdvanced ? 'bg-violet-900/30 border-violet-500/50' : 'bg-violet-50 border-violet-200') : (isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200')}`}
               >
                 <div className="flex items-center gap-4 mb-3 sm:mb-0">
@@ -157,14 +182,21 @@ export function Business({ currentTab, onNavigate }: any) {
                   <p className="text-sm">{selectedDeal.notes}</p>
                 </div>
 
-                <div className="flex gap-2">
-                  <button className={`flex-1 py-3 rounded-xl font-bold text-sm transition-colors ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
-                    Update Stage
-                  </button>
-                  <button className={`py-3 px-4 rounded-xl font-bold text-sm border transition-colors ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'border-slate-200 hover:bg-slate-50 text-slate-600'}`}>
-                    Edit
-                  </button>
-                </div>
+                {isEditingDeal ? (
+                  <div className="space-y-3 border-t border-slate-200 dark:border-slate-700 pt-4">
+                    <textarea value={selectedDeal.notes || ''} onChange={(event) => setSelectedDeal({ ...selectedDeal, notes: event.target.value })} rows={3} aria-label="Deal notes" className={`w-full rounded-xl border p-3 text-sm resize-none ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`} />
+                    <button onClick={async () => { await updateDeal({ notes: selectedDeal.notes || '' }); setIsEditingDeal(false); }} className={`w-full py-2.5 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-100 hover:bg-slate-200'}`}>Save notes</button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <button onClick={advanceDealStage} disabled={['Closed Won', 'Closed Lost'].includes(selectedDeal.stage)} className={`flex-1 py-3 rounded-xl font-bold text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
+                      {['Closed Won', 'Closed Lost'].includes(selectedDeal.stage) ? selectedDeal.stage : 'Advance Stage'}
+                    </button>
+                    <button onClick={() => setIsEditingDeal(true)} className={`py-3 px-4 rounded-xl font-bold text-sm border transition-colors ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'border-slate-200 hover:bg-slate-50 text-slate-600'}`}>
+                      Edit
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className={`p-8 text-center rounded-3xl border border-dashed ${isAdvanced ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>

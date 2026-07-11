@@ -912,9 +912,8 @@ To run FinGent as a desktop application:
   app.get("/api/business_deals", async (req, res) => {
     try {
       const db = await getDb();
-      // Fetch leads and proposals from business_items as deals
       const items = await db.all("SELECT i.*, b.name as venture FROM business_items i LEFT JOIN businesses b ON i.business_id = b.id WHERE i.type IN ('lead', 'proposal')");
-      const deals = items.map((i:any) => ({
+      const itemDeals = items.map((i:any) => ({
         id: i.id,
         title: i.name,
         venture: i.venture,
@@ -923,9 +922,11 @@ To run FinGent as a desktop application:
         probability: i.type === 'proposal' ? 80 : 30, // rough estimate based on type
         closing: 'TBD',
         contact: 'N/A',
-        notes: ''
+        notes: i.extra_info || '',
+        source: 'item'
       }));
-      res.json(deals);
+      const savedDeals = await db.all("SELECT d.*, b.name as venture FROM business_deals d LEFT JOIN businesses b ON d.business_id = b.id");
+      res.json([...itemDeals, ...savedDeals.map((deal: any) => ({ ...deal, source: 'deal' }))]);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -947,7 +948,12 @@ To run FinGent as a desktop application:
      try {
         const db = await getDb();
         const { stage, notes } = req.body;
-        await db.run("UPDATE business_deals SET stage = ?, notes = ? WHERE id = ?", [stage, notes, req.params.id]);
+        const item = await db.get("SELECT id FROM business_items WHERE id = ?", [req.params.id]);
+        if (item) {
+          await db.run("UPDATE business_items SET status = ?, extra_info = ? WHERE id = ?", [stage, notes || '', req.params.id]);
+        } else {
+          await db.run("UPDATE business_deals SET stage = ?, notes = ? WHERE id = ?", [stage, notes || '', req.params.id]);
+        }
         res.json({ success: true });
      } catch(e: any) {
         res.status(500).json({ error: e.message });

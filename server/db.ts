@@ -185,7 +185,6 @@ async function initDb(db: any) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       business_id INTEGER,
       type TEXT NOT NULL,
-      business_id INTEGER,
       name TEXT NOT NULL,
       status TEXT,
       value REAL,

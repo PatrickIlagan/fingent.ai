@@ -1,3 +1,0 @@
-app/applet/src/pages/Freelancing.tsx(139,150): error TS1127: Invalid character.
-app/applet/src/pages/Freelancing.tsx(139,168): error TS1381: Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
-app/applet/src/pages/Freelancing.tsx(139,171): error TS1382: Unexpected token. Did you mean `{'>'}` or `&gt;`?

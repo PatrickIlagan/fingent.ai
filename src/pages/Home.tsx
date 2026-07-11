@@ -7,20 +7,21 @@ import { format } from 'date-fns';
 export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) => void, toggleChat?: () => void }) {
   const { shouldRefresh, themeMode } = useStore();
   const isAdvanced = themeMode === 'advanced';
-  const [data, setData] = useState<{ accounts: any[], transactions: any[], wealth: any, liabilities: any[], goals: any[], portfolios: any[] } | null>(null);
+  const [data, setData] = useState<{ accounts: any[], transactions: any[], wealth: any, liabilities: any[], goals: any[], portfolios: any[], budgets: any[] } | null>(null);
   const [chartTab, setChartTab] = useState<'Cash Flow' | 'Expenses' | 'Income' | 'Credits' | 'Dues'>('Cash Flow');
   const [balanceType, setBalanceType] = useState<'Total Balance' | 'Digital Wallets' | 'Cash on Hand' | 'Bank Accounts'>('Total Balance');
   const [isBalanceDropdownOpen, setIsBalanceDropdownOpen] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
-      const [accRes, txRes, wealthRes, liabRes, goalsRes, portRes] = await Promise.all([
+      const [accRes, txRes, wealthRes, liabRes, goalsRes, portRes, budgetRes] = await Promise.all([
         fetch('/api/accounts').then(r => r.json()).catch(() => []),
         fetch('/api/transactions').then(r => r.json()).catch(() => []),
         fetch('/api/wealth').then(r => r.json()).catch(() => ({})),
         fetch('/api/liabilities').then(r => r.json()).catch(() => []),
         fetch('/api/goals').then(r => r.json()).catch(() => []),
-        fetch('/api/portfolios').then(r => r.json()).catch(() => [])
+        fetch('/api/portfolios').then(r => r.json()).catch(() => []),
+        fetch('/api/budgets').then(r => r.json()).catch(() => [])
       ]);
       setData({ 
         accounts: Array.isArray(accRes) ? accRes : [], 
@@ -28,7 +29,8 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
         wealth: wealthRes || {},
         liabilities: Array.isArray(liabRes) ? liabRes : [],
         goals: Array.isArray(goalsRes) ? goalsRes : [],
-        portfolios: Array.isArray(portRes) ? portRes : []
+        portfolios: Array.isArray(portRes) ? portRes : [],
+        budgets: Array.isArray(budgetRes) ? budgetRes : []
       });
     }
     fetchData();
@@ -51,27 +53,38 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
     totalCash = data.accounts.filter(a => a.type === 'cash').reduce((sum, a) => sum + (a.balance || 0), 0);
   }
 
-  const expensesByCategory: Record<string, number> = {};
-  data.transactions.forEach(tx => {
-    if (tx.type === 'expense') {
-      expensesByCategory[tx.category || 'Other'] = (expensesByCategory[tx.category || 'Other'] || 0) + tx.amount;
-    }
-  });
-  
   const colors = ['#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#3B82F6', '#EC4899', '#14B8A6'];
-  const mockBudgets = Object.entries(expensesByCategory).map(([name, spent], i) => ({
-    id: i,
-    name,
-    spent,
-    limit: Math.max(spent * 1.2, 5000),
-    color: colors[i % colors.length]
-  }));
-  if (mockBudgets.length === 0) {
-    mockBudgets.push({ id: 0, name: 'General', spent: 0, limit: 10000, color: '#10B981' });
-  }
+  const budgetSummaries = data.budgets.flatMap((record) => {
+    try {
+      const plan = JSON.parse(record.categories);
+      const groups = Array.isArray(plan.groups) ? plan.groups : [];
+      return groups.flatMap((group: any, groupIndex: number) => {
+        const categories = Array.isArray(group.categories) ? group.categories : [];
+        if (categories.length > 0) {
+          return categories.map((category: any, categoryIndex: number) => ({
+            id: category.id ?? `${record.id}-${groupIndex}-${categoryIndex}`,
+            name: category.name || group.name || 'Untitled category',
+            spent: Number(category.spent || 0),
+            limit: Number(category.limit || 0),
+            color: category.color || group.color || colors[(groupIndex + categoryIndex) % colors.length]
+          }));
+        }
+        return [{
+          id: group.id ?? `${record.id}-${groupIndex}`,
+          name: group.name || record.name || 'Untitled budget',
+          spent: Number(group.spent || 0),
+          limit: Number(group.limit || 0),
+          color: group.color || colors[groupIndex % colors.length]
+        }];
+      });
+    } catch {
+      return [];
+    }
+  }).filter((budget) => budget.limit > 0);
 
-  const totalBudgetSpent = mockBudgets.reduce((sum, b) => sum + b.spent, 0);
-  const totalBudgetLimit = mockBudgets.reduce((sum, b) => sum + b.limit, 0);
+  const totalBudgetSpent = budgetSummaries.reduce((sum, budget) => sum + budget.spent, 0);
+  const totalBudgetLimit = budgetSummaries.reduce((sum, budget) => sum + budget.limit, 0);
+  const budgetPercent = totalBudgetLimit > 0 ? Math.round((totalBudgetSpent / totalBudgetLimit) * 100) : 0;
 
   const budgetData = [
     { name: 'Spent', value: totalBudgetSpent, color: '#10B981' },
@@ -94,7 +107,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
   });
   const cashFlowData = days.map(d => cashFlowByDay[d]);
 
-  const mockBills = data.liabilities.filter(l => l.status !== 'Paid').map(l => ({
+  const upcomingBills = data.liabilities.filter(l => l.status !== 'Paid').map(l => ({
     id: l.id,
     name: l.name,
     amount: l.amount || l.remaining_amount || 0,
@@ -125,7 +138,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
      const amountOwed = balanceAsOfStmt < 0 ? Math.abs(balanceAsOfStmt) : 0;
      
      if (amountOwed > 0) {
-       mockBills.push({
+       upcomingBills.push({
          id: `card-stmt-${card.id}`,
          name: `${card.name} Statement`,
          amount: amountOwed,
@@ -136,9 +149,9 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
   });
 
   // Sort bills by date closest to today
-  mockBills.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  upcomingBills.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  const mockGoals = data.goals.map(g => ({
+  const goalSummaries = data.goals.map(g => ({
     id: g.id,
     name: g.name,
     target: g.target || 0,
@@ -238,7 +251,9 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
              <span className="text-sm text-emerald-500 dark:text-violet-400 font-medium">View All</span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-             {mockGoals.map(goal => {
+             {goalSummaries.length === 0 ? (
+               <p className="py-4 text-sm text-slate-500">Create a goal to track progress here.</p>
+             ) : goalSummaries.map(goal => {
                const progress = Math.round((goal.current / goal.target) * 100);
                return (
                  <div key={goal.id} className="w-full">
@@ -420,7 +435,9 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
             FinGent Insights
           </h3>
           <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed mb-4">
-            Good morning! You're on track with your budget this week. You have {mockBills.length} upcoming bills due in the next 14 days. Don't forget to log your latest side hustle revenue.
+            {upcomingBills.length > 0
+              ? `You have ${upcomingBills.length} unpaid bill${upcomingBills.length === 1 ? '' : 's'} to review. Keep recording income and expenses to make the dashboard more useful.`
+              : 'Add accounts, transactions, and plans to build a complete financial picture.'}
           </p>
           <div className={`p-4 rounded-2xl flex items-center justify-between ${isAdvanced ? 'bg-slate-900/50' : 'bg-white/60'}`}>
              <div>
@@ -446,7 +463,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
                 </div>
                 <div>
                    <p className="text-sm font-bold text-slate-800 dark:text-slate-200">Review Unpaid Bills</p>
-                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{mockBills.length} bills pending payment</p>
+                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{upcomingBills.length} bills pending payment</p>
                 </div>
              </div>
              <div className={`p-3 rounded-2xl border ${isAdvanced ? 'bg-slate-700/30 border-slate-700' : 'bg-amber-50 border-amber-100'} flex gap-3`}>
@@ -455,7 +472,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
                 </div>
                 <div>
                    <p className="text-sm font-bold text-slate-800 dark:text-slate-200">Update Goals</p>
-                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">You have {mockGoals.length} active financial goals.</p>
+                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">You have {goalSummaries.length} active financial goals.</p>
                 </div>
              </div>
           </div>
@@ -470,7 +487,9 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
             </button>
           </div>
           <div className="space-y-4">
-            {mockBills.map(bill => (
+            {upcomingBills.length === 0 ? (
+              <p className="py-4 text-sm text-slate-500">No unpaid bills recorded.</p>
+            ) : upcomingBills.map(bill => (
               <div key={bill.id} onClick={() => onNavigate?.('liabilities-bills')} className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-600 cursor-pointer">
                 <div className="flex items-center">
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center mr-3 ${isAdvanced ? 'bg-slate-700 text-slate-300' : 'bg-rose-50 text-rose-500'}`}>
@@ -491,7 +510,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
           <div className="flex justify-between items-center mb-6">
             <h3 className="font-bold text-lg">Monthly Budget</h3>
             <span className="text-xs font-bold px-2 py-1 bg-slate-100 dark:bg-slate-700 rounded-lg text-slate-500">
-              {Math.round((totalBudgetSpent / totalBudgetLimit) * 100)}% Spent
+              {budgetPercent}% Spent
             </span>
           </div>
           <div className="flex flex-col items-center">
@@ -512,7 +531,9 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
             </div>
             
             <div className="w-full space-y-4 border-t border-slate-100 dark:border-slate-700 pt-6 mt-6">
-              {mockBudgets.map(budget => (
+              {budgetSummaries.length === 0 ? (
+                <p className="text-center text-sm text-slate-500">Create a budget plan to see category progress here.</p>
+              ) : budgetSummaries.map(budget => (
                 <div key={budget.id} className="w-full">
                   <div className="flex justify-between text-sm mb-1.5">
                     <span className="font-medium text-slate-700 dark:text-slate-300">{budget.name}</span>

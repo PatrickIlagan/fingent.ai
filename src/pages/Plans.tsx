@@ -3,7 +3,7 @@ import { useStore } from '../store/useStore';
 import { Target, PieChart, Plus, Plane, Laptop, ShieldAlert, Calendar as CalendarIcon, Home, Car, AlertCircle, CheckCircle2, TrendingUp, X } from 'lucide-react';
 
 export function Plans({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
-  const { themeMode, shouldRefresh } = useStore();
+  const { themeMode, shouldRefresh, triggerRefresh } = useStore();
   const isAdvanced = themeMode === 'advanced';
 
   const isGoals = category === 'goals';
@@ -25,7 +25,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
       setDbIncomeFlows(Array.isArray(inc) ? inc : []);
       setDbPresets(Array.isArray(p) ? p : []);
       if (Array.isArray(b) && b.length > 0) {
-         setBudgetPlans(prev => {
+         setBudgetPlans(() => {
             const newPlans = b.map(dbB => {
                try {
                   const data = JSON.parse(dbB.categories);
@@ -33,55 +33,14 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                } catch(e) { return null; }
             }).filter(Boolean);
             
-            const existingIds = prev.map(p => p.id);
-            const toAdd = newPlans.filter(np => !existingIds.includes(np.id));
-            return [...toAdd, ...prev];
+            return newPlans;
          });
       }
     }
     fetchData();
   }, [shouldRefresh]);
 
-  const [budgetPlans, setBudgetPlans] = useState([
-    {
-      id: 1,
-      name: 'Monthly Budget - July',
-      type: 'recurring',
-      isGrouped: true,
-      totalLimit: 15000,
-      groups: [
-        { 
-          id: 1, 
-          name: 'Needs', 
-          limit: 7500, 
-          color: 'emerald', 
-          categories: [
-            { id: 11, name: 'Food & Dining', spent: 4500, limit: 5000, color: 'emerald', transactions: [{ name: 'Jollibee', amount: 500, date: '2026-07-01', account: 'Cash' }, { name: 'Supermarket', amount: 4000, date: '2026-07-02', account: 'BDO Debit' }] },
-            { id: 12, name: 'Transportation', spent: 2100, limit: 2500, color: 'emerald', transactions: [{ name: 'Gas', amount: 1500, date: '2026-07-03', account: 'BDO Debit' }, { name: 'Grab', amount: 600, date: '2026-07-04', account: 'GCash' }] }
-          ]
-        },
-        { 
-          id: 2, 
-          name: 'Wants', 
-          limit: 4500, 
-          color: 'blue', 
-          categories: [
-             { id: 21, name: 'Entertainment', spent: 1800, limit: 2000, color: 'blue', transactions: [{ name: 'Netflix', amount: 500, date: '2026-07-01', account: 'BPI Credit' }, { name: 'Movie Ticket', amount: 1300, date: '2026-07-04', account: 'Cash' }] },
-             { id: 22, name: 'Shopping', spent: 500, limit: 2500, color: 'blue', transactions: [] }
-          ]
-        },
-        { 
-          id: 3, 
-          name: 'Savings', 
-          limit: 3000, 
-          color: 'violet', 
-          categories: [
-            { id: 31, name: 'Emergency Fund', spent: 3000, limit: 3000, color: 'violet', transactions: [{ name: 'Transfer', amount: 3000, date: '2026-07-01', account: 'BDO Debit' }] }
-          ]
-        }
-      ]
-    }
-  ]);
+  const [budgetPlans, setBudgetPlans] = useState<any[]>([]);
 
   const [goals, setGoals] = useState<any[]>([]);
 
@@ -287,7 +246,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
     };
     
     
-    await fetch('/api/budgets', {
+    const response = await fetch('/api/budgets', {
        method: 'POST', headers: {'Content-Type': 'application/json'},
        body: JSON.stringify({
           name: budgetPlanName,
@@ -296,8 +255,9 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
           month: newBudgetPlan.startDate || new Date().toISOString()
        })
     });
-    
-    setBudgetPlans([...budgetPlans, newBudgetPlan]);
+    if (!response.ok) return;
+    const saved = await response.json();
+    setBudgetPlans((plans) => [...plans, { ...newBudgetPlan, id: saved.id }]);
     setIsBudgetBuilderOpen(false);
     setBudgetStep(1);
     setTotalBudgetLimit('');
@@ -306,7 +266,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
     setBudgetEndDate('');
     setBudgetType('recurring');
     setIsGroupedBudget(true);
-    window.location.reload();
+    triggerRefresh();
   };
 
   const handleNextStep = () => {
