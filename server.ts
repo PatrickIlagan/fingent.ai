@@ -20,7 +20,7 @@ function formatTicker(ticker: string, type: string) {
 
 async function startServer() {
   const app = express();
-const upload = multer({ dest: 'data/uploads/' });
+  const upload = multer({ dest: 'data/uploads/' });
 
   const PORT = 3000;
 
@@ -28,7 +28,11 @@ const upload = multer({ dest: 'data/uploads/' });
 
   // API Routes
   app.get("/api/system/desktop-wrapper", async (req, res) => {
-    const archiver = (await import("archiver")).default; const archive = archiver('zip', {
+    const createArchive = (await import("archiver")) as unknown as (
+      format: string,
+      options?: import("archiver").ArchiverOptions,
+    ) => import("archiver").Archiver;
+    const archive = createArchive('zip', {
       zlib: { level: 9 }
     });
 
@@ -445,9 +449,9 @@ To run FinGent as a desktop application:
 
   app.get("/api/rates", async (req, res) => {
     try {
-      const phpQuote = await yahooFinance.quote("PHP=X");
-      const eurQuote = await yahooFinance.quote("EURUSD=X");
-      const gbpQuote = await yahooFinance.quote("GBPUSD=X");
+      const phpQuote: any = await yahooFinance.quote("PHP=X");
+      const eurQuote: any = await yahooFinance.quote("EURUSD=X");
+      const gbpQuote: any = await yahooFinance.quote("GBPUSD=X");
       res.json({
         PHP: phpQuote?.regularMarketPrice || 58.5,
         EUR: eurQuote?.regularMarketPrice ? 1 / eurQuote.regularMarketPrice : 0.92,
