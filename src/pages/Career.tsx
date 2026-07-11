@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import { Briefcase, Lightbulb, CheckCircle2, ChevronRight, TrendingUp, Edit2, Check, X } from 'lucide-react';
+import { Briefcase, CheckCircle2, ChevronRight, TrendingUp, Edit2, Check, X, CalendarDays, Plus, Target } from 'lucide-react';
 
 export function Career() {
   const { themeMode } = useStore();
@@ -22,14 +22,18 @@ export function Career() {
   const [incomeViewMode, setIncomeViewMode] = useState<"list" | "add" | "details">("list");
   const [selectedFlowId, setSelectedFlowId] = useState<number | null>(null);
   const [incomeForm, setIncomeForm] = useState({ name: '', amount: '', date: '', is_recurring: false, budget_preset_id: '', account_id: '' });
+  const [calendarEvents, setCalendarEvents] = useState<any[]>([]);
+  const [isScheduleOpen, setIsScheduleOpen] = useState(false);
+  const [scheduleForm, setScheduleForm] = useState({ name: '', date: new Date().toISOString().split('T')[0], type: 'Career meeting' });
 
   useEffect(() => {
      Promise.all([
         fetch('/api/career'),
         fetch('/api/income_flows'),
         fetch('/api/budget_presets'),
-        fetch('/api/accounts')
-     ]).then(async ([c, i, b, a]) => {
+        fetch('/api/accounts'),
+        fetch('/api/calendar_events')
+     ]).then(async ([c, i, b, a, events]) => {
         const data = await c.json().catch(()=>null);
         if (data) {
            setCareer(data);
@@ -39,6 +43,7 @@ export function Career() {
         const iRes = await i.json().catch(()=>[]); setDbIncomeFlows(Array.isArray(iRes) ? iRes : []);
         const bRes = await b.json().catch(()=>[]); setBudgetPresets(Array.isArray(bRes) ? bRes : []);
         const aRes = await a.json().catch(()=>[]); setAccounts(Array.isArray(aRes) ? aRes : []);
+        const eventRes = await events.json().catch(()=>[]); setCalendarEvents(Array.isArray(eventRes) ? eventRes : []);
      });
   }, []);
   
@@ -95,18 +100,33 @@ export function Career() {
     }
   };
 
-  const sideHustles = [
-    { name: 'Freelance Web Development', potential: '₱20k - ₱50k/mo', effort: 'Medium', tags: ['Coding', 'Remote'] },
-    { name: 'Tech Mentoring/Tutoring', potential: '₱10k - ₱30k/mo', effort: 'Low', tags: ['Teaching', 'Flexible'] },
-    { name: 'SaaS Micro-product', potential: 'Variable', effort: 'High', tags: ['Product', 'Passive Income'] },
-    { name: 'Technical Writing', potential: '₱5k - ₱15k/article', effort: 'Medium', tags: ['Writing', 'Remote'] },
-  ];
-
   if (!career) return <div className="animate-pulse space-y-4"><div className="h-48 bg-slate-200 dark:bg-slate-800 rounded-3xl"></div></div>;
 
   const currentSal = parseFloat(career.current_salary || 0);
   const targetSal = parseFloat(career.target_salary || 0);
   const progress = targetSal > 0 ? Math.min(100, Math.round((currentSal / targetSal) * 100)) : 0;
+  const completedSkills = skills.filter((skill) => skill.completed).length;
+  const careerEvents = calendarEvents.filter((event) => event.source === 'career' || event.type === 'career' || event.type === 'interview').sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const sideHustles = careerEvents.map((event) => ({
+    name: event.name,
+    potential: new Date(event.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
+    effort: event.provider || 'Career event',
+    tags: ['Calendar', 'Career']
+  }));
+
+  const scheduleCareerEvent = async () => {
+    if (!scheduleForm.name.trim() || !scheduleForm.date) return;
+    const response = await fetch('/api/calendar_events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: scheduleForm.name.trim(), type: 'career', amount: 0, date: scheduleForm.date, color: 'violet', icon: 'Briefcase', provider: scheduleForm.type, source: 'career' })
+    });
+    if (!response.ok) return;
+    const created = await response.json();
+    setCalendarEvents((items) => [...items, { id: created.id, name: scheduleForm.name.trim(), type: 'career', date: scheduleForm.date, color: 'violet', provider: scheduleForm.type, source: 'career' }]);
+    setScheduleForm({ name: '', date: new Date().toISOString().split('T')[0], type: 'Career meeting' });
+    setIsScheduleOpen(false);
+  };
 
   const renderIncomeBuilder = () => (
     <div className="max-w-3xl mx-auto space-y-6 pb-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -294,9 +314,29 @@ export function Career() {
     <div className="space-y-6 pb-10">
       <div className="flex justify-between items-end">
         <div>
-          <h2 className="text-2xl font-bold">Career & Growth</h2>
-          <p className="text-slate-500 dark:text-slate-400 mt-1">Track your professional development and side income</p>
+          <h2 className="text-3xl font-black">Career Command Center</h2>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">A practical view of your next role, skills, income, and important career dates.</p>
         </div>
+        <button onClick={() => setIsScheduleOpen(true)} className={`hidden sm:flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}><CalendarDays size={16} /> Schedule</button>
+      </div>
+
+      <div className={`relative overflow-hidden rounded-[2rem] p-7 md:p-9 border shadow-sm ${isAdvanced ? 'bg-gradient-to-br from-violet-950 via-slate-800 to-slate-900 border-violet-500/30' : 'bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 border-emerald-400 text-white'}`}>
+        <div className="relative z-10 grid lg:grid-cols-[1.3fr_.7fr] gap-8">
+          <div>
+            <p className={`text-xs font-black uppercase tracking-[0.2em] ${isAdvanced ? 'text-violet-300' : 'text-emerald-50'}`}>Professional trajectory</p>
+            <div className="mt-4 flex flex-wrap items-center gap-3"><h3 className="text-3xl md:text-4xl font-black">{career.current_role || 'Set your current role'}</h3><ChevronRight className={isAdvanced ? 'text-violet-300' : 'text-emerald-50'} /><h3 className="text-3xl md:text-4xl font-black">{career.target_role || 'Choose a target role'}</h3></div>
+            <p className={`mt-4 max-w-2xl text-sm md:text-base ${isAdvanced ? 'text-slate-300' : 'text-emerald-50'}`}>Focus on the skills and meetings that move you toward your next meaningful career step—not a generic checklist.</p>
+            <div className={`mt-7 h-3 overflow-hidden rounded-full ${isAdvanced ? 'bg-slate-700' : 'bg-white/25'}`}><div className={`h-full rounded-full ${isAdvanced ? 'bg-violet-400' : 'bg-white'}`} style={{ width: `${progress}%` }} /></div>
+            <div className="mt-2 flex justify-between text-xs font-bold"><span>{progress}% salary trajectory</span><span>{completedSkills}/{skills.length} skills mastered</span></div>
+          </div>
+          <div className={`rounded-3xl p-5 backdrop-blur-sm ${isAdvanced ? 'bg-slate-950/35 border border-slate-700' : 'bg-white/15 border border-white/20'}`}>
+            <p className={`text-xs font-bold uppercase tracking-wider ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Income runway</p>
+            <p className="mt-2 text-3xl font-black">₱{currentSal.toLocaleString()}</p>
+            <p className={`text-sm ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Current monthly compensation</p>
+            <div className={`mt-5 pt-5 border-t ${isAdvanced ? 'border-slate-700' : 'border-white/20'}`}><p className={`text-xs font-bold ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Target monthly compensation</p><p className="mt-1 text-xl font-black">₱{targetSal.toLocaleString()}</p></div>
+          </div>
+        </div>
+        <Target className={`absolute -right-6 -bottom-8 h-44 w-44 opacity-15 ${isAdvanced ? 'text-violet-300' : 'text-white'}`} />
       </div>
       
       <div className="grid lg:grid-cols-3 gap-6">
@@ -463,9 +503,11 @@ export function Career() {
 
           <div className={`rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
              <h3 className="font-bold text-lg mb-6 flex items-center">
-               <Lightbulb className="w-5 h-5 mr-2 text-amber-500" /> Side Hustle Ideas
+               <CalendarDays className="w-5 h-5 mr-2 text-violet-500" /> Career Calendar
              </h3>
+             <button onClick={() => setIsScheduleOpen(true)} className={`-mt-12 ml-auto mb-5 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold ${isAdvanced ? 'bg-slate-900 text-violet-400' : 'bg-emerald-50 text-emerald-700'}`}><Plus size={14} /> Add date</button>
              <div className="space-y-4">
+               {sideHustles.length === 0 && <p className="text-sm text-slate-500">No career events yet. Add interviews, 1:1s, reviews, or study blocks.</p>}
                {sideHustles.map((hustle, idx) => (
                  <div key={idx} className={`p-4 rounded-2xl border ${isAdvanced ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
                    <div className="flex justify-between items-start mb-2">
@@ -491,6 +533,20 @@ export function Career() {
           </div>
         </div>
       </div>
+
+      {isScheduleOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className={`w-full max-w-md rounded-3xl p-6 shadow-2xl ${isAdvanced ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'}`}>
+            <div className="flex items-center justify-between mb-5"><div><h3 className="text-xl font-black">Schedule career date</h3><p className="mt-1 text-sm text-slate-500">This will appear in the Calendar and Career dashboard.</p></div><button onClick={() => setIsScheduleOpen(false)} className="p-2 text-slate-500"><X size={20} /></button></div>
+            <div className="space-y-4">
+              <label className="block text-sm font-bold">What is it?<input value={scheduleForm.name} onChange={(event) => setScheduleForm({ ...scheduleForm, name: event.target.value })} placeholder="e.g. Interview with Acme" className={`mt-1.5 w-full rounded-xl border p-3 outline-none ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`} /></label>
+              <label className="block text-sm font-bold">Date<input type="date" value={scheduleForm.date} onChange={(event) => setScheduleForm({ ...scheduleForm, date: event.target.value })} className={`mt-1.5 w-full rounded-xl border p-3 outline-none ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`} /></label>
+              <label className="block text-sm font-bold">Type<select value={scheduleForm.type} onChange={(event) => setScheduleForm({ ...scheduleForm, type: event.target.value })} className={`mt-1.5 w-full rounded-xl border p-3 outline-none ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}><option>Career meeting</option><option>Interview</option><option>Performance review</option><option>Study block</option><option>Networking</option></select></label>
+            </div>
+            <div className="mt-6 flex justify-end gap-3"><button onClick={() => setIsScheduleOpen(false)} className="px-5 py-2.5 text-sm font-bold text-slate-500">Cancel</button><button onClick={scheduleCareerEvent} className={`px-5 py-2.5 rounded-xl text-sm font-bold text-white ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700' : 'bg-slate-900 hover:bg-slate-800'}`}>Add to calendar</button></div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

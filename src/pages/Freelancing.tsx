@@ -169,7 +169,7 @@ export function Freelancing({ currentTab, onNavigate }: any) {
                 onNavigate("freelance-dashboard");
               }}
             >
-              <div className="absolute top-4 right-4 flex opacity-0 group-hover:opacity-100 transition-opacity gap-2">
+              <div className="absolute top-4 right-4 z-10 flex opacity-0 group-hover:opacity-100 transition-opacity gap-2">
                  <button onClick={(e) => { e.stopPropagation(); setEditProfile(p); setIsEditProfileOpen(true); }} className={`p-2 rounded-lg ${isAdvanced ? "hover:bg-slate-700" : "hover:bg-slate-100"}`}>
                    <MoreHorizontal size={16} className="text-slate-500" />
                  </button>
@@ -178,7 +178,7 @@ export function Freelancing({ currentTab, onNavigate }: any) {
                  </button>
               </div>
 
-              <div className="flex justify-between items-start mb-4">
+              <div className="flex justify-between items-start mb-4 pr-20">
                 <div
                   className={`p-3 rounded-2xl ${isAdvanced ? "bg-slate-900 text-violet-400" : "bg-indigo-50 text-indigo-600"}`}
                 >
@@ -477,6 +477,20 @@ function ContractsTab({
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editService, setEditService] = useState<any>(null);
 
+  const handleLogHours = async (service: any) => {
+    const hours = Number(window.prompt(`Hours to add to ${service.name}:`));
+    if (!hours || hours <= 0) return;
+    const description = window.prompt("What did you work on?") || "Manual contract hours";
+    try {
+      const response = await fetch("/api/freelancing/time_logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ business_id: businessId, service_id: service.id, date: new Date().toISOString().split("T")[0], seconds: Math.round(hours * 3600), description }),
+      });
+      if (response.ok) fetchAll();
+    } catch (e) {}
+  };
+
   const handleAdd = async () => {
     try {
       await fetch("/api/freelancing/services", {
@@ -531,7 +545,7 @@ function ContractsTab({
             key={s.id}
             className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"} relative group`}
           >
-            <div className="absolute top-4 right-4 flex opacity-0 group-hover:opacity-100 transition-opacity gap-2">
+            <div className="absolute top-4 right-4 z-10 flex opacity-0 group-hover:opacity-100 transition-opacity gap-2">
                <button onClick={() => { setEditService(s); setIsEditOpen(true); }} className={`p-2 rounded-lg ${isAdvanced ? "hover:bg-slate-700" : "hover:bg-slate-100"}`}>
                  <MoreHorizontal size={16} className="text-slate-500" />
                </button>
@@ -540,7 +554,7 @@ function ContractsTab({
                </button>
             </div>
             
-            <div className="flex justify-between items-start mb-4">
+            <div className="flex justify-between items-start mb-4 pr-20">
               <span
                 className={`text-[10px] font-bold uppercase px-2 py-1 rounded-md ${isAdvanced ? "bg-slate-900 text-slate-400" : "bg-slate-100 text-slate-500"}`}
               >
@@ -562,6 +576,10 @@ function ContractsTab({
             {s.type === "Hourly" && (
               <p className="font-mono font-bold text-lg">₱{s.rate}/hr</p>
             )}
+            <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between gap-3">
+              <span className="text-xs font-bold text-slate-500">{Number(s.hours_logged || 0).toFixed(1)}h logged</span>
+              <button onClick={() => handleLogHours(s)} className={`px-3 py-2 rounded-xl text-xs font-bold ${isAdvanced ? "bg-slate-900 hover:bg-slate-700 text-violet-400" : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700"}`}>Log hours</button>
+            </div>
           </div>
         ))}
         {services.length === 0 && (
@@ -756,7 +774,7 @@ function InvoicesTab({
       fetchAll();
     } catch (e) {}
   };
-  
+
   const handleDelete = async (id: number) => {
     if (!confirm('Are you sure you want to delete this invoice?')) return;
     try {
@@ -1042,10 +1060,18 @@ function TimeLogsTab({
   fetchAll,
   isAdvanced,
 }: any) {
+  const timerStorageKey = `fingent-freelance-timer-${businessId}`;
   const [activeTimer, setActiveTimer] = useState<{
     service_id: string;
     start: number;
-  } | null>(null);
+  } | null>(() => {
+    try {
+      const saved = localStorage.getItem(`fingent-freelance-timer-${businessId}`);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [elapsed, setElapsed] = useState(0);
   const [timerServiceId, setTimerServiceId] = useState("");
   
@@ -1058,6 +1084,7 @@ function TimeLogsTab({
   useEffect(() => {
     let interval: any;
     if (activeTimer) {
+      setElapsed(Math.max(0, Math.floor((Date.now() - activeTimer.start) / 1000)));
       interval = setInterval(() => {
         setElapsed(Math.floor((Date.now() - activeTimer.start) / 1000));
       }, 1000);
@@ -1065,13 +1092,21 @@ function TimeLogsTab({
     return () => clearInterval(interval);
   }, [activeTimer]);
 
+  useEffect(() => {
+    if (activeTimer) {
+      localStorage.setItem(timerStorageKey, JSON.stringify(activeTimer));
+    } else {
+      localStorage.removeItem(timerStorageKey);
+    }
+  }, [activeTimer, timerStorageKey]);
+
   const startTimer = (serviceId: string) => {
     setActiveTimer({ service_id: serviceId, start: Date.now() });
+    setElapsed(0);
   };
 
   useEffect(() => {
-    const firstHourlyService = services.find((service: any) => service.type === "Hourly");
-    if (!timerServiceId && firstHourlyService) setTimerServiceId(String(firstHourlyService.id));
+    if (!timerServiceId && services.length > 0) setTimerServiceId(String(services[0].id));
   }, [services, timerServiceId]);
 
   const stopTimer = () => {
@@ -1081,6 +1116,8 @@ function TimeLogsTab({
   
   const saveTimer = async () => {
     if (!activeTimer) return;
+    const seconds = Math.max(elapsed, Math.floor((Date.now() - activeTimer.start) / 1000));
+    if (seconds <= 0) return;
     try {
       await fetch("/api/freelancing/time_logs", {
         method: "POST",
@@ -1089,7 +1126,7 @@ function TimeLogsTab({
           business_id: businessId,
           service_id: activeTimer.service_id,
           date: new Date().toISOString().split("T")[0],
-          seconds: elapsed,
+          seconds,
           description: logMessage || "Session",
         }),
       });
@@ -1173,17 +1210,17 @@ function TimeLogsTab({
                 onChange={(event) => setTimerServiceId(event.target.value)}
                 className={`w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700 text-white" : "bg-slate-50 border-slate-200"}`}
               >
-                {services
-                  .filter((s: any) => s.type === "Hourly")
-                  .map((s: any) => (
+                <option value="">Choose a contract</option>
+                {services.map((s: any) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
                     </option>
                   ))}
               </select>
               <button
+                disabled={!timerServiceId}
                 onClick={() => timerServiceId && startTimer(timerServiceId)}
-                className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 ${isAdvanced ? "bg-emerald-600 text-white hover:bg-emerald-700" : "bg-emerald-500 text-white hover:bg-emerald-600"}`}
+                className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 ${isAdvanced ? "bg-emerald-600 text-white hover:bg-emerald-700" : "bg-emerald-500 text-white hover:bg-emerald-600"}`}
               >
                 <Play fill="currentColor" size={16} /> Start Timer
               </button>
