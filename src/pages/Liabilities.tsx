@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 
-import { Receipt, CreditCard, ShoppingBag, Home, Zap, X, RefreshCw, Landmark, ArrowUpRight, ArrowRight, CheckCircle2, History } from 'lucide-react';
+import { Receipt, CreditCard, ShoppingBag, Home, Zap, X, RefreshCw, Landmark, ArrowUpRight, ArrowRight, CheckCircle2, History, Download, FileText } from 'lucide-react';
+import { exportCsv, exportPdf } from '../lib/export';
 
 export function Liabilities({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
   const { themeMode } = useStore();
@@ -275,10 +276,11 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
             </div>
 
             <div className="mt-8">
-              <button 
+              <button onClick={async () => { if (selectedLiability.isCardStatement) return; const response = await fetch(`/api/liabilities/${selectedLiability.id}/pay`, { method: 'PUT' }); if (response.ok) { setSelectedLiability({ ...selectedLiability, status: 'Paid' }); triggerRefresh(); } }}
+                disabled={selectedLiability.isCardStatement || selectedLiability.status === 'Paid'}
                 className={`w-full py-4 rounded-xl font-bold transition-colors ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white'}`}
               >
-                Mark as Paid
+                {selectedLiability.isCardStatement ? 'Managed by Card Account' : selectedLiability.status === 'Paid' ? 'Paid' : 'Mark as Paid'}
               </button>
             </div>
           </div>
@@ -311,6 +313,8 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
           <p className="text-slate-500 dark:text-slate-400 mt-1">{isAll ? 'Track your expenses, bills, and debts' : `Manage your ${activeCategoryName.toLowerCase()}`}</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => exportCsv('liabilities', filteredData.map(item => ({ Name: item.name || item.title, Type: item.type, Provider: item.provider || '', DueDate: item.date || '', Status: item.status || 'Unpaid', Amount: item.amount })))} className={`p-2 rounded-xl border ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'border-slate-200 hover:bg-slate-50 text-slate-600'}`} title="Export CSV"><Download size={16} /></button>
+          <button onClick={() => exportPdf('Liabilities Summary', filteredData.map(item => ({ Name: item.name || item.title, Type: item.type, Provider: item.provider || '', DueDate: item.date || '', Status: item.status || 'Unpaid', Amount: item.amount })), 'FinGent liabilities, bills, credits, debts, and installments')} className={`p-2 rounded-xl border ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'border-slate-200 hover:bg-slate-50 text-slate-600'}`} title="Export PDF"><FileText size={16} /></button>
           {!isAll && (
             <button 
               onClick={() => onNavigate?.('liabilities')}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import { CreditCard, Landmark, Wallet, Banknote, Plus, Minus, X, Edit2, Trash2, History, ArrowUpRight, ArrowDownRight, Calendar, FileText, Check } from 'lucide-react';
+import { CreditCard, Landmark, Wallet, Banknote, Plus, Minus, X, Edit2, Trash2, History, ArrowUpRight, ArrowDownRight, Calendar, FileText, Check, Download } from 'lucide-react';
+import { exportCsv, exportPdf } from '../lib/export';
 
 const getIconForType = (type: string) => {
   if (type.toLowerCase() === 'card' || type.toLowerCase() === 'credit') return CreditCard;
@@ -259,6 +260,10 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
   const totalExpenses30d = filteredAccounts.reduce((acc, curr) => {
     return acc + (curr.transactions || []).filter((t: any) => t.type === 'expense' && new Date(t.date) >= thirtyDaysAgo).reduce((s: number, t: any) => s + t.amount, 0);
   }, 0);
+  const accountExportRows = filteredAccounts.flatMap((account: any) => [
+    { Record: 'Account', Account: account.name, Type: account.type, Balance: account.balance, Purpose: account.purpose || '' },
+    ...(account.transactions || []).map((transaction: any) => ({ Record: 'Transaction', Account: account.name, Date: transaction.date, Type: transaction.type, Category: transaction.category, Description: transaction.title, Notes: transaction.notes || '', Amount: transaction.amount }))
+  ]);
 
   if (selectedAccount) {
     return (
@@ -271,6 +276,8 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
             <ArrowUpRight className="w-4 h-4 rotate-[-135deg]" /> Back
           </button>
           <div className="flex gap-2">
+            <button onClick={() => exportCsv(`${selectedAccount.name}-transactions`, (selectedAccount.transactions || []).map((transaction: any) => ({ Date: transaction.date, Type: transaction.type, Category: transaction.category, Description: transaction.title, Notes: transaction.notes || '', Amount: transaction.amount })))} className={`px-3 py-2 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 shadow-sm'}`}>CSV</button>
+            <button onClick={() => exportPdf(`${selectedAccount.name} Transaction History`, (selectedAccount.transactions || []).map((transaction: any) => ({ Date: transaction.date, Type: transaction.type, Category: transaction.category, Description: transaction.title, Notes: transaction.notes || '', Amount: transaction.amount })), `Account balance: PHP ${Number(selectedAccount.balance || 0).toLocaleString()}`)} className={`px-3 py-2 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 shadow-sm'}`}>PDF</button>
             <button onClick={() => {
               setEditingAccount(selectedAccount);
               setNewAccount({
@@ -420,6 +427,8 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
           <p className="text-slate-500 dark:text-slate-400 mt-1">Manage your connected financial accounts</p>
         </div>
         <div className="flex gap-2">
+        <button onClick={() => exportCsv('accounts-and-transactions', accountExportRows)} className={`px-3 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 border transition-colors ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'}`}><Download size={15} /> CSV</button>
+        <button onClick={() => exportPdf('Accounts and Transactions', accountExportRows, 'FinGent account balances and transaction history')} className={`px-3 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 border transition-colors ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'}`}><FileText size={15} /> PDF</button>
         <button onClick={handleAccrueInterest} className={`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 border transition-colors ${isAdvanced ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'}`}>
              Simulate Next Day (Accrue Interest)
         </button>

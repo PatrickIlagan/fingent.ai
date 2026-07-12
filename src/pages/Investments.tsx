@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
-import { Plus, X, ArrowUpRight, History, Trash2, Edit2, TrendingUp, TrendingDown, Activity, RefreshCw } from 'lucide-react';
+import { Plus, X, ArrowUpRight, History, Trash2, Edit2, TrendingUp, TrendingDown, Activity, RefreshCw, Download, FileText } from 'lucide-react';
+import { exportCsv, exportPdf } from '../lib/export';
 
 const getSymbol = (currency?: string) => {
   if (currency === 'USD') return '$';
@@ -551,6 +552,8 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
           <p className="text-slate-500 dark:text-slate-400 mt-1">Track your wealth and assets</p>
         </div>
         <div className="flex gap-2 items-center">
+          <button onClick={() => exportCsv('investment-portfolio', filteredInvestments.map(inv => ({ Name: inv.name, Type: inv.type, Ticker: inv.ticker || '', Platform: inv.platform || '', Invested: inv.invested, CurrentValue: inv.value, Shares: inv.shares || '', Currency: inv.currency })))} className={`p-2 rounded-xl border ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'border-slate-200 hover:bg-slate-50 text-slate-600'}`} title="Export CSV"><Download size={16} /></button>
+          <button onClick={() => exportPdf('Investment Portfolio', filteredInvestments.map(inv => ({ Name: inv.name, Type: inv.type, Ticker: inv.ticker || '', Platform: inv.platform || '', Invested: inv.invested, CurrentValue: inv.value, Shares: inv.shares || '', Currency: inv.currency })), `Displayed in ${displayCurrency}`)} className={`p-2 rounded-xl border ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'border-slate-200 hover:bg-slate-50 text-slate-600'}`} title="Export PDF"><FileText size={16} /></button>
           {displayCurrency === 'PHP' && exchangeRates['PHP'] && (
             <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border ${isAdvanced ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}>
               <Activity size={14} className="text-emerald-500" />
