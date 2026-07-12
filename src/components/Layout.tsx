@@ -3,6 +3,7 @@ import { Home, Calendar, Briefcase, Bot, PieChart, Settings, CreditCard, Clock, 
 import { useStore } from '../store/useStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { exportEverythingWorkbook } from '../lib/workbookExport';
+import { exportEverythingPdfStatement } from '../lib/export';
 
 export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any) {
   const { themeMode, setThemeMode, selectedBusiness, setSelectedBusiness, selectedFreelance, setSelectedFreelance } = useStore();
@@ -232,8 +233,8 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
           <button onClick={() => exportEverythingWorkbook().catch(console.error)} className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl font-bold text-sm transition-all shadow-sm ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20'}`}>
             <FileSpreadsheet size={18} /> Export Excel Workbook
           </button>
-          <button onClick={() => window.print()} className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-xs transition-all ${isAdvanced ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200' : 'text-emerald-700 hover:bg-emerald-50'}`}>
-            <Download size={15} /> Print current view / Save PDF
+          <button onClick={() => exportEverythingPdfStatement().catch(console.error)} className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-xs transition-all ${isAdvanced ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200' : 'text-emerald-700 hover:bg-emerald-50'}`}>
+            <Download size={15} /> Export PDF Statement
           </button>
         </div>
       </aside>
