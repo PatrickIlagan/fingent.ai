@@ -17,12 +17,26 @@ export type OperationDraft = {
   redactedCommand: string;
 };
 
+export type InvestmentDraft = {
+  type: 'Stocks' | 'Cryptos';
+  name: string;
+  ticker: string;
+  invested: number;
+  current_value: number;
+  shares: number | null;
+  avg_price: number | null;
+  currency: 'USD' | 'PHP';
+  platform: string;
+  redactedCommand: string;
+};
+
 export type CopilotReply = {
   text: string;
   actions?: CopilotAction[];
   navigateNow?: string;
   transaction?: TransactionDraft;
   operation?: OperationDraft;
+  investment?: InvestmentDraft;
 };
 
 const routes = [
@@ -128,6 +142,34 @@ function amountFrom(value: string) {
   return Number.isFinite(amount) ? amount : 0;
 }
 
+function parseInvestmentCommand(message: string): InvestmentDraft | null {
+  if (!/\b(bought|buy|purchased|purchase|invested|invest)\b/i.test(message)) return null;
+  const tickerMatch = message.match(/\b(?:on|of|in)\s+([a-z][a-z0-9.-]{0,9})\b/i);
+  if (!tickerMatch) return null;
+  const ticker = tickerMatch[1].toUpperCase();
+  if (['CASH', 'FOOD', 'GROCERIES', 'THIS', 'THAT', 'IT'].includes(ticker)) return null;
+  const isUsd = /\b(?:usd|dollars?)\b|\$/i.test(message);
+  const amount = amountFrom(message);
+  if (!isUsd || amount <= 0) return null;
+  const isCrypto = /\b(?:crypto|bitcoin|ethereum|btc|eth|sol)\b/i.test(message) || ['BTC', 'ETH', 'SOL'].includes(ticker);
+  const shareMatch = message.match(/\b(\d+(?:\.\d+)?)\s+shares?\b/i);
+  const priceMatch = message.match(/\b(?:at|@)\s*(?:\$|usd\s*)?(\d[\d,]*(?:\.\d{1,2})?)/i);
+  const shares = shareMatch ? Number(shareMatch[1]) : null;
+  const avgPrice = priceMatch ? Number(priceMatch[1].replace(/,/g, '')) : shares ? amount / shares : null;
+  return {
+    type: isCrypto ? 'Cryptos' : 'Stocks',
+    name: ticker,
+    ticker,
+    invested: amount,
+    current_value: amount,
+    shares,
+    avg_price: avgPrice,
+    currency: 'USD',
+    platform: '',
+    redactedCommand: 'Action: CREATE [INVESTMENT] ticker [TICKER], amount [AMOUNT], currency [CURRENCY].'
+  };
+}
+
 function operation(kind: OperationDraft['kind'], label: string, tab: string, payload: Record<string, unknown>): OperationDraft {
   return { kind, label, tab, payload, redactedCommand: 'Action: CREATE [' + kind.toUpperCase() + '] using [PRIVATE FIELDS].' };
 }
@@ -168,6 +210,14 @@ export function runLocalCopilot(message: string): CopilotReply {
   const trimmed = message.trim();
   const lower = trimmed.toLowerCase();
   const route = matchedRoute(trimmed);
+
+  const investment = parseInvestmentCommand(trimmed);
+  if (investment) {
+    return {
+      text: 'I prepared a private ' + investment.type.toLowerCase().replace(/s$/, '') + ' purchase draft for ' + investment.ticker + '. I interpreted the amount as a USD total investment' + (investment.shares ? ' across ' + investment.shares + ' shares' : '') + '. Review it, then explicitly save it.',
+      investment
+    };
+  }
 
   const transaction = parseTransactionCommand(trimmed);
   if (transaction) {
