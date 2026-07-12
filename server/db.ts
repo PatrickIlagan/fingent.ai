@@ -133,6 +133,16 @@ async function initDb(db: any) {
       skills_needed TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS career_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      due_date TEXT,
+      priority TEXT DEFAULT 'Medium',
+      status TEXT DEFAULT 'Open',
+      notes TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS calendar_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       business_id INTEGER,

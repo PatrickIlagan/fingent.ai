@@ -327,6 +327,53 @@ To run FinGent as a desktop application:
      }
   });
 
+  app.get("/api/career/tasks", async (_req, res) => {
+    try {
+      const db = await getDb();
+      res.json(await db.all("SELECT * FROM career_tasks ORDER BY status ASC, due_date ASC, id DESC"));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/career/tasks", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { title, due_date, priority, notes } = req.body;
+      const result = await db.run(
+        "INSERT INTO career_tasks (title, due_date, priority, notes) VALUES (?, ?, ?, ?)",
+        [title, due_date || null, priority || 'Medium', notes || '']
+      );
+      res.json({ id: result.lastInsertRowid });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/career/tasks/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { title, due_date, priority, status, notes } = req.body;
+      await db.run(
+        "UPDATE career_tasks SET title = ?, due_date = ?, priority = ?, status = ?, notes = ? WHERE id = ?",
+        [title, due_date || null, priority || 'Medium', status || 'Open', notes || '', req.params.id]
+      );
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/career/tasks/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      await db.run("DELETE FROM career_tasks WHERE id = ?", [req.params.id]);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/accounts", async (req, res) => {
     try {
       const db = await getDb();

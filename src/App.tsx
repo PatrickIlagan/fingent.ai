@@ -23,7 +23,7 @@ export default function App() {
         {currentTab === 'home' && <Home onNavigate={setCurrentTab} toggleChat={() => setIsChatOpen(true)} />}
         {currentTab === 'calendar' && <Calendar />}
         {currentTab.startsWith('investments') && <Investments category={currentTab.split('-').slice(1).join('-')} onNavigate={setCurrentTab} />}
-        {currentTab === 'career' && <Career />}
+        {currentTab.startsWith('career') && <Career category={currentTab.split('-').slice(1).join('-')} onNavigate={setCurrentTab} />}
         {currentTab.startsWith('business') && <Business currentTab={currentTab} onNavigate={setCurrentTab} />}
         {(currentTab === 'freelancing' || currentTab.startsWith('freelance-')) && <Freelancing currentTab={currentTab} onNavigate={setCurrentTab} />}
         {currentTab === 'taxes' && <Taxes />}

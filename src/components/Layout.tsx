@@ -37,7 +37,12 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
       label: 'Investments',
       subItems: ['Real Estate', 'Stocks', 'Cryptos', 'Others']
     },
-    { id: 'career', icon: Briefcase, label: 'Career' },
+    {
+      id: 'career',
+      icon: Briefcase,
+      label: 'Career',
+      subItems: ['Overview', 'Calendar', 'Tasks', 'Upskilling', 'Income']
+    },
     { id: 'business', icon: Building, label: 'Business' },
     { id: 'freelancing', icon: Briefcase, label: 'Freelancing' },
     { id: 'taxes', icon: FileText, label: 'Taxes' },

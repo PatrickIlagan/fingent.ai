@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { Briefcase, CheckCircle2, ChevronRight, TrendingUp, Edit2, Check, X, CalendarDays, Plus, Target } from 'lucide-react';
 
-export function Career() {
+export function Career({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
   const { themeMode } = useStore();
   const isAdvanced = themeMode === 'advanced';
 
@@ -23,8 +23,12 @@ export function Career() {
   const [selectedFlowId, setSelectedFlowId] = useState<number | null>(null);
   const [incomeForm, setIncomeForm] = useState({ name: '', amount: '', date: '', is_recurring: false, budget_preset_id: '', account_id: '' });
   const [calendarEvents, setCalendarEvents] = useState<any[]>([]);
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [isTaskOpen, setIsTaskOpen] = useState(false);
+  const [taskForm, setTaskForm] = useState({ title: '', due_date: '', priority: 'Medium', notes: '' });
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({ name: '', date: new Date().toISOString().split('T')[0], type: 'Career meeting' });
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
 
   useEffect(() => {
      Promise.all([
@@ -32,8 +36,9 @@ export function Career() {
         fetch('/api/income_flows'),
         fetch('/api/budget_presets'),
         fetch('/api/accounts'),
-        fetch('/api/calendar_events')
-     ]).then(async ([c, i, b, a, events]) => {
+        fetch('/api/calendar_events'),
+        fetch('/api/career/tasks')
+     ]).then(async ([c, i, b, a, events, taskResponse]) => {
         const data = await c.json().catch(()=>null);
         if (data) {
            setCareer(data);
@@ -44,6 +49,7 @@ export function Career() {
         const bRes = await b.json().catch(()=>[]); setBudgetPresets(Array.isArray(bRes) ? bRes : []);
         const aRes = await a.json().catch(()=>[]); setAccounts(Array.isArray(aRes) ? aRes : []);
         const eventRes = await events.json().catch(()=>[]); setCalendarEvents(Array.isArray(eventRes) ? eventRes : []);
+        const taskRes = await taskResponse.json().catch(()=>[]); setTasks(Array.isArray(taskRes) ? taskRes : []);
      });
   }, []);
   
@@ -113,6 +119,11 @@ export function Career() {
     effort: event.provider || 'Career event',
     tags: ['Calendar', 'Career']
   }));
+  const calendarDays = Array.from({ length: new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate() }, (_, index) => new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), index + 1));
+  const leadingCalendarDays = Array.from({ length: calendarDays[0]?.getDay() || 0 }, () => null);
+  const calendarCells = [...leadingCalendarDays, ...calendarDays];
+  const toDateKey = (date: Date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
+  const eventsForDate = (date: Date) => careerEvents.filter((event) => String(event.date).slice(0, 10) === toDateKey(date));
 
   const scheduleCareerEvent = async () => {
     if (!scheduleForm.name.trim() || !scheduleForm.date) return;
@@ -126,6 +137,30 @@ export function Career() {
     setCalendarEvents((items) => [...items, { id: created.id, name: scheduleForm.name.trim(), type: 'career', date: scheduleForm.date, color: 'violet', provider: scheduleForm.type, source: 'career' }]);
     setScheduleForm({ name: '', date: new Date().toISOString().split('T')[0], type: 'Career meeting' });
     setIsScheduleOpen(false);
+  };
+
+  const saveTask = async () => {
+    if (!taskForm.title.trim()) return;
+    const response = await fetch('/api/career/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(taskForm)
+    });
+    if (!response.ok) return;
+    const created = await response.json();
+    setTasks((items) => [{ id: created.id, ...taskForm, status: 'Open' }, ...items]);
+    setTaskForm({ title: '', due_date: '', priority: 'Medium', notes: '' });
+    setIsTaskOpen(false);
+  };
+
+  const updateTaskStatus = async (task: any, status: string) => {
+    const updated = { ...task, status };
+    const response = await fetch(`/api/career/tasks/${task.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated)
+    });
+    if (response.ok) setTasks((items) => items.map((item) => item.id === task.id ? updated : item));
   };
 
   const renderIncomeBuilder = () => (
@@ -310,6 +345,26 @@ export function Career() {
   if (incomeViewMode === 'add') return renderIncomeBuilder();
   if (incomeViewMode === 'details') return renderIncomeDetails();
 
+  if (category === 'calendar') return (
+    <div className="space-y-6 pb-10">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4"><div><h2 className="text-3xl font-black">Career Calendar</h2><p className="text-slate-500 mt-1">Plan interviews, 1:1s, reviews, networking, and focused learning time.</p></div><button onClick={() => setIsScheduleOpen(true)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm ${isAdvanced ? 'bg-violet-600 text-white' : 'bg-slate-900 text-white'}`}><Plus size={16} /> Schedule date</button></div>
+      <div className={`rounded-3xl border p-5 md:p-7 ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}><div className="mb-6 flex items-center justify-between"><button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="px-3 py-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700">Previous</button><h3 className="text-xl font-black">{calendarMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h3><button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="px-3 py-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700">Next</button></div><div className="grid grid-cols-7 gap-2 text-center text-xs font-bold text-slate-400">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(day => <span key={day}>{day}</span>)}</div><div className="mt-3 grid grid-cols-7 gap-2">{calendarCells.map((day, index) => !day ? <span key={`empty-${index}`} className="min-h-20" /> : (() => { const dayEvents = eventsForDate(day); const isToday = toDateKey(day) === toDateKey(new Date()); return <button key={toDateKey(day)} onClick={() => { setScheduleForm({ ...scheduleForm, date: toDateKey(day) }); setIsScheduleOpen(true); }} className={`min-h-20 rounded-2xl border p-2 text-left transition-colors ${isToday ? (isAdvanced ? 'border-violet-500 bg-violet-500/15' : 'border-emerald-500 bg-emerald-50') : (isAdvanced ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50')}`}><span className="font-black">{day.getDate()}</span>{dayEvents.slice(0, 2).map(event => <span key={event.id} className={`mt-1 block truncate rounded px-1.5 py-0.5 text-[10px] font-bold ${isAdvanced ? 'bg-violet-500/20 text-violet-300' : 'bg-violet-100 text-violet-700'}`}>{event.name}</span>)}</button>; })())}</div></div>
+      {isScheduleOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"><div className={`w-full max-w-md rounded-3xl p-6 ${isAdvanced ? 'bg-slate-800' : 'bg-white'}`}><div className="flex justify-between items-center mb-5"><h3 className="text-xl font-black">Schedule career date</h3><button onClick={() => setIsScheduleOpen(false)}><X size={20} /></button></div><div className="space-y-4"><input value={scheduleForm.name} onChange={(event) => setScheduleForm({ ...scheduleForm, name: event.target.value })} placeholder="Event title" className={`w-full rounded-xl border p-3 ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`} /><input type="date" value={scheduleForm.date} onChange={(event) => setScheduleForm({ ...scheduleForm, date: event.target.value })} className={`w-full rounded-xl border p-3 ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`} /><select value={scheduleForm.type} onChange={(event) => setScheduleForm({ ...scheduleForm, type: event.target.value })} className={`w-full rounded-xl border p-3 ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}><option>Career meeting</option><option>Interview</option><option>Performance review</option><option>Study block</option><option>Networking</option></select></div><button onClick={scheduleCareerEvent} className={`mt-6 w-full rounded-xl py-3 font-bold text-white ${isAdvanced ? 'bg-violet-600' : 'bg-slate-900'}`}>Add to calendar</button></div></div>}
+    </div>
+  );
+
+  if (category === 'tasks') return (
+    <div className="space-y-6 pb-10"><div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4"><div><h2 className="text-3xl font-black">Career Tasks</h2><p className="text-slate-500 mt-1">Turn your next career move into a focused, manageable plan.</p></div><button onClick={() => setIsTaskOpen(true)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm ${isAdvanced ? 'bg-violet-600 text-white' : 'bg-slate-900 text-white'}`}><Plus size={16} /> Add task</button></div><div className="grid lg:grid-cols-2 gap-4">{tasks.length === 0 ? <div className={`lg:col-span-2 rounded-3xl border border-dashed p-10 text-center text-slate-500 ${isAdvanced ? 'border-slate-700' : 'border-slate-200'}`}>No career tasks yet. Add an application, portfolio update, study goal, or follow-up.</div> : tasks.map(task => <div key={task.id} className={`rounded-3xl border p-5 ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}><div className="flex items-start gap-3"><button onClick={() => updateTaskStatus(task, task.status === 'Done' ? 'Open' : 'Done')} className={`mt-0.5 h-6 w-6 rounded-lg border-2 ${task.status === 'Done' ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300 dark:border-slate-600'}`}>{task.status === 'Done' && <Check size={14} />}</button><div className="flex-1"><div className="flex justify-between gap-3"><p className={`font-black ${task.status === 'Done' ? 'line-through text-slate-400' : ''}`}>{task.title}</p><span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-lg ${task.priority === 'High' ? 'bg-rose-100 text-rose-600' : task.priority === 'Low' ? 'bg-slate-100 text-slate-500' : 'bg-amber-100 text-amber-700'}`}>{task.priority}</span></div>{task.notes && <p className="mt-2 text-sm text-slate-500">{task.notes}</p>}<p className="mt-3 text-xs font-bold text-slate-400">{task.due_date ? `Due ${new Date(task.due_date).toLocaleDateString()}` : 'No due date'}</p></div><button onClick={async () => { await fetch(`/api/career/tasks/${task.id}`, { method: 'DELETE' }); setTasks((items) => items.filter((item) => item.id !== task.id)); }} className="text-slate-400 hover:text-rose-500"><X size={16} /></button></div></div>)}</div>{isTaskOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"><div className={`w-full max-w-md rounded-3xl p-6 ${isAdvanced ? 'bg-slate-800' : 'bg-white'}`}><div className="flex justify-between items-center mb-5"><h3 className="text-xl font-black">Add career task</h3><button onClick={() => setIsTaskOpen(false)}><X size={20} /></button></div><div className="space-y-4"><input value={taskForm.title} onChange={(event) => setTaskForm({ ...taskForm, title: event.target.value })} placeholder="e.g. Update portfolio case study" className={`w-full rounded-xl border p-3 ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`} /><div className="grid grid-cols-2 gap-3"><input type="date" value={taskForm.due_date} onChange={(event) => setTaskForm({ ...taskForm, due_date: event.target.value })} className={`rounded-xl border p-3 ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`} /><select value={taskForm.priority} onChange={(event) => setTaskForm({ ...taskForm, priority: event.target.value })} className={`rounded-xl border p-3 ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}><option>High</option><option>Medium</option><option>Low</option></select></div><textarea rows={3} value={taskForm.notes} onChange={(event) => setTaskForm({ ...taskForm, notes: event.target.value })} placeholder="Notes (optional)" className={`w-full rounded-xl border p-3 ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`} /></div><button onClick={saveTask} className={`mt-6 w-full rounded-xl py-3 font-bold text-white ${isAdvanced ? 'bg-violet-600' : 'bg-slate-900'}`}>Save task</button></div></div>}</div>
+  );
+
+  if (category === 'upskilling') return (
+    <div className="space-y-6 pb-10"><div><h2 className="text-3xl font-black">Upskilling Plan</h2><p className="text-slate-500 mt-1">Track the skills that close the gap between your current and target role.</p></div><div className={`rounded-3xl border p-6 md:p-8 ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}><div className="flex justify-between items-center mb-5"><h3 className="font-black text-lg">Skill progress</h3><span className="text-sm font-bold text-slate-500">{completedSkills}/{skills.length} mastered</span></div><form onSubmit={handleAddSkill} className="mb-5 flex gap-2"><input value={newSkill} onChange={(event) => setNewSkill(event.target.value)} placeholder="Add a skill, certification, or portfolio milestone" className={`flex-1 rounded-xl border px-4 py-3 outline-none ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`} /><button className={`px-4 py-3 rounded-xl font-bold text-white ${isAdvanced ? 'bg-violet-600' : 'bg-slate-900'}`}>Add</button></form><div className="grid md:grid-cols-2 gap-3">{skills.length === 0 ? <p className="text-sm text-slate-500">No skills yet—start with one capability your target role needs.</p> : skills.map(skill => <div key={skill.id} onClick={() => toggleSkill(skill.id)} className={`flex cursor-pointer items-center gap-3 rounded-2xl border p-4 ${skill.completed ? (isAdvanced ? 'bg-violet-500/15 border-violet-500/30' : 'bg-emerald-50 border-emerald-200') : (isAdvanced ? 'border-slate-700 bg-slate-900/40' : 'border-slate-100 bg-white')}`}><span className={`flex h-6 w-6 items-center justify-center rounded-lg border-2 ${skill.completed ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300 dark:border-slate-600'}`}>{skill.completed && <Check size={14} />}</span><span className="flex-1 font-bold">{skill.name}</span><button onClick={(event) => deleteSkill(event, skill.id)} className="text-slate-400 hover:text-rose-500"><X size={16} /></button></div>)}</div></div></div>
+  );
+
+  if (category === 'income') return (
+    <div className="space-y-6 pb-10"><div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4"><div><h2 className="text-3xl font-black">Income Flows</h2><p className="text-slate-500 mt-1">Track salary, projects, recurring income, and budgeting automations.</p></div><button onClick={() => setIncomeViewMode('add')} className={`px-4 py-2.5 rounded-xl font-bold text-sm text-white ${isAdvanced ? 'bg-violet-600' : 'bg-slate-900'}`}><Plus className="inline mr-2" size={16} />Add income</button></div><div className="grid lg:grid-cols-2 gap-4">{dbIncomeFlows.length === 0 ? <p className="text-slate-500">No income flows yet.</p> : dbIncomeFlows.map(flow => <button key={flow.id} onClick={() => { setSelectedFlowId(flow.id); setIncomeViewMode('details'); }} className={`text-left rounded-3xl border p-5 ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}><div className="flex justify-between"><div><p className="font-black">{flow.name}</p><p className="mt-1 text-sm text-slate-500">{flow.is_recurring ? 'Recurring monthly' : 'One-time'} · {new Date(flow.date).toLocaleDateString()}</p></div><p className="font-black text-emerald-500">₱{Number(flow.amount || 0).toLocaleString()}</p></div></button>)}</div></div>
+  );
+
   return (
     <div className="space-y-6 pb-10">
       <div className="flex justify-between items-end">
@@ -317,14 +372,14 @@ export function Career() {
           <h2 className="text-3xl font-black">Career Command Center</h2>
           <p className="text-slate-500 dark:text-slate-400 mt-1">A practical view of your next role, skills, income, and important career dates.</p>
         </div>
-        <button onClick={() => setIsScheduleOpen(true)} className={`hidden sm:flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}><CalendarDays size={16} /> Schedule</button>
+        <div className="hidden sm:flex items-center gap-2"><button onClick={() => setIsEditing(true)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold border ${isAdvanced ? 'border-slate-700 hover:bg-slate-800 text-slate-200' : 'border-slate-200 hover:bg-slate-50 text-slate-700'}`}><Edit2 size={16} /> Profile</button><button onClick={() => setIsScheduleOpen(true)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}><CalendarDays size={16} /> Schedule</button></div>
       </div>
 
-      <div className={`relative overflow-hidden rounded-[2rem] p-7 md:p-9 border shadow-sm ${isAdvanced ? 'bg-gradient-to-br from-violet-950 via-slate-800 to-slate-900 border-violet-500/30' : 'bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 border-emerald-400 text-white'}`}>
+      <div className={`relative overflow-hidden rounded-[2rem] p-6 md:p-7 border shadow-sm ${isAdvanced ? 'bg-gradient-to-br from-violet-950 via-slate-800 to-slate-900 border-violet-500/30' : 'bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 border-emerald-400 text-white'}`}>
         <div className="relative z-10 grid lg:grid-cols-[1.3fr_.7fr] gap-8">
           <div>
             <p className={`text-xs font-black uppercase tracking-[0.2em] ${isAdvanced ? 'text-violet-300' : 'text-emerald-50'}`}>Professional trajectory</p>
-            <div className="mt-4 flex flex-wrap items-center gap-3"><h3 className="text-3xl md:text-4xl font-black">{career.current_role || 'Set your current role'}</h3><ChevronRight className={isAdvanced ? 'text-violet-300' : 'text-emerald-50'} /><h3 className="text-3xl md:text-4xl font-black">{career.target_role || 'Choose a target role'}</h3></div>
+            <div className="mt-3 flex flex-wrap items-center gap-3"><h3 className="text-2xl md:text-3xl font-black">{career.current_role || 'Set your current role'}</h3><ChevronRight className={isAdvanced ? 'text-violet-300' : 'text-emerald-50'} /><h3 className="text-2xl md:text-3xl font-black">{career.target_role || 'Choose a target role'}</h3></div>
             <p className={`mt-4 max-w-2xl text-sm md:text-base ${isAdvanced ? 'text-slate-300' : 'text-emerald-50'}`}>Focus on the skills and meetings that move you toward your next meaningful career step—not a generic checklist.</p>
             <div className={`mt-7 h-3 overflow-hidden rounded-full ${isAdvanced ? 'bg-slate-700' : 'bg-white/25'}`}><div className={`h-full rounded-full ${isAdvanced ? 'bg-violet-400' : 'bg-white'}`} style={{ width: `${progress}%` }} /></div>
             <div className="mt-2 flex justify-between text-xs font-bold"><span>{progress}% salary trajectory</span><span>{completedSkills}/{skills.length} skills mastered</span></div>
@@ -336,12 +391,12 @@ export function Career() {
             <div className={`mt-5 pt-5 border-t ${isAdvanced ? 'border-slate-700' : 'border-white/20'}`}><p className={`text-xs font-bold ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Target monthly compensation</p><p className="mt-1 text-xl font-black">₱{targetSal.toLocaleString()}</p></div>
           </div>
         </div>
-        <Target className={`absolute -right-6 -bottom-8 h-44 w-44 opacity-15 ${isAdvanced ? 'text-violet-300' : 'text-white'}`} />
+        <Target className={`absolute -right-6 -bottom-8 h-32 w-32 opacity-15 ${isAdvanced ? 'text-violet-300' : 'text-white'}`} />
       </div>
       
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          <div className={`rounded-3xl p-6 md:p-8 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+          {false && <div className={`rounded-3xl p-6 md:p-8 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                  <div className={`p-3 rounded-xl ${isAdvanced ? 'bg-violet-600' : 'bg-emerald-500'} text-white shadow-lg`}>
@@ -405,7 +460,7 @@ export function Career() {
                 <div className={`h-full bg-gradient-to-r transition-all duration-1000 ${isAdvanced ? 'from-violet-500 to-fuchsia-500' : 'from-emerald-400 to-teal-500'}`} style={{ width: `${progress}%` }} />
               </div>
             </div>
-          </div>
+          </div>}
 
           <div className={`rounded-3xl p-6 md:p-8 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
             <div className="flex items-center justify-between mb-6">
@@ -506,6 +561,13 @@ export function Career() {
                <CalendarDays className="w-5 h-5 mr-2 text-violet-500" /> Career Calendar
              </h3>
              <button onClick={() => setIsScheduleOpen(true)} className={`-mt-12 ml-auto mb-5 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold ${isAdvanced ? 'bg-slate-900 text-violet-400' : 'bg-emerald-50 text-emerald-700'}`}><Plus size={14} /> Add date</button>
+             <div className={`mb-5 rounded-2xl p-3 ${isAdvanced ? 'bg-slate-900/60' : 'bg-slate-50'}`}>
+               <div className="mb-3 flex items-center justify-between"><button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="px-2 text-lg text-slate-500 hover:text-violet-500">‹</button><p className="text-sm font-black">{calendarMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</p><button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="px-2 text-lg text-slate-500 hover:text-violet-500">›</button></div>
+               <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-slate-400">{['S','M','T','W','T','F','S'].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
+               <div className="mt-1 grid grid-cols-7 gap-1">
+                 {calendarCells.map((day, index) => !day ? <span key={`empty-${index}`} /> : (() => { const dayEvents = eventsForDate(day); const isToday = toDateKey(day) === toDateKey(new Date()); return <button key={toDateKey(day)} onClick={() => { setScheduleForm({ ...scheduleForm, date: toDateKey(day) }); setIsScheduleOpen(true); }} className={`relative flex h-9 items-center justify-center rounded-lg text-xs font-bold transition-colors ${isToday ? (isAdvanced ? 'bg-violet-600 text-white' : 'bg-emerald-500 text-white') : dayEvents.length ? (isAdvanced ? 'bg-violet-500/15 text-violet-300 hover:bg-violet-500/25' : 'bg-violet-100 text-violet-700 hover:bg-violet-200') : (isAdvanced ? 'hover:bg-slate-800' : 'hover:bg-white')}`}>{day.getDate()}{dayEvents.length > 0 && <span className={`absolute bottom-1 h-1 w-1 rounded-full ${isToday ? 'bg-white' : 'bg-violet-500'}`} />}</button>; })())}
+               </div>
+             </div>
              <div className="space-y-4">
                {sideHustles.length === 0 && <p className="text-sm text-slate-500">No career events yet. Add interviews, 1:1s, reviews, or study blocks.</p>}
                {sideHustles.map((hustle, idx) => (
@@ -533,6 +595,16 @@ export function Career() {
           </div>
         </div>
       </div>
+
+      {isEditing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className={`w-full max-w-lg rounded-3xl p-6 shadow-2xl ${isAdvanced ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'}`}>
+            <div className="flex items-center justify-between mb-5"><div><h3 className="text-xl font-black">Career profile</h3><p className="mt-1 text-sm text-slate-500">Keep your professional trajectory current.</p></div><button onClick={() => setIsEditing(false)} className="p-2 text-slate-500"><X size={20} /></button></div>
+            <div className="grid sm:grid-cols-2 gap-4"><label className="text-sm font-bold">Current role<input value={editForm.current_role} onChange={(event) => setEditForm({ ...editForm, current_role: event.target.value })} className={`mt-1.5 w-full rounded-xl border p-3 ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`} /></label><label className="text-sm font-bold">Target role<input value={editForm.target_role} onChange={(event) => setEditForm({ ...editForm, target_role: event.target.value })} className={`mt-1.5 w-full rounded-xl border p-3 ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`} /></label><label className="text-sm font-bold">Current monthly compensation<input type="number" value={editForm.current_salary} onChange={(event) => setEditForm({ ...editForm, current_salary: event.target.value })} className={`mt-1.5 w-full rounded-xl border p-3 ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`} /></label><label className="text-sm font-bold">Target monthly compensation<input type="number" value={editForm.target_salary} onChange={(event) => setEditForm({ ...editForm, target_salary: event.target.value })} className={`mt-1.5 w-full rounded-xl border p-3 ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`} /></label></div>
+            <div className="mt-6 flex justify-end gap-3"><button onClick={() => setIsEditing(false)} className="px-5 py-2.5 text-sm font-bold text-slate-500">Cancel</button><button onClick={handleSaveTrajectory} className={`px-5 py-2.5 rounded-xl text-sm font-bold text-white ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700' : 'bg-slate-900 hover:bg-slate-800'}`}>Save profile</button></div>
+          </div>
+        </div>
+      )}
 
       {isScheduleOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">

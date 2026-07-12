@@ -178,7 +178,7 @@ export function Freelancing({ currentTab, onNavigate }: any) {
                  </button>
               </div>
 
-              <div className="flex justify-between items-start mb-4 pr-20">
+              <div className="flex items-start gap-3 mb-4">
                 <div
                   className={`p-3 rounded-2xl ${isAdvanced ? "bg-slate-900 text-violet-400" : "bg-indigo-50 text-indigo-600"}`}
                 >
@@ -1141,7 +1141,7 @@ function TimeLogsTab({
   const saveManualLog = async () => {
     const source = editingLog || manualLog;
     const seconds = Math.round(Number(source.hours || 0) * 3600);
-    if (!source.service_id || seconds <= 0) return;
+    if (seconds <= 0) return;
     const endpoint = editingLog ? `/api/freelancing/time_logs/${editingLog.id}` : "/api/freelancing/time_logs";
     const method = editingLog ? "PUT" : "POST";
     try {
@@ -1271,7 +1271,7 @@ function TimeLogsTab({
               const draft = editingLog || manualLog;
               const setDraft = (changes: any) => editingLog ? setEditingLog({ ...editingLog, ...changes }) : setManualLog({ ...manualLog, ...changes });
               return <div className="space-y-4">
-                <label className="block text-sm font-bold">Contract<select value={draft.service_id || ""} onChange={(event) => setDraft({ service_id: event.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`}><option value="">Select contract</option>{services.map((service: any) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
+                <label className="block text-sm font-bold">Contract <span className="font-medium text-slate-400">(optional)</span><select value={draft.service_id || ""} onChange={(event) => setDraft({ service_id: event.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`}><option value="">Unassigned time</option>{services.map((service: any) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
                 <div className="grid grid-cols-2 gap-3"><label className="text-sm font-bold">Date<input type="date" value={draft.date || ""} onChange={(event) => setDraft({ date: event.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`} /></label><label className="text-sm font-bold">Hours<input type="number" min="0.01" step="0.25" value={draft.hours || ""} onChange={(event) => setDraft({ hours: event.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`} /></label></div>
                 <label className="block text-sm font-bold">Description<textarea rows={3} value={draft.description || ""} onChange={(event) => setDraft({ description: event.target.value })} className={`mt-1.5 w-full p-3 rounded-xl border outline-none resize-none ${isAdvanced ? "bg-slate-900 border-slate-700" : "bg-slate-50 border-slate-200"}`} /></label>
               </div>;
