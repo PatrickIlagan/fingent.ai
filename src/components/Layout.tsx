@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Home, Calendar, Briefcase, Bot, PieChart, Settings, CreditCard, Clock, Receipt, Target, ChevronDown, ChevronRight, Building, FileText, Download, ArrowLeft, Megaphone, Package, ShoppingCart, Activity, Users, DollarSign, TrendingUp, Tags, UserRound } from 'lucide-react';
+import { Home, Calendar, Briefcase, Bot, PieChart, Settings, CreditCard, Clock, Receipt, Target, ChevronDown, ChevronRight, Building, FileText, Download, ArrowLeft, Megaphone, Package, ShoppingCart, Activity, Users, DollarSign, TrendingUp, Tags, UserRound, FileSpreadsheet } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { motion, AnimatePresence } from 'framer-motion';
+import { exportEverythingWorkbook } from '../lib/workbookExport';
 
 export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any) {
   const { themeMode, setThemeMode, selectedBusiness, setSelectedBusiness, selectedFreelance, setSelectedFreelance } = useStore();
@@ -227,9 +228,12 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
             </div>
           </div>
         </div>
-        <div className="pb-8">
-          <button onClick={() => window.print()} className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl font-bold text-sm transition-all shadow-sm ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700' : 'bg-white hover:bg-emerald-50 text-emerald-600 border border-emerald-100 shadow-emerald-500/5'}`}>
-            <Download size={18} /> Print / Save PDF
+        <div className="space-y-2 pb-8">
+          <button onClick={() => exportEverythingWorkbook().catch(console.error)} className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl font-bold text-sm transition-all shadow-sm ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20'}`}>
+            <FileSpreadsheet size={18} /> Export Excel Workbook
+          </button>
+          <button onClick={() => window.print()} className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-xs transition-all ${isAdvanced ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200' : 'text-emerald-700 hover:bg-emerald-50'}`}>
+            <Download size={15} /> Print current view / Save PDF
           </button>
         </div>
       </aside>

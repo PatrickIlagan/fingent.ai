@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Calculator, Download, ExternalLink, FileText, Info } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { exportCsv, exportPdf } from '../lib/export';
+import { exportPdf } from '../lib/export';
+import { exportExcel } from '../lib/workbookExport';
 
 type Profile = 'employment' | 'self-employed' | 'mixed';
 type Scenario = {
@@ -112,7 +113,7 @@ export function Taxes() {
   ];
 
   return <div className="space-y-6 pb-10">
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="text-3xl font-black">Philippine Tax Planner</h2><p className="mt-1 text-slate-500">Transparent planning estimates for individual taxpayers in the Philippines.</p></div><div className="flex gap-2"><button onClick={() => exportCsv(`philippine-tax-estimate-${taxYear}`, taxExportRows)} className={"flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold " + (isAdvanced ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50')}><Download size={16} /> CSV</button><button onClick={() => exportPdf(`Philippine Tax Estimate ${taxYear}`, taxExportRows, 'Planning estimate only - verify before filing.')} className={"flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold " + (isAdvanced ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50')}><FileText size={16} /> PDF</button><button onClick={() => window.print()} className={"flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold " + (isAdvanced ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50')}><Download size={16} /> Print</button></div></div>
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="text-3xl font-black">Philippine Tax Planner</h2><p className="mt-1 text-slate-500">Transparent planning estimates for individual taxpayers in the Philippines.</p></div><div className="flex gap-2"><button onClick={() => exportExcel(`philippine-tax-estimate-${taxYear}`, [{ name: 'Tax Estimate', rows: taxExportRows }])} className={"flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold " + (isAdvanced ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50')}><Download size={16} /> Excel</button><button onClick={() => exportPdf(`Philippine Tax Estimate ${taxYear}`, taxExportRows, 'Planning estimate only - verify before filing.')} className={"flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold " + (isAdvanced ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50')}><FileText size={16} /> PDF</button><button onClick={() => window.print()} className={"flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold " + (isAdvanced ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50')}><Download size={16} /> Print</button></div></div>
 
     <div className={"flex gap-3 rounded-3xl border p-4 text-sm " + (isAdvanced ? 'border-amber-500/30 bg-amber-500/10 text-amber-100' : 'border-amber-200 bg-amber-50 text-amber-900')}><AlertCircle className="mt-0.5 shrink-0" size={20} /><p><strong>Planning estimate, not filing advice.</strong> This does not determine eligibility, exemptions, final taxes, capital-gains taxes, or VAT registration. Check BIR forms and a qualified tax professional before filing.</p></div>
 
