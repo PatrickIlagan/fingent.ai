@@ -930,20 +930,24 @@ To run FinGent as a desktop application:
          const transactions = await db.all("SELECT * FROM business_transactions WHERE business_id = ?", [b.id]);
          const items = await db.all("SELECT * FROM business_items WHERE business_id = ?", [b.id]);
          
+         const thisMonth = new Date().toISOString().slice(0, 7);
+         const active = (item: any) => item.status === 'Active';
          if (b.type === 'Store') {
-            const orders = transactions.filter((t:any) => t.type === 'income');
-            b.mrr = orders.reduce((sum:any, t:any) => sum + t.amount, 0);
-            b.customers = orders.length; // rough estimate
+            const orders = transactions.filter((t:any) => t.type === 'income' && String(t.date || '').startsWith(thisMonth));
+            b.mrr = orders.reduce((sum:any, t:any) => sum + (Number(t.amount) || 0), 0);
+            b.customers = new Set(orders.map((t:any) => t.description).filter(Boolean)).size;
          } else if (b.type === 'SaaS') {
-            const users = items.filter((i:any) => i.type === 'user');
-            b.customers = users.length;
-            // value is MRR for users
-            b.mrr = users.reduce((sum:any, u:any) => sum + (u.value || 0), 0);
-         } else if (b.type === 'Agency') {
-            const clients = items.filter((i:any) => i.type === 'client');
+            const subscriptions = items.filter((i:any) => ['user', 'subscription'].includes(i.type) && active(i));
+            b.customers = subscriptions.length;
+            b.mrr = subscriptions.reduce((sum:any, item:any) => sum + (Number(item.value) || 0), 0);
+         } else if (['Agency', 'Professional Services'].includes(b.type)) {
+            const clients = items.filter((i:any) => i.type === 'client' && active(i));
             b.customers = clients.length;
-            // Use clients revenue or invoices for MRR
-            b.mrr = clients.reduce((sum:any, c:any) => sum + (c.value || 0), 0);
+            b.mrr = clients.reduce((sum:any, item:any) => sum + (Number(item.value) || 0), 0);
+         } else if (b.type === 'Creator') {
+            const partnerships = items.filter((i:any) => i.type === 'partnership' && active(i));
+            b.customers = partnerships.length;
+            b.mrr = partnerships.reduce((sum:any, item:any) => sum + (Number(item.value) || 0), 0);
          } else {
             b.mrr = 0;
             b.customers = 0;
@@ -1018,6 +1022,18 @@ To run FinGent as a desktop application:
      }
   });
 
+  app.delete("/api/business_deals/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const item = await db.get("SELECT id FROM business_items WHERE id = ?", [req.params.id]);
+      if (item) await db.run("DELETE FROM business_items WHERE id = ?", [req.params.id]);
+      else await db.run("DELETE FROM business_deals WHERE id = ?", [req.params.id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/businesses/:id/items", async (req, res) => {
     try {
       const db = await getDb();
@@ -1040,6 +1056,30 @@ To run FinGent as a desktop application:
     }
   });
 
+  app.put("/api/businesses/:businessId/items/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { type, name, status, value, extra_info } = req.body;
+      await db.run(
+        "UPDATE business_items SET type = ?, name = ?, status = ?, value = ?, extra_info = ? WHERE id = ? AND business_id = ?",
+        [type, name, status, value || 0, extra_info ? JSON.stringify(extra_info) : null, req.params.id, req.params.businessId]
+      );
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/businesses/:businessId/items/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      await db.run("DELETE FROM business_items WHERE id = ? AND business_id = ?", [req.params.id, req.params.businessId]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/businesses/:id/transactions", async (req, res) => {
     try {
       const db = await getDb();
@@ -1057,6 +1097,30 @@ To run FinGent as a desktop application:
       const result = await db.run("INSERT INTO business_transactions (business_id, type, amount, date, description, status, category) VALUES (?, ?, ?, ?, ?, ?, ?)",
         [req.params.id, type, amount, date, description, status, category]);
       res.json({ id: result.lastInsertRowid });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/businesses/:businessId/transactions/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { type, amount, date, description, status, category } = req.body;
+      await db.run(
+        "UPDATE business_transactions SET type = ?, amount = ?, date = ?, description = ?, status = ?, category = ? WHERE id = ? AND business_id = ?",
+        [type, amount || 0, date, description, status, category, req.params.id, req.params.businessId]
+      );
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/businesses/:businessId/transactions/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      await db.run("DELETE FROM business_transactions WHERE id = ? AND business_id = ?", [req.params.id, req.params.businessId]);
+      res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -1109,6 +1173,31 @@ To run FinGent as a desktop application:
       await db.run('DELETE FROM freelancing_invoices WHERE business_id = ?', [req.params.id]);
       await db.run('DELETE FROM freelancing_services WHERE business_id = ?', [req.params.id]);
       await db.run('DELETE FROM freelance_businesses WHERE id = ?', [req.params.id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/businesses/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { name, type, status, target } = req.body;
+      await db.run("UPDATE businesses SET name = ?, type = ?, status = ?, target = ? WHERE id = ?", [name, type, status, target || 0, req.params.id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/businesses/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const id = req.params.id;
+      await db.run("DELETE FROM business_deals WHERE business_id = ?", [id]);
+      await db.run("DELETE FROM business_items WHERE business_id = ?", [id]);
+      await db.run("DELETE FROM business_transactions WHERE business_id = ?", [id]);
+      await db.run("DELETE FROM businesses WHERE id = ?", [id]);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

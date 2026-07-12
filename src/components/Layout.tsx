@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Home, Calendar, Briefcase, Bot, PieChart, Settings, CreditCard, Clock, Receipt, Target, ChevronDown, ChevronRight, Building, FileText, Download, ArrowLeft, Megaphone, Package, ShoppingCart, Activity, Users, DollarSign } from 'lucide-react';
+import { Home, Calendar, Briefcase, Bot, PieChart, Settings, CreditCard, Clock, Receipt, Target, ChevronDown, ChevronRight, Building, FileText, Download, ArrowLeft, Megaphone, Package, ShoppingCart, Activity, Users, DollarSign, TrendingUp } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -52,26 +52,34 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
     if (selectedBusiness.type === 'Store') {
       tabs = [
         { id: 'business-dashboard', icon: Building, label: 'Dashboard' },
-        { id: 'business-marketing', icon: Megaphone, label: 'Marketing' },
-        { id: 'business-logistics', icon: Package, label: 'Logistics/Stocks' },
-        { id: 'business-ordering', icon: ShoppingCart, label: 'Ordering' },
-        { id: 'business-transactions', icon: Activity, label: 'Transactions' },
+        { id: 'business-records', icon: Package, label: 'Catalogue & Stock' },
+        { id: 'business-sales', icon: ShoppingCart, label: 'Orders' },
+        { id: 'business-operations', icon: Megaphone, label: 'Marketing & Supply' },
+        { id: 'business-finance', icon: Activity, label: 'Cash Flow' },
       ];
     } else if (selectedBusiness.type === 'SaaS') {
       tabs = [
         { id: 'business-dashboard', icon: Building, label: 'Dashboard' },
-        { id: 'business-mrr', icon: Activity, label: 'MRR & Churn' },
-        { id: 'business-users', icon: Users, label: 'Subscriptions' },
-        { id: 'business-acquisition', icon: Megaphone, label: 'Acquisition' },
-        { id: 'business-expenditure', icon: DollarSign, label: 'Expenditure' },
+        { id: 'business-records', icon: Users, label: 'Subscriptions' },
+        { id: 'business-sales', icon: Megaphone, label: 'Acquisition' },
+        { id: 'business-operations', icon: Package, label: 'Product & Support' },
+        { id: 'business-finance', icon: DollarSign, label: 'Cash Flow' },
       ];
-    } else if (selectedBusiness.type === 'Agency') {
+    } else if (selectedBusiness.type === 'Agency' || selectedBusiness.type === 'Professional Services') {
       tabs = [
         { id: 'business-dashboard', icon: Building, label: 'Dashboard' },
-        { id: 'business-clients', icon: Users, label: 'Clients' },
-        { id: 'business-pipeline', icon: Briefcase, label: 'Pipeline' },
-        { id: 'business-proposals', icon: FileText, label: 'Proposals' },
-        { id: 'business-invoices', icon: DollarSign, label: 'Invoices' },
+        { id: 'business-records', icon: Users, label: 'Clients' },
+        { id: 'business-sales', icon: Briefcase, label: selectedBusiness.type === 'Agency' ? 'Pipeline & Proposals' : 'Opportunities' },
+        { id: 'business-operations', icon: Package, label: 'Delivery' },
+        { id: 'business-finance', icon: DollarSign, label: 'Cash Flow' },
+      ];
+    } else if (selectedBusiness.type === 'Creator') {
+      tabs = [
+        { id: 'business-dashboard', icon: Building, label: 'Dashboard' },
+        { id: 'business-records', icon: DollarSign, label: 'Partnerships' },
+        { id: 'business-sales', icon: TrendingUp, label: 'Revenue Streams' },
+        { id: 'business-operations', icon: Megaphone, label: 'Content & Growth' },
+        { id: 'business-finance', icon: Activity, label: 'Cash Flow' },
       ];
     }
   } else if (selectedFreelance) {

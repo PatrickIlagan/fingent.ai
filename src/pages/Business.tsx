@@ -1,2054 +1,234 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Activity, ArrowLeft, ArrowRight, BadgeDollarSign, BarChart3, BriefcaseBusiness,
+  Building2, CheckCircle2, Clapperboard, CreditCard, DollarSign, Layers3,
+  Megaphone, MonitorSmartphone, Package, Pencil, Plus, ReceiptText, ShoppingBag,
+  Sparkles, Store, Trash2, TrendingDown, TrendingUp, Users, Wrench, X
+} from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { Building, TrendingUp, Users, DollarSign, Plus, ArrowUpRight, ArrowDownRight, Store, MonitorSmartphone, X, ArrowLeft, ShoppingCart, Package, Megaphone, CheckSquare, Activity, RefreshCw, FileText, Briefcase } from 'lucide-react';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
-export function Business({ currentTab, onNavigate }: any) {
-  const { themeMode, selectedBusiness, setSelectedBusiness } = useStore();
-  const isAdvanced = themeMode === 'advanced';
+type Business = { id: number; name: string; type: string; status: string; target: number; mrr?: number; customers?: number };
+type Item = { id: number; business_id: number; type: string; name: string; status: string; value: number; extra_info?: string | null };
+type Transaction = { id: number; business_id: number; type: 'income' | 'expense'; amount: number; date: string; description: string; status?: string; category?: string };
 
-  const { shouldRefresh, triggerRefresh } = useStore();
-  const [businesses, setBusinesses] = React.useState<any[]>([]);
-  const [globalDeals, setGlobalDeals] = React.useState<any[]>([]);
-  const [isPipelineOpen, setIsPipelineOpen] = useState(false);
-  const [selectedDeal, setSelectedDeal] = useState<any>(null);
-  const [isEditingDeal, setIsEditingDeal] = useState(false);
+const peso = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', maximumFractionDigits: 0 });
+const today = () => new Date().toISOString().slice(0, 10);
+const money = (value: number) => peso.format(Number(value) || 0);
+const parseExtra = (value?: string | null) => {
+  try { return JSON.parse(value || '{}') as Record<string, string>; } catch { return {}; }
+};
+const paid = (transaction: Transaction) => !['Draft', 'Pending', 'Overdue', 'Scheduled'].includes(transaction.status || 'Paid');
 
-  React.useEffect(() => {
-    Promise.all([
-      fetch('/api/businesses').then(r => r.json()),
-      fetch('/api/business_deals').then(r => r.json())
-    ]).then(([b, d]) => {
-      setBusinesses(Array.isArray(b) ? b : []);
-      setGlobalDeals(Array.isArray(d) ? d : []);
-    }).catch(console.error);
-  }, [shouldRefresh, currentTab]);
+const VENTURE_TYPES = [
+  { type: 'Store', label: 'Store', description: 'Physical retail or e-commerce products', icon: Store },
+  { type: 'SaaS', label: 'SaaS', description: 'Subscription software and digital products', icon: MonitorSmartphone },
+  { type: 'Agency', label: 'Agency', description: 'Creative, marketing, development, or operations agency', icon: BriefcaseBusiness },
+  { type: 'Professional Services', label: 'Professional services', description: 'Consulting, coaching, practice, or specialist work', icon: Wrench },
+  { type: 'Creator', label: 'Creator business', description: 'Content, media, community, and brand partnerships', icon: Clapperboard },
+];
 
-  
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [step, setStep] = useState(1);
-  const [newBusiness, setNewBusiness] = useState({ name: '', type: 'Store', status: 'Active', mrr: '', customers: '', target: '' });
-  
-  const handleAddBusiness = async () => {
-    try {
-      await fetch('/api/businesses', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newBusiness.name,
-          type: newBusiness.type,
-          status: 'Active',
-          target: parseFloat(newBusiness.target) || 100000
-        })
-      });
-      triggerRefresh();
-      setIsModalOpen(false);
-      setStep(1);
-      setNewBusiness({ name: '', type: 'Store', status: 'Active', mrr: '', customers: '', target: '' });
-    } catch(e) { console.error(e); }
+type WorkspaceConfig = {
+  headline: string;
+  primaryMetric: string;
+  primaryTypes: string[];
+  sections: Record<string, { title: string; description: string; types: string[]; valueLabel: string; detailLabel: string; dateLabel: string; statuses: string[]; icon: React.ElementType }>;
+};
+
+const configs: Record<string, WorkspaceConfig> = {
+  Store: {
+    headline: 'Retail command centre', primaryMetric: 'Products tracked', primaryTypes: ['product'],
+    sections: {
+      'business-records': { title: 'Catalogue & stock', description: 'Keep products, pricing, quantities, and reorder notes in one place.', types: ['product'], valueLabel: 'Unit price', detailLabel: 'Stock quantity / SKU', dateLabel: 'Reorder date', statuses: ['In stock', 'Low stock', 'Out of stock', 'Discontinued'], icon: Package },
+      'business-sales': { title: 'Orders', description: 'Track customer orders separately from when cash is actually received.', types: ['order'], valueLabel: 'Order total', detailLabel: 'Customer / order reference', dateLabel: 'Order date', statuses: ['New', 'Processing', 'Fulfilled', 'Cancelled'], icon: ShoppingBag },
+      'business-operations': { title: 'Marketing & replenishment', description: 'Plan campaigns and supplier replenishment without using placeholder metrics.', types: ['campaign', 'restock'], valueLabel: 'Budget / expected cost', detailLabel: 'Channel or supplier', dateLabel: 'Start / expected date', statuses: ['Planned', 'Active', 'Paused', 'Complete'], icon: Megaphone },
+    }
+  },
+  SaaS: {
+    headline: 'Subscription operating system', primaryMetric: 'Active subscriptions', primaryTypes: ['subscription', 'user'],
+    sections: {
+      'business-records': { title: 'Subscriptions', description: 'Record plans, monthly value, renewal dates, and customer status.', types: ['subscription', 'user'], valueLabel: 'Monthly recurring value', detailLabel: 'Plan / account owner', dateLabel: 'Renewal date', statuses: ['Active', 'Trial', 'Past due', 'Cancelled'], icon: Users },
+      'business-sales': { title: 'Acquisition', description: 'Track channels and campaigns with their planned spend and review date.', types: ['campaign'], valueLabel: 'Budget', detailLabel: 'Channel / campaign objective', dateLabel: 'Review date', statuses: ['Planned', 'Active', 'Paused', 'Complete'], icon: Megaphone },
+      'business-operations': { title: 'Product & support', description: 'Keep your roadmap items and customer support work visible.', types: ['roadmap', 'support'], valueLabel: 'Estimated effort / cost', detailLabel: 'Owner or customer', dateLabel: 'Target date', statuses: ['Backlog', 'In progress', 'Waiting', 'Done'], icon: Layers3 },
+    }
+  },
+  Agency: {
+    headline: 'Agency delivery desk', primaryMetric: 'Active clients', primaryTypes: ['client'],
+    sections: {
+      'business-records': { title: 'Clients', description: 'Maintain retainers, contacts, and renewal or review dates.', types: ['client'], valueLabel: 'Monthly retainer', detailLabel: 'Contact / engagement', dateLabel: 'Renewal or review date', statuses: ['Lead', 'Active', 'Paused', 'Closed'], icon: Users },
+      'business-sales': { title: 'Pipeline & proposals', description: 'Track opportunities before they become client work.', types: ['lead', 'proposal'], valueLabel: 'Potential value', detailLabel: 'Contact / next step', dateLabel: 'Expected close date', statuses: ['Qualification', 'Proposal sent', 'Negotiation', 'Won', 'Lost'], icon: BriefcaseBusiness },
+      'business-operations': { title: 'Delivery', description: 'Use this for projects, milestones, and delivery owners.', types: ['project'], valueLabel: 'Project value / budget', detailLabel: 'Client / project owner', dateLabel: 'Due date', statuses: ['Not started', 'In progress', 'Waiting', 'Delivered'], icon: CheckCircle2 },
+    }
+  },
+  'Professional Services': {
+    headline: 'Practice and client desk', primaryMetric: 'Active clients', primaryTypes: ['client'],
+    sections: {
+      'business-records': { title: 'Clients', description: 'Keep recurring clients, engagements, and review dates organised.', types: ['client'], valueLabel: 'Monthly value', detailLabel: 'Contact / service', dateLabel: 'Review date', statuses: ['Prospect', 'Active', 'Paused', 'Closed'], icon: Users },
+      'business-sales': { title: 'Opportunities', description: 'Track referrals, proposals, and their expected value.', types: ['lead', 'proposal'], valueLabel: 'Potential value', detailLabel: 'Source / next step', dateLabel: 'Expected close date', statuses: ['New', 'Discovery', 'Proposal sent', 'Won', 'Lost'], icon: BriefcaseBusiness },
+      'business-operations': { title: 'Delivery', description: 'Track engagements, appointments, and scheduled work.', types: ['engagement', 'appointment'], valueLabel: 'Engagement value', detailLabel: 'Client / location', dateLabel: 'Service date', statuses: ['Scheduled', 'In progress', 'Completed', 'Cancelled'], icon: CheckCircle2 },
+    }
+  },
+  Creator: {
+    headline: 'Creator business studio', primaryMetric: 'Active partnerships', primaryTypes: ['partnership'],
+    sections: {
+      'business-records': { title: 'Partnerships', description: 'Track brand deals, retainers, deliverables, and payment terms.', types: ['partnership'], valueLabel: 'Monthly / deal value', detailLabel: 'Brand or contact', dateLabel: 'Delivery / renewal date', statuses: ['Prospect', 'Negotiating', 'Active', 'Complete'], icon: BadgeDollarSign },
+      'business-sales': { title: 'Revenue streams', description: 'Record platform, affiliate, product, or membership income sources.', types: ['channel'], valueLabel: 'Expected monthly value', detailLabel: 'Platform / programme', dateLabel: 'Review date', statuses: ['Active', 'Testing', 'Paused', 'Ended'], icon: TrendingUp },
+      'business-operations': { title: 'Content & growth', description: 'Plan content and audience-growth campaigns with real due dates.', types: ['content', 'campaign'], valueLabel: 'Production / campaign budget', detailLabel: 'Platform / owner', dateLabel: 'Publish / review date', statuses: ['Idea', 'In production', 'Scheduled', 'Published'], icon: Sparkles },
+    }
+  },
+};
+
+const genericConfig = configs['Professional Services'];
+const card = (advanced: boolean) => advanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100';
+const input = (advanced: boolean) => `w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${advanced ? 'bg-slate-900 border-slate-700 focus:border-violet-500' : 'bg-slate-50 border-slate-200 focus:border-emerald-500'}`;
+const button = (advanced: boolean) => `inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white ${advanced ? 'bg-violet-600 hover:bg-violet-700' : 'bg-slate-900 hover:bg-slate-800'}`;
+
+export function Business({ currentTab, onNavigate }: { currentTab: string; onNavigate: (tab: string) => void }) {
+  const { themeMode, selectedBusiness, setSelectedBusiness, shouldRefresh, triggerRefresh } = useStore();
+  const advanced = themeMode === 'advanced';
+  const [businesses, setBusinesses] = useState<Business[]>([]);
+  const [ventureEditor, setVentureEditor] = useState<Business | null | 'new'>(null);
+
+  const loadBusinesses = async () => {
+    const response = await fetch('/api/businesses');
+    if (response.ok) setBusinesses(await response.json());
   };
+  useEffect(() => { loadBusinesses().catch(console.error); }, [shouldRefresh, currentTab === 'business']);
 
-  const updateDeal = async (changes: { stage?: string; notes?: string }) => {
-    if (!selectedDeal) return;
-    const updated = { ...selectedDeal, ...changes };
-    const response = await fetch(`/api/business_deals/${selectedDeal.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stage: updated.stage, notes: updated.notes })
+  const saveVenture = async (values: Omit<Business, 'id'>) => {
+    const editing = ventureEditor && ventureEditor !== 'new' ? ventureEditor : null;
+    const response = await fetch(editing ? `/api/businesses/${editing.id}` : '/api/businesses', {
+      method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values)
     });
     if (!response.ok) return;
-    setSelectedDeal(updated);
-    setGlobalDeals((deals) => deals.map((deal) => deal.id === updated.id ? updated : deal));
+    setVentureEditor(null); triggerRefresh(); await loadBusinesses();
+    if (editing && selectedBusiness?.id === editing.id) setSelectedBusiness({ ...editing, ...values });
+  };
+  const deleteVenture = async (business: Business) => {
+    if (!window.confirm(`Delete ${business.name} and all of its records? This cannot be undone.`)) return;
+    const response = await fetch(`/api/businesses/${business.id}`, { method: 'DELETE' });
+    if (!response.ok) return;
+    if (selectedBusiness?.id === business.id) { setSelectedBusiness(null); onNavigate('business'); }
+    triggerRefresh(); await loadBusinesses();
   };
 
-  const advanceDealStage = () => {
-    if (!selectedDeal || ['Closed Won', 'Closed Lost'].includes(selectedDeal.stage)) return;
-    const stages: Record<string, string> = {
-      Qualification: 'Proposal Sent',
-      'Proposal Sent': 'Negotiation',
-      Negotiation: 'Closed Won'
-    };
-    updateDeal({ stage: stages[selectedDeal.stage] || 'Qualification' });
-  };
-
-  const totalMrr = businesses.reduce((acc, b) => acc + b.mrr, 0);
-  const revenueData = [
-    { name: 'Jan', value: totalMrr * 0.72 },
-    { name: 'Feb', value: totalMrr * 0.81 },
-    { name: 'Mar', value: totalMrr * 0.78 },
-    { name: 'Apr', value: totalMrr * 0.87 },
-    { name: 'May', value: totalMrr * 0.93 },
-    { name: 'Jun', value: totalMrr },
-  ];
-
-  if (isPipelineOpen) {
-    return (
-      <div className="space-y-6 pb-10">
-        <div className="flex items-center gap-4 mb-6">
-          <button onClick={() => { setIsPipelineOpen(false); setSelectedDeal(null); }} className={`p-2 rounded-xl transition-colors ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-white hover:bg-slate-50 border shadow-sm text-slate-600'}`}>
-            <ArrowLeft size={20} />
-          </button>
-          <div>
-            <h2 className="text-2xl font-bold">Global Pipeline</h2>
-            <p className="text-slate-500 dark:text-slate-400 mt-1">Cross-venture sales and lead tracking</p>
-          </div>
-        </div>
-        
-        {(() => {
-          const totalDealValue = globalDeals.reduce((sum, d) => sum + (d.value || 0), 0);
-          const activeDeals = globalDeals.filter(d => !['Closed Won', 'Closed Lost', 'Accepted'].includes(d.stage));
-          const closedDeals = globalDeals.filter(d => ['Closed Won', 'Closed Lost', 'Accepted'].includes(d.stage));
-          const wonDeals = closedDeals.filter(d => d.stage === 'Closed Won' || d.stage === 'Accepted').length;
-          const winRate = closedDeals.length > 0 ? ((wonDeals / closedDeals.length) * 100).toFixed(0) : 0;
-          return (
-            <div className="grid md:grid-cols-3 gap-4 mb-8">
-              <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-                <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Total Value</p>
-                <p className="text-3xl font-black">₱{totalDealValue.toLocaleString()}</p>
-              </div>
-              <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-                <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Active Deals</p>
-                <p className="text-3xl font-black">{activeDeals.length}</p>
-              </div>
-              <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-                <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Win Rate</p>
-                <p className="text-3xl font-black text-emerald-500">{winRate}%</p>
-              </div>
-            </div>
-          );
-        })()}
-
-        <div className="grid lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-4">
-            <h4 className="font-bold text-lg mb-4">All Opportunities</h4>
-            {globalDeals.map((deal) => (
-              <div 
-                key={deal.id} 
-                onClick={() => { setSelectedDeal(deal); setIsEditingDeal(false); }}
-                className={`p-5 rounded-2xl border flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer transition-all hover:scale-[1.01] shadow-sm ${selectedDeal?.id === deal.id ? (isAdvanced ? 'bg-violet-900/30 border-violet-500/50' : 'bg-violet-50 border-violet-200') : (isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200')}`}
-              >
-                <div className="flex items-center gap-4 mb-3 sm:mb-0">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center font-black text-lg ${isAdvanced ? 'bg-slate-900 text-violet-400' : 'bg-slate-100 text-violet-600'}`}>
-                    {deal.title.charAt(0)}
-                  </div>
-                  <div>
-                    <p className="font-bold text-lg">{deal.title}</p>
-                    <p className="text-xs font-bold text-slate-500 mt-1">{deal.venture} &bull; <span className={deal.stage === 'Closed Won' ? 'text-emerald-500' : 'text-orange-500'}>{deal.stage}</span></p>
-                  </div>
-                </div>
-                <div className="text-left sm:text-right w-full sm:w-auto">
-                  <p className="font-black text-xl text-emerald-500">₱{deal.value.toLocaleString()}</p>
-                  <p className="text-xs font-bold text-slate-500 mt-1">Closing in {deal.closing}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div>
-            {selectedDeal ? (
-              <div className={`p-6 rounded-3xl border shadow-sm sticky top-6 ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-                <h3 className="text-xl font-bold mb-1">{selectedDeal.title}</h3>
-                <p className="text-sm text-slate-500 mb-6">{selectedDeal.venture}</p>
-
-                <div className="space-y-4 mb-6">
-                  <div>
-                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Status</p>
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${selectedDeal.stage === 'Closed Won' ? 'bg-emerald-500' : 'bg-orange-500'}`}></div>
-                      <p className="font-bold">{selectedDeal.stage}</p>
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Deal Value</p>
-                    <p className="font-black text-2xl text-emerald-500">₱{selectedDeal.value.toLocaleString()}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Probability</p>
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                         <div className="h-full bg-violet-500 rounded-full" style={{ width: `${selectedDeal.probability}%` }}></div>
-                      </div>
-                      <p className="font-bold text-sm">{selectedDeal.probability}%</p>
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Primary Contact</p>
-                    <p className="font-bold">{selectedDeal.contact}</p>
-                  </div>
-                </div>
-
-                <div className={`p-4 rounded-2xl mb-6 ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-                  <p className="text-xs font-bold text-slate-500 uppercase mb-2">Latest Notes</p>
-                  <p className="text-sm">{selectedDeal.notes}</p>
-                </div>
-
-                {isEditingDeal ? (
-                  <div className="space-y-3 border-t border-slate-200 dark:border-slate-700 pt-4">
-                    <textarea value={selectedDeal.notes || ''} onChange={(event) => setSelectedDeal({ ...selectedDeal, notes: event.target.value })} rows={3} aria-label="Deal notes" className={`w-full rounded-xl border p-3 text-sm resize-none ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`} />
-                    <button onClick={async () => { await updateDeal({ notes: selectedDeal.notes || '' }); setIsEditingDeal(false); }} className={`w-full py-2.5 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-100 hover:bg-slate-200'}`}>Save notes</button>
-                  </div>
-                ) : (
-                  <div className="flex gap-2">
-                    <button onClick={advanceDealStage} disabled={['Closed Won', 'Closed Lost'].includes(selectedDeal.stage)} className={`flex-1 py-3 rounded-xl font-bold text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
-                      {['Closed Won', 'Closed Lost'].includes(selectedDeal.stage) ? selectedDeal.stage : 'Advance Stage'}
-                    </button>
-                    <button onClick={() => setIsEditingDeal(true)} className={`py-3 px-4 rounded-xl font-bold text-sm border transition-colors ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'border-slate-200 hover:bg-slate-50 text-slate-600'}`}>
-                      Edit
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className={`p-8 text-center rounded-3xl border border-dashed ${isAdvanced ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-4 ${isAdvanced ? 'bg-slate-800 text-slate-500' : 'bg-white text-slate-400 shadow-sm'}`}>
-                  <ArrowUpRight size={24} />
-                </div>
-                <p className="font-bold text-slate-500">Select a deal to view details</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
+  if (selectedBusiness && currentTab !== 'business') {
+    return <BusinessWorkspace business={selectedBusiness} currentTab={currentTab} onNavigate={onNavigate} advanced={advanced} />;
   }
 
-  if (selectedBusiness && currentTab !== "business") {
-    return (
-      <div className="space-y-6 pb-10">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <button onClick={() => { setSelectedBusiness(null); onNavigate('business'); }} className={`p-2 rounded-xl transition-colors ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-white hover:bg-slate-50 border shadow-sm text-slate-600'}`}>
-              <ArrowLeft size={20} />
-            </button>
-            <div>
-                <h2 className="text-2xl font-bold">{selectedBusiness.name}</h2>
-                <p className="text-slate-500 dark:text-slate-400 mt-1">{selectedBusiness.type} Dashboard</p>
-            </div>
-          </div>
-        </div>
-        
-        {selectedBusiness.type === 'Store' && <StoreDashboard business={selectedBusiness} isAdvanced={isAdvanced} currentTab={currentTab}  onNavigate={onNavigate} />}
-        {selectedBusiness.type === 'SaaS' && <SaaSDashboard business={selectedBusiness} isAdvanced={isAdvanced} currentTab={currentTab}  onNavigate={onNavigate} />}
-        {selectedBusiness.type === 'Agency' && <AgencyDashboard business={selectedBusiness} isAdvanced={isAdvanced} currentTab={currentTab}  onNavigate={onNavigate} />}
-      </div>
-    );
-  }
+  const totalMrr = businesses.reduce((sum, business) => sum + (Number(business.mrr) || 0), 0);
+  const totalCustomers = businesses.reduce((sum, business) => sum + (Number(business.customers) || 0), 0);
+  const totalTarget = businesses.reduce((sum, business) => sum + (Number(business.target) || 0), 0);
+  const targetProgress = totalTarget ? Math.min(100, Math.round(totalMrr / totalTarget * 100)) : 0;
 
-  return (
-    <div className="space-y-6 pb-10">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold">Business Operations</h2>
-          <p className="text-slate-500 dark:text-slate-400 mt-1">Manage your active ventures and track revenue</p>
-        </div>
-        <button onClick={() => setIsModalOpen(true)} className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all shadow-sm hover:scale-105 ${isAdvanced ? 'bg-violet-600 text-white hover:bg-violet-700 shadow-violet-900/20' : 'bg-slate-900 text-white hover:bg-slate-800'}`}>
-          <Plus className="w-4 h-4" /> New Venture
-        </button>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {(() => {
-          const totalMrr = businesses.reduce((acc, b) => acc + b.mrr, 0);
-          const totalCustomers = businesses.reduce((acc, b) => acc + b.customers, 0);
-          const avgGrowth = businesses.length > 0 ? businesses.reduce((acc, b) => acc + b.growth, 0) / businesses.length : 0;
-          const totalTarget = businesses.reduce((acc, b) => acc + b.target, 0);
-          const percentComplete = totalTarget > 0 ? (totalMrr / totalTarget) * 100 : 0;
-
-          return [
-            { label: 'Total Monthly Revenue', value: `₱${totalMrr.toLocaleString()}`, icon: DollarSign, trend: totalMrr > 0 ? '+8.5%' : '0%', positive: true },
-            { label: 'Active Customers', value: totalCustomers.toLocaleString(), icon: Users, trend: totalCustomers > 0 ? '+12%' : '0%', positive: true },
-            { label: 'Avg Growth Rate', value: `${avgGrowth.toFixed(1)}%`, icon: TrendingUp, trend: avgGrowth > 0 ? '+2.1%' : '0%', positive: true },
-            { label: 'Total MRR Goal', value: `₱${totalTarget.toLocaleString()}`, icon: Building, trend: `${percentComplete.toFixed(0)}% Complete`, positive: true, noColor: true },
-          ].map((kpi, idx) => {
-            const Icon = kpi.icon;
-          return (
-            <div key={idx} className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-              <div className="flex justify-between items-start mb-4">
-                <div className={`p-3 rounded-2xl ${isAdvanced ? 'bg-slate-900 text-violet-400' : 'bg-slate-50 text-emerald-600'}`}>
-                  <Icon size={24} />
-                </div>
-                <div className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-lg ${kpi.noColor ? 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300' : kpi.positive ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400' : 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400'}`}>
-                  {!kpi.noColor && (kpi.positive ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />)}
-                  {kpi.trend}
-                </div>
-              </div>
-              <p className="text-sm font-medium text-slate-500 mb-1">{kpi.label}</p>
-              <h3 className="text-2xl font-black">{kpi.value}</h3>
-            </div>
-          );
-        })})()}
-      </div>
-
-      {/* Chart and Active Ventures */}
-      <div className="grid lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <div className={`p-4 rounded-2xl flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between ${isAdvanced ? 'bg-slate-900/50 border border-slate-700 text-slate-300' : 'bg-blue-50 border border-blue-100 text-blue-800'}`}>
-             <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-xl shrink-0 ${isAdvanced ? 'bg-slate-800 text-violet-400' : 'bg-blue-100 text-blue-600'}`}>
-                   <Building size={20} />
-                </div>
-                <div>
-                   {(() => {
-                      const topBusiness = [...businesses].sort((a, b) => b.mrr - a.mrr)[0];
-                      const total = businesses.reduce((acc, b) => acc + b.mrr, 0);
-                      const percentage = total > 0 && topBusiness ? ((topBusiness.mrr / total) * 100).toFixed(0) : 0;
-                      return (
-                        <>
-                           <p className="font-bold text-sm">Business Insight</p>
-                           <p className="text-xs mt-0.5 opacity-80">
-                             {topBusiness 
-                               ? `Your ${topBusiness.name} is driving ${percentage}% of your overall revenue. Consider re-investing profits to boost its marketing.` 
-                               : 'Add ventures to get intelligent business insights and performance reviews.'}
-                           </p>
-                        </>
-                      );
-                   })()}
-                </div>
-             </div>
-             <button className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-white hover:bg-blue-100 text-blue-600'}`}>
-                Apply Strategy
-             </button>
-          </div>
-
-          <div className={`rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-            <h3 className="font-bold text-lg mb-6">Total Revenue Trend</h3>
-            <div className="h-[300px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={revenueData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
-                  <defs>
-                    <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={isAdvanced ? '#8b5cf6' : '#10B981'} stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor={isAdvanced ? '#8b5cf6' : '#10B981'} stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} padding={{ left: 20, right: 20 }} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} tickFormatter={(val) => `₱${(val/1000)}k`} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: isAdvanced ? '#1e293b' : '#ffffff', border: isAdvanced ? '1px solid #334155' : '1px solid #e2e8f0', borderRadius: '12px' }} 
-                    itemStyle={{ color: isAdvanced ? '#e2e8f0' : '#0f172a', fontWeight: 'bold' }}
-                    formatter={(value: number) => [`₱${value.toLocaleString()}`, 'Revenue']}
-                  />
-                  <Area type="monotone" dataKey="value" stroke={isAdvanced ? '#8b5cf6' : '#10B981'} strokeWidth={3} fillOpacity={1} fill="url(#colorRev)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <div className={`rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-            <h3 className="font-bold text-lg mb-4">Ventures</h3>
-            <div className="space-y-4">
-              {businesses.length === 0 ? (
-                <div className="text-center py-8">
-                  <div className={`w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4 ${isAdvanced ? 'bg-slate-900 text-violet-400' : 'bg-slate-100 text-slate-400'}`}>
-                    <Building size={32} />
-                  </div>
-                  <h4 className="font-bold text-slate-600 dark:text-slate-300 mb-2">No active ventures</h4>
-                  <p className="text-xs text-slate-500 mb-4">Add your first business to track your MRR and growth.</p>
-                  <button onClick={() => setIsModalOpen(true)} className={`px-4 py-2 rounded-xl text-xs font-bold ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>Start a Business</button>
-                </div>
-              ) : businesses.map((business) => {
-                const progress = (business.mrr / business.target) * 100;
-                return (
-                  <div key={business.id} onClick={() => { setSelectedBusiness(business); onNavigate('business-dashboard'); }} className={`p-4 rounded-2xl border transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer ${isAdvanced ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <h4 className="font-bold">{business.name}</h4>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md ${business.status === 'Active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400'}`}>
-                            {business.status}
-                          </span>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${isAdvanced ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
-                            {business.type}
-                          </span>
-                        </div>
-                      </div>
-                      {business.growth > 0 && (
-                        <span className="text-[10px] font-bold text-emerald-500 flex items-center gap-1 bg-emerald-50 dark:bg-emerald-500/10 px-2 py-1 rounded-lg">
-                          <ArrowUpRight size={12} /> {business.growth}%
-                        </span>
-                      )}
-                    </div>
-                    
-                    <div className="flex items-end justify-between mb-3">
-                      <div>
-                        <p className="text-xs font-medium text-slate-500 mb-0.5">Monthly Rev</p>
-                        <p className="font-black text-lg">₱{business.mrr.toLocaleString()}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs font-medium text-slate-500 mb-0.5">Customers</p>
-                        <p className="font-bold">{business.customers}</p>
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1">
-                        <span>Target: ₱{business.target.toLocaleString()}</span>
-                        <span>{progress.toFixed(0)}%</span>
-                      </div>
-                      <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${isAdvanced ? 'bg-violet-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(progress, 100)}%` }} />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            
-            <button onClick={() => setIsPipelineOpen(true)} className={`w-full mt-4 py-3 rounded-xl font-bold text-sm border-2 border-dashed transition-colors ${isAdvanced ? 'border-slate-700 hover:border-violet-500 text-slate-400 hover:text-violet-400' : 'border-slate-200 hover:border-slate-400 text-slate-500 hover:text-slate-800'}`}>
-              View All Pipeline
-            </button>
-          </div>      </div>
+  return <div className="space-y-6 pb-10">
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div><h2 className="text-2xl font-bold">Business Operations</h2><p className="mt-1 text-slate-500">A portfolio of distinct ventures, each with its own operating workspace.</p></div>
+      <button onClick={() => setVentureEditor('new')} className={button(advanced)}><Plus size={17} /> New venture</button>
     </div>
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setIsModalOpen(false)}>
-          <div 
-            className={`w-full max-w-md rounded-3xl shadow-xl flex flex-col p-6 overflow-y-auto max-h-[90vh] custom-scrollbar ${isAdvanced ? 'bg-slate-800 border border-slate-700 text-white' : 'bg-white border border-slate-100'}`}
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold">Start a New Venture</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20} /></button>
-            </div>
-            
-            {step === 1 && (
-              <div className="space-y-4">
-                <p className="text-sm text-slate-500 mb-4">What kind of business are you starting?</p>
-                <div 
-                  onClick={() => setNewBusiness({...newBusiness, type: 'Store'})}
-                  className={`p-4 rounded-2xl border cursor-pointer transition-colors flex items-center gap-4 ${newBusiness.type === 'Store' ? (isAdvanced ? 'bg-violet-900/30 border-violet-500' : 'bg-slate-100 border-slate-900') : (isAdvanced ? 'bg-slate-900/50 border-slate-700' : 'bg-white border-slate-200')}`}
-                >
-                  <div className={`p-3 rounded-xl ${newBusiness.type === 'Store' ? (isAdvanced ? 'bg-violet-600 text-white' : 'bg-slate-900 text-white') : (isAdvanced ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500')}`}><Store size={24} /></div>
-                  <div>
-                    <h4 className="font-bold">Physical / E-commerce Store</h4>
-                    <p className="text-xs text-slate-500">Sell physical products</p>
-                  </div>
-                </div>
-                <div 
-                  onClick={() => setNewBusiness({...newBusiness, type: 'SaaS'})}
-                  className={`p-4 rounded-2xl border cursor-pointer transition-colors flex items-center gap-4 ${newBusiness.type === 'SaaS' ? (isAdvanced ? 'bg-violet-900/30 border-violet-500' : 'bg-slate-100 border-slate-900') : (isAdvanced ? 'bg-slate-900/50 border-slate-700' : 'bg-white border-slate-200')}`}
-                >
-                  <div className={`p-3 rounded-xl ${newBusiness.type === 'SaaS' ? (isAdvanced ? 'bg-violet-600 text-white' : 'bg-slate-900 text-white') : (isAdvanced ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500')}`}><MonitorSmartphone size={24} /></div>
-                  <div>
-                    <h4 className="font-bold">Software as a Service</h4>
-                    <p className="text-xs text-slate-500">Digital subscriptions</p>
-                  </div>
-                </div>
-                <div 
-                  onClick={() => setNewBusiness({...newBusiness, type: 'Agency'})}
-                  className={`p-4 rounded-2xl border cursor-pointer transition-colors flex items-center gap-4 ${newBusiness.type === 'Agency' ? (isAdvanced ? 'bg-violet-900/30 border-violet-500' : 'bg-slate-100 border-slate-900') : (isAdvanced ? 'bg-slate-900/50 border-slate-700' : 'bg-white border-slate-200')}`}
-                >
-                  <div className={`p-3 rounded-xl ${newBusiness.type === 'Agency' ? (isAdvanced ? 'bg-violet-600 text-white' : 'bg-slate-900 text-white') : (isAdvanced ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500')}`}><Users size={24} /></div>
-                  <div>
-                    <h4 className="font-bold">Service Agency</h4>
-                    <p className="text-xs text-slate-500">Consulting, design, etc.</p>
-                  </div>
-                </div>
-                
-                <button 
-                  onClick={() => setStep(2)}
-                  className={`w-full mt-6 py-4 rounded-xl font-bold transition-colors ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}
-                >
-                  Continue
-                </button>
-              </div>
-            )}
-            
-            {step === 2 && (
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Business Name</label>
-                  <input 
-                    type="text" 
-                    value={newBusiness.name}
-                    onChange={(e) => setNewBusiness({...newBusiness, name: e.target.value})}
-                    placeholder="e.g. Acme Corp"
-                    className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Current MRR (₱)</label>
-                    <input 
-                      type="number" 
-                      value={newBusiness.mrr}
-                      onChange={(e) => setNewBusiness({...newBusiness, mrr: e.target.value})}
-                      placeholder="0"
-                      className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Target MRR (₱)</label>
-                    <input 
-                      type="number" 
-                      value={newBusiness.target}
-                      onChange={(e) => setNewBusiness({...newBusiness, target: e.target.value})}
-                      placeholder="100000"
-                      className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Active Customers</label>
-                  <input 
-                    type="number" 
-                    value={newBusiness.customers}
-                    onChange={(e) => setNewBusiness({...newBusiness, customers: e.target.value})}
-                    placeholder="0"
-                    className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`}
-                  />
-                </div>
-                
-                <div className="flex gap-4 mt-6">
-                  <button 
-                    onClick={() => setStep(1)}
-                    className={`px-6 py-4 rounded-xl font-bold transition-colors ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-900'}`}
-                  >
-                    Back
-                  </button>
-                  <button 
-                    onClick={handleAddBusiness}
-                    disabled={!newBusiness.name}
-                    className={`flex-1 py-4 rounded-xl font-bold transition-colors ${!newBusiness.name ? 'opacity-50 cursor-not-allowed' : ''} ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}
-                  >
-                    Launch Business
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <Metric advanced={advanced} icon={Building2} label="Active ventures" value={String(businesses.filter(b => b.status !== 'Archived').length)} helper="Separate dashboards and records" />
+      <Metric advanced={advanced} icon={TrendingUp} label="Monthly recurring value" value={money(totalMrr)} helper="Only active recurring records" color="emerald" />
+      <Metric advanced={advanced} icon={Users} label="Active customers / clients" value={String(totalCustomers)} helper="Across your active ventures" />
+      <Metric advanced={advanced} icon={BarChart3} label="Portfolio target" value={totalTarget ? `${targetProgress}%` : 'Not set'} helper={totalTarget ? `${money(totalMrr)} of ${money(totalTarget)}` : 'Set a target per venture'} />
     </div>
-  );
+
+    {businesses.length === 0 ? <EmptyState advanced={advanced} icon={Building2} title="Start with your first venture" text="Choose a business model and FinGent will set up a relevant workspace without any sample data." action={() => setVentureEditor('new')} actionLabel="Create venture" /> :
+      <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
+        {businesses.map(business => {
+          const type = VENTURE_TYPES.find(t => t.type === business.type) || VENTURE_TYPES[3];
+          const Icon = type.icon; const progress = business.target ? Math.min(100, Math.round((business.mrr || 0) / business.target * 100)) : 0;
+          return <div key={business.id} className={`group rounded-3xl border p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${card(advanced)}`}>
+            <div className="mb-6 flex items-start justify-between gap-4"><div className="flex items-center gap-3"><div className={`rounded-2xl p-3 ${advanced ? 'bg-violet-500/15 text-violet-300' : 'bg-emerald-50 text-emerald-600'}`}><Icon size={23} /></div><div><p className="font-bold">{business.name}</p><p className="text-xs text-slate-500">{type.label}</p></div></div><span className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${business.status === 'Active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{business.status}</span></div>
+            <div className="grid grid-cols-2 gap-3"><div><p className="text-xs text-slate-500">Monthly value</p><p className="mt-1 text-xl font-black">{money(business.mrr || 0)}</p></div><div><p className="text-xs text-slate-500">Customers</p><p className="mt-1 text-xl font-black">{business.customers || 0}</p></div></div>
+            <div className="mt-5"><div className="mb-1.5 flex justify-between text-xs font-medium text-slate-500"><span>Monthly target</span><span>{business.target ? `${progress}%` : 'Not set'}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700"><div className={`h-full rounded-full ${advanced ? 'bg-violet-500' : 'bg-emerald-500'}`} style={{ width: `${progress}%` }} /></div></div>
+            <div className="mt-6 flex gap-2"><button onClick={() => { setSelectedBusiness(business); onNavigate('business-dashboard'); }} className={`${button(advanced)} flex-1`}>Open workspace <ArrowRight size={16} /></button><button aria-label={`Edit ${business.name}`} onClick={() => setVentureEditor(business)} className={`rounded-xl border p-2.5 ${advanced ? 'border-slate-700 hover:bg-slate-700' : 'border-slate-200 hover:bg-slate-50'}`}><Pencil size={16} /></button><button aria-label={`Delete ${business.name}`} onClick={() => deleteVenture(business)} className="rounded-xl border border-rose-200 p-2.5 text-rose-600 hover:bg-rose-50 dark:border-rose-500/30 dark:hover:bg-rose-500/10"><Trash2 size={16} /></button></div>
+          </div>;
+        })}
+      </div>}
+
+    <div className={`rounded-3xl border p-6 ${card(advanced)}`}><div className="flex items-center gap-3"><div className={`rounded-2xl p-3 ${advanced ? 'bg-slate-900 text-violet-300' : 'bg-slate-50 text-slate-600'}`}><Sparkles size={21} /></div><div><h3 className="font-bold">How the portfolio stays accurate</h3><p className="mt-1 text-sm text-slate-500">Venture cards use the records inside each workspace: active subscriptions, retainers, partnerships, or this month's paid store income. No demo totals are mixed in.</p></div></div></div>
+    {ventureEditor && <VentureModal advanced={advanced} business={ventureEditor === 'new' ? null : ventureEditor} onClose={() => setVentureEditor(null)} onSave={saveVenture} />}
+  </div>;
 }
 
-
-function StoreDashboard({ business, isAdvanced, currentTab, onNavigate }: any) {
-  const { triggerRefresh } = useStore();
-  const [search, setSearch] = React.useState('');
-  const [inventory, setInventory] = React.useState([
-    { id: 'INV-1001', name: 'Premium Leather Wallet', stock: 45, status: 'In Stock', price: 1200 },
-    { id: 'INV-1002', name: 'Minimalist Watch', stock: 12, status: 'Low Stock', price: 3500 },
-    { id: 'INV-1003', name: 'Canvas Backpack', stock: 0, status: 'Out of Stock', price: 2100 },
-    { id: 'INV-1004', name: 'Sunglasses', stock: 89, status: 'In Stock', price: 800 },
-  ]);
-  const [isAddOpen, setIsAddOpen] = React.useState(false);
-  const [newItem, setNewItem] = React.useState({ name: '', stock: '', price: '' });
-
-  const [restockOrders, setRestockOrders] = React.useState([
-    { id: 'RST-001', item: 'Premium Leather Wallet', quantity: 50, date: 'Today, 10:00 AM', status: 'Pending' }
-  ]);
-  const [isAddRestockOpen, setIsAddRestockOpen] = React.useState(false);
-  const [newRestock, setNewRestock] = React.useState({ item: '', quantity: '' });
-
-  const [campaigns, setCampaigns] = React.useState([
-    { id: 'CMP-1', name: 'Summer Sale - FB Ads', spend: '1,500/day', roas: '3.2x', status: 'Active' },
-    { id: 'CMP-2', name: 'Retargeting - Google', spend: '500/day', roas: '4.5x', status: 'Active' }
-  ]);
-  const [isAddCampaignOpen, setIsAddCampaignOpen] = React.useState(false);
-  const [newCampaign, setNewCampaign] = React.useState({ name: '', spend: '', roas: '' });
-
-  const [orders, setOrders] = React.useState([
-    { id: 'ORD-5092', date: 'Today, 2:30 PM', customer: 'Alice Smith', amount: 3200, status: 'Processing' },
-    { id: 'ORD-5091', date: 'Today, 10:15 AM', customer: 'Bob Jones', amount: 1450, status: 'Fulfilled' }
-  ]);
-  const [isAddOrderOpen, setIsAddOrderOpen] = React.useState(false);
-  const [newOrder, setNewOrder] = React.useState({ customer: '', amount: '' });
-
-  const [transactions, setTransactions] = React.useState([
-    { id: 'TXN-1', name: 'Payout from Stripe', date: 'Today', amount: 12450.00, type: 'income' },
-    { id: 'TXN-2', name: 'Supplier Payment (Leather Goods)', date: 'Yesterday', amount: 8200.00, type: 'expense' },
-    { id: 'TXN-3', name: 'Facebook Ads Billing', date: 'Jul 5, 2026', amount: 5000.00, type: 'expense' }
-  ]);
-  const [isAddTxnOpen, setIsAddTxnOpen] = React.useState(false);
-  const [newTxn, setNewTxn] = React.useState({ name: '', amount: '', type: 'income' });
-
-  const handleAddItem = () => {
-    if (!newItem.name) return;
-    const stock = parseInt(newItem.stock) || 0;
-    setInventory([...inventory, {
-      id: `INV-${1000 + inventory.length + 1}`,
-      name: newItem.name,
-      stock: stock,
-      status: stock > 20 ? 'In Stock' : stock > 0 ? 'Low Stock' : 'Out of Stock',
-      price: parseFloat(newItem.price) || 0
-    }]);
-    setNewItem({ name: '', stock: '', price: '' });
-    setIsAddOpen(false);
-  };
-
-  const handleAddRestock = () => {
-    if (!newRestock.item) return;
-    setRestockOrders([{
-      id: `RST-00${restockOrders.length + 1}`,
-      item: newRestock.item,
-      quantity: parseInt(newRestock.quantity) || 0,
-      date: 'Just now',
-      status: 'Pending'
-    }, ...restockOrders]);
-    setNewRestock({ item: '', quantity: '' });
-    setIsAddRestockOpen(false);
-  };
-
-  const handleAddCampaign = () => {
-    if (!newCampaign.name) return;
-    setCampaigns([...campaigns, {
-      id: `CMP-${campaigns.length + 1}`,
-      name: newCampaign.name,
-      spend: newCampaign.spend,
-      roas: newCampaign.roas || '0x',
-      status: 'Active'
-    }]);
-    setNewCampaign({ name: '', spend: '', roas: '' });
-    setIsAddCampaignOpen(false);
-  };
-
-  const handleAddOrder = async () => {
-    if (!newOrder.customer) return;
+function BusinessWorkspace({ business, currentTab, onNavigate, advanced }: { business: Business; currentTab: string; onNavigate: (tab: string) => void; advanced: boolean }) {
+  const { shouldRefresh, triggerRefresh, setSelectedBusiness } = useStore();
+  const [items, setItems] = useState<Item[]>([]); const [transactions, setTransactions] = useState<Transaction[]>([]); const [loading, setLoading] = useState(true);
+  const [recordEditor, setRecordEditor] = useState<{ item?: Item; section: WorkspaceConfig['sections'][string] } | null>(null);
+  const [transactionEditor, setTransactionEditor] = useState<Transaction | null | 'new'>(null);
+  const config = configs[business.type] || genericConfig;
+  const section = config.sections[currentTab];
+  const load = async () => {
+    setLoading(true);
     try {
-      await fetch(`/api/businesses/${business.id}/transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'income',
-          amount: parseFloat(newOrder.amount) || 0,
-          date: new Date().toISOString().split('T')[0],
-          description: newOrder.customer,
-          status: 'Processing'
-        })
-      });
-      triggerRefresh();
-      setNewOrder({ customer: '', amount: '' });
-      setIsAddOrderOpen(false);
-    } catch(e) { console.error(e); }
+      const [itemResponse, transactionResponse] = await Promise.all([fetch(`/api/businesses/${business.id}/items`), fetch(`/api/businesses/${business.id}/transactions`)]);
+      if (itemResponse.ok) setItems(await itemResponse.json());
+      if (transactionResponse.ok) setTransactions(await transactionResponse.json());
+    } finally { setLoading(false); }
   };
+  useEffect(() => { load().catch(console.error); }, [business.id, shouldRefresh]);
 
-  const handleAddTxn = () => {
-    if (!newTxn.name) return;
-    setTransactions([{
-      id: `TXN-${transactions.length + 1}`,
-      name: newTxn.name,
-      date: 'Just now',
-      amount: parseFloat(newTxn.amount) || 0,
-      type: newTxn.type
-    }, ...transactions]);
-    setNewTxn({ name: '', amount: '', type: 'income' });
-    setIsAddTxnOpen(false);
+  const saveItem = async (values: Omit<Item, 'id' | 'business_id'>, editing?: Item) => {
+    const response = await fetch(editing ? `/api/businesses/${business.id}/items/${editing.id}` : `/api/businesses/${business.id}/items`, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
+    if (!response.ok) return; setRecordEditor(null); triggerRefresh(); await load();
   };
-
-  const filteredInventory = inventory.filter(item => item.name.toLowerCase().includes(search.toLowerCase()) || item.id.toLowerCase().includes(search.toLowerCase()));
-
-  if (currentTab === 'business-logistics') {
-    return (
-      <div className="space-y-6">
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="font-bold text-xl flex items-center gap-2"><Package className={isAdvanced ? 'text-violet-400' : 'text-orange-500'} size={24} /> Inventory</h3>
-            <button onClick={() => setIsAddOpen(true)} className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
-              <Plus size={16} /> Add Item
-            </button>
-          </div>
-
-          <div className="mb-6">
-             <input 
-               type="text" 
-               placeholder="Search by ID or Name..." 
-               value={search}
-               onChange={(e) => setSearch(e.target.value)}
-               className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
-             />
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className={`border-b ${isAdvanced ? 'border-slate-700 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
-                  <th className="pb-3 font-medium">Item ID</th>
-                  <th className="pb-3 font-medium">Name</th>
-                  <th className="pb-3 font-medium text-right">Stock</th>
-                  <th className="pb-3 font-medium text-right">Price</th>
-                  <th className="pb-3 font-medium text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-dashed dark:divide-slate-700">
-                {filteredInventory.map(item => (
-                  <tr key={item.id} className={`${isAdvanced ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50'}`}>
-                    <td className="py-4 font-mono text-xs text-slate-500">{item.id}</td>
-                    <td className="py-4 font-bold">{item.name}</td>
-                    <td className="py-4 text-right">{item.stock}</td>
-                    <td className="py-4 text-right">₱{item.price.toLocaleString()}</td>
-                    <td className="py-4 text-right">
-                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-md ${item.status === 'In Stock' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : item.status === 'Low Stock' ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400'}`}>
-                        {item.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Restocking Table */}
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="font-bold text-xl flex items-center gap-2"><RefreshCw className={isAdvanced ? 'text-violet-400' : 'text-blue-500'} size={24} /> Logistic Orders / Restocking</h3>
-            <button onClick={() => setIsAddRestockOpen(true)} className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
-              <Plus size={16} /> Add Restock Order
-            </button>
-          </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className={`border-b ${isAdvanced ? 'border-slate-700 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
-                  <th className="pb-3 font-medium">Order ID</th>
-                  <th className="pb-3 font-medium">Item Name</th>
-                  <th className="pb-3 font-medium text-right">Qty</th>
-                  <th className="pb-3 font-medium">Date</th>
-                  <th className="pb-3 font-medium text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-dashed dark:divide-slate-700">
-                {restockOrders.map(order => (
-                  <tr key={order.id} className={`${isAdvanced ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50'}`}>
-                    <td className="py-4 font-mono text-xs text-slate-500">{order.id}</td>
-                    <td className="py-4 font-bold">{order.item}</td>
-                    <td className="py-4 text-right">{order.quantity}</td>
-                    <td className="py-4 text-slate-500">{order.date}</td>
-                    <td className="py-4 text-right">
-                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-md ${order.status === 'Fulfilled' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'}`}>
-                        {order.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {isAddOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setIsAddOpen(false)}>
-            <div className={`w-full max-w-md rounded-3xl p-6 shadow-xl ${isAdvanced ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4">Add Inventory Item</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Item Name</label>
-                  <input type="text" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Stock Count</label>
-                    <input type="number" value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Price (₱)</label>
-                    <input type="number" value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                  </div>
-                </div>
-                <div className="flex gap-4 mt-6">
-                  <button onClick={() => setIsAddOpen(false)} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}>Cancel</button>
-                  <button onClick={handleAddItem} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-violet-600 text-white' : 'bg-emerald-600 text-white'}`}>Save Item</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {isAddRestockOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setIsAddRestockOpen(false)}>
-            <div className={`w-full max-w-md rounded-3xl p-6 shadow-xl ${isAdvanced ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4">Add Restock Order</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Item Name</label>
-                  <input type="text" value={newRestock.item} onChange={e => setNewRestock({...newRestock, item: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Quantity</label>
-                  <input type="number" value={newRestock.quantity} onChange={e => setNewRestock({...newRestock, quantity: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                </div>
-                <div className="flex gap-4 mt-6">
-                  <button onClick={() => setIsAddRestockOpen(false)} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}>Cancel</button>
-                  <button onClick={handleAddRestock} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-violet-600 text-white' : 'bg-emerald-600 text-white'}`}>Save Order</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (currentTab === 'business-marketing') {
-    return (
-      <div className="space-y-6">
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="font-bold text-xl flex items-center gap-2"><Megaphone className={isAdvanced ? 'text-violet-400' : 'text-blue-500'} size={24} /> Marketing Campaigns</h3>
-            <button onClick={() => setIsAddCampaignOpen(true)} className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
-              <Plus size={16} /> Add Campaign
-            </button>
-          </div>
-          
-          {/* Detailed marketing stats */}
-          <div className="grid md:grid-cols-3 gap-4 mb-6">
-            <div className={`p-4 rounded-2xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-              <p className="text-sm text-slate-500">Total Spend</p>
-              <p className="text-2xl font-black">₱45,200</p>
-            </div>
-            <div className={`p-4 rounded-2xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-              <p className="text-sm text-slate-500">Impressions</p>
-              <p className="text-2xl font-black">1.2M</p>
-            </div>
-            <div className={`p-4 rounded-2xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-              <p className="text-sm text-slate-500">Avg. CPC</p>
-              <p className="text-2xl font-black">₱12.50</p>
-            </div>
-          </div>
-          <div className="space-y-3">
-             {campaigns.map(camp => (
-               <div key={camp.id} className="flex justify-between items-center p-4 rounded-xl border dark:border-slate-700">
-                 <div>
-                   <h4 className="font-bold">{camp.name}</h4>
-                   <p className="text-xs text-slate-500">{camp.status} • ₱{camp.spend}</p>
-                 </div>
-                 <span className="text-emerald-500 font-bold">{camp.roas} ROAS</span>
-               </div>
-             ))}
-          </div>
-        </div>
-
-        {isAddCampaignOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setIsAddCampaignOpen(false)}>
-            <div className={`w-full max-w-md rounded-3xl p-6 shadow-xl ${isAdvanced ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4">Add Campaign</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Campaign Name</label>
-                  <input type="text" value={newCampaign.name} onChange={e => setNewCampaign({...newCampaign, name: e.target.value})} placeholder="e.g. Meta Conversions" className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Daily Spend</label>
-                    <input type="text" value={newCampaign.spend} onChange={e => setNewCampaign({...newCampaign, spend: e.target.value})} placeholder="e.g. 500/day" className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Target ROAS</label>
-                    <input type="text" value={newCampaign.roas} onChange={e => setNewCampaign({...newCampaign, roas: e.target.value})} placeholder="e.g. 2.0x" className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                  </div>
-                </div>
-                <div className="flex gap-4 mt-6">
-                  <button onClick={() => setIsAddCampaignOpen(false)} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}>Cancel</button>
-                  <button onClick={handleAddCampaign} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-violet-600 text-white' : 'bg-emerald-600 text-white'}`}>Save Campaign</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (currentTab === 'business-ordering') {
-    return (
-      <div className="space-y-6">
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="font-bold text-xl flex items-center gap-2"><ShoppingCart className={isAdvanced ? 'text-violet-400' : 'text-emerald-500'} size={24} /> Recent Orders</h3>
-            <button onClick={() => setIsAddOrderOpen(true)} className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
-              <Plus size={16} /> Add Order
-            </button>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className={`border-b ${isAdvanced ? 'border-slate-700 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
-                  <th className="pb-3 font-medium">Order ID</th>
-                  <th className="pb-3 font-medium">Date</th>
-                  <th className="pb-3 font-medium">Customer</th>
-                  <th className="pb-3 font-medium text-right">Amount</th>
-                  <th className="pb-3 font-medium text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-dashed dark:divide-slate-700">
-                {orders.map(order => (
-                  <tr key={order.id} className={`${isAdvanced ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50'}`}>
-                    <td className="py-4 font-mono text-xs text-slate-500">{order.id}</td>
-                    <td className="py-4 text-slate-500">{order.date}</td>
-                    <td className="py-4 font-bold">{order.customer}</td>
-                    <td className="py-4 text-right">₱{order.amount.toLocaleString()}</td>
-                    <td className="py-4 text-right">
-                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-md ${order.status === 'Fulfilled' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'}`}>
-                        {order.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {isAddOrderOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setIsAddOrderOpen(false)}>
-            <div className={`w-full max-w-md rounded-3xl p-6 shadow-xl ${isAdvanced ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4">Add Customer Order</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Customer Name</label>
-                  <input type="text" value={newOrder.customer} onChange={e => setNewOrder({...newOrder, customer: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Amount (₱)</label>
-                  <input type="number" value={newOrder.amount} onChange={e => setNewOrder({...newOrder, amount: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                </div>
-                <div className="flex gap-4 mt-6">
-                  <button onClick={() => setIsAddOrderOpen(false)} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}>Cancel</button>
-                  <button onClick={handleAddOrder} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-violet-600 text-white' : 'bg-emerald-600 text-white'}`}>Save Order</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (currentTab === 'business-transactions') {
-    return (
-      <div className="space-y-6">
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="font-bold text-xl flex items-center gap-2"><Activity className={isAdvanced ? 'text-violet-400' : 'text-indigo-500'} size={24} /> Financial Transactions</h3>
-            <button onClick={() => setIsAddTxnOpen(true)} className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
-              <Plus size={16} /> Add Transaction
-            </button>
-          </div>
-          <div className="space-y-4">
-             {transactions.map(txn => (
-               <div key={txn.id} className="flex justify-between items-center p-4 rounded-xl border dark:border-slate-700">
-                 <div>
-                   <h4 className="font-bold">{txn.name}</h4>
-                   <p className="text-xs text-slate-500">{txn.date}</p>
-                 </div>
-                 <span className={`font-bold ${txn.type === 'income' ? 'text-emerald-500' : 'text-rose-500'}`}>
-                   {txn.type === 'income' ? '+' : '-'}₱{txn.amount.toLocaleString(undefined, {minimumFractionDigits: 2})}
-                 </span>
-               </div>
-             ))}
-          </div>
-        </div>
-
-        {isAddTxnOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setIsAddTxnOpen(false)}>
-            <div className={`w-full max-w-md rounded-3xl p-6 shadow-xl ${isAdvanced ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4">Add Transaction</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Description</label>
-                  <input type="text" value={newTxn.name} onChange={e => setNewTxn({...newTxn, name: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Type</label>
-                    <select value={newTxn.type} onChange={e => setNewTxn({...newTxn, type: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`}>
-                      <option value="income">Income</option>
-                      <option value="expense">Expense</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Amount (₱)</label>
-                    <input type="number" value={newTxn.amount} onChange={e => setNewTxn({...newTxn, amount: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                  </div>
-                </div>
-                <div className="flex gap-4 mt-6">
-                  <button onClick={() => setIsAddTxnOpen(false)} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}>Cancel</button>
-                  <button onClick={handleAddTxn} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-violet-600 text-white' : 'bg-emerald-600 text-white'}`}>Save</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6 mt-6">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Total Sales (Monthly)</p>
-          <p className="font-black text-2xl">₱{(business?.mrr || 124500).toLocaleString()}</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {orders.length > 0 ? "+12.5%" : "0%"} this month</p>
-        </div>
-        <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Orders</p>
-          <p className="font-black text-2xl">{business?.customers || 156}</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {orders.length > 0 ? "+5.2%" : "0%"} this month</p>
-        </div>
-        <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Avg Order Value</p>
-          <p className="font-black text-2xl">₱798</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {orders.length > 0 ? "+1.2%" : "0%"} this month</p>
-        </div>
-        <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Low Stock</p>
-          <p className="font-black text-2xl text-rose-500">3</p>
-          <p className="text-[10px] text-rose-500 font-bold mt-2">Requires attention</p>
-        </div>
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-6">
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Megaphone className={isAdvanced ? 'text-violet-400' : 'text-blue-500'} size={20} /> Marketing</h3>
-          <div className="space-y-3">
-            <div className={`p-3 rounded-xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-              <p className="text-xs text-slate-500 mb-1">Active Ad Spend</p>
-              <p className="font-bold">₱15,000</p>
-            </div>
-            <div className={`p-3 rounded-xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-              <p className="text-xs text-slate-500 mb-1">ROAS (Return on Ad Spend)</p>
-              <p className="font-bold text-emerald-500">2.4x</p>
-            </div>
-          </div>
-        </div>
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Package className={isAdvanced ? 'text-violet-400' : 'text-orange-500'} size={20} /> Top Products</h3>
-          <div className="space-y-3">
-            <div className="flex justify-between items-center p-2 border-b border-dashed dark:border-slate-700">
-               <span className="text-sm">Premium Leather Wallet</span>
-               <span className="text-sm font-bold text-emerald-500">120 sold</span>
-            </div>
-            <div className="flex justify-between items-center p-2 border-b border-dashed dark:border-slate-700">
-               <span className="text-sm">Minimalist Watch</span>
-               <span className="text-sm font-bold text-emerald-500">45 sold</span>
-            </div>
-            <div className="flex justify-between items-center p-2 border-b border-dashed dark:border-slate-700">
-               <span className="text-sm">Canvas Backpack</span>
-               <span className="text-sm font-bold text-emerald-500">32 sold</span>
-            </div>
-          </div>
-        </div>
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><ShoppingCart className={isAdvanced ? 'text-violet-400' : 'text-emerald-500'} size={20} /> Pending Orders</h3>
-          <div className="space-y-3">
-             <div className={`p-4 rounded-xl flex justify-between items-center ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-                <div>
-                   <p className="text-sm font-bold">New Orders (Today)</p>
-                   <p className="text-xs text-slate-500">To be fulfilled</p>
-                </div>
-                <p className="font-black text-2xl text-orange-500">24</p>
-             </div>
-             <button onClick={() => onNavigate('business-ordering')} className={`w-full py-2 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-200 hover:bg-slate-300'}`}>
-               View Orders
-             </button>
-          </div>
-        </div>
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Activity className={isAdvanced ? 'text-violet-400' : 'text-indigo-500'} size={20} /> Recent Transactions</h3>
-          <div className="space-y-3">
-             <div className="flex justify-between text-sm p-2 border-b border-dashed dark:border-slate-700">
-               <span>Order #1029</span>
-               <span className="font-bold text-emerald-500">+₱1,200</span>
-             </div>
-             <div className="flex justify-between text-sm p-2 border-b border-dashed dark:border-slate-700">
-               <span>Order #1028</span>
-               <span className="font-bold text-emerald-500">+₱850</span>
-             </div>
-             <div className="flex justify-between text-sm p-2 border-b border-dashed dark:border-slate-700">
-               <span>Meta Ads Billing</span>
-               <span className="font-bold text-rose-500">-₱5,000</span>
-             </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-function SaaSDashboard({ business, isAdvanced, currentTab, onNavigate }: any) {
-  const { shouldRefresh, triggerRefresh } = useStore();
-  const [isAddUserOpen, setIsAddUserOpen] = React.useState(false);
-  const [users, setUsers] = React.useState<any[]>([]);
-  const [newUser, setNewUser] = React.useState({ email: '', plan: 'Basic' });
-  
-  const [isAddCampaignOpen, setIsAddCampaignOpen] = React.useState(false);
-  const [campaigns, setCampaigns] = React.useState<any[]>([]);
-  const [newCampaign, setNewCampaign] = React.useState({ name: '', spend: '' });
-
-  const [isAddExpenseOpen, setIsAddExpenseOpen] = React.useState(false);
-  const [expenses, setExpenses] = React.useState<any[]>([]);
-  const [newExpense, setNewExpense] = React.useState({ name: '', category: 'Tools', amount: '', frequency: 'Monthly' });
-
-  React.useEffect(() => {
-    Promise.all([
-      fetch(`/api/businesses/${business.id}/items`),
-      fetch(`/api/businesses/${business.id}/transactions`)
-    ]).then(async ([itemsRes, txRes]) => {
-      const itemsData = await itemsRes.json();
-      const txData = await txRes.json();
-      
-      const usrs = itemsData.filter((i:any) => i.type === 'user').map((i:any) => {
-        let extra = {};
-        try { extra = JSON.parse(i.extra_info || '{}'); } catch(e){}
-        return { id: i.id, email: i.name, plan: (extra as any).plan || 'Basic', status: i.status };
-      });
-      setUsers(usrs);
-
-      const camps = itemsData.filter((i:any) => i.type === 'campaign').map((i:any) => {
-        return { id: i.id, name: i.name, spend: i.value, signups: 0 };
-      });
-      setCampaigns(camps);
-
-      const exps = txData.filter((t:any) => t.type === 'expense').map((t:any) => ({
-        id: t.id, name: t.description, amount: t.amount, category: t.category, frequency: 'Monthly'
-      }));
-      setExpenses(exps);
-    }).catch(console.error);
-  }, [business.id, shouldRefresh]);
-
-  const handleAddUser = async () => {
-    if (!newUser.email) return;
-    try {
-      const val = newUser.plan === 'Pro' ? 1500 : newUser.plan === 'Enterprise' ? 5000 : 500;
-      await fetch(`/api/businesses/${business.id}/items`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'user',
-          name: newUser.email,
-          status: 'Active',
-          value: val,
-          extra_info: { plan: newUser.plan }
-        })
-      });
-      triggerRefresh();
-      setNewUser({ email: '', plan: 'Basic' });
-      setIsAddUserOpen(false);
-    } catch(e) { console.error(e); }
+  const deleteItem = async (item: Item) => { if (!window.confirm(`Delete "${item.name}"?`)) return; const response = await fetch(`/api/businesses/${business.id}/items/${item.id}`, { method: 'DELETE' }); if (response.ok) { triggerRefresh(); await load(); } };
+  const saveTransaction = async (values: Omit<Transaction, 'id' | 'business_id'>, editing?: Transaction) => {
+    const response = await fetch(editing ? `/api/businesses/${business.id}/transactions/${editing.id}` : `/api/businesses/${business.id}/transactions`, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
+    if (!response.ok) return; setTransactionEditor(null); triggerRefresh(); await load();
   };
+  const deleteTransaction = async (transaction: Transaction) => { if (!window.confirm(`Delete this ${transaction.type} record?`)) return; const response = await fetch(`/api/businesses/${business.id}/transactions/${transaction.id}`, { method: 'DELETE' }); if (response.ok) { triggerRefresh(); await load(); } };
 
-  const handleAddCampaign = async () => {
-    if (!newCampaign.name) return;
-    try {
-      await fetch(`/api/businesses/${business.id}/items`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'campaign',
-          name: newCampaign.name,
-          status: 'Active',
-          value: parseFloat(newCampaign.spend) || 0
-        })
-      });
-      triggerRefresh();
-      setNewCampaign({ name: '', spend: '' });
-      setIsAddCampaignOpen(false);
-    } catch(e) { console.error(e); }
-  };
+  if (loading) return <div className="py-20 text-center text-sm text-slate-500">Loading {business.name}...</div>;
+  if (currentTab === 'business-finance') return <>
+    <WorkspaceHeader business={business} advanced={advanced} onBack={() => { setSelectedBusiness(null); onNavigate('business'); }} />
+    <TransactionManager advanced={advanced} transactions={transactions} onAdd={() => setTransactionEditor('new')} onEdit={setTransactionEditor} onDelete={deleteTransaction} />
+    {transactionEditor && <TransactionModal advanced={advanced} transaction={transactionEditor === 'new' ? null : transactionEditor} onClose={() => setTransactionEditor(null)} onSave={saveTransaction} />}
+  </>;
+  if (section) return <>
+    <WorkspaceHeader business={business} advanced={advanced} onBack={() => { setSelectedBusiness(null); onNavigate('business'); }} />
+    <RecordManager advanced={advanced} section={section} items={items.filter(item => section.types.includes(item.type))} onAdd={() => setRecordEditor({ section })} onEdit={item => setRecordEditor({ item, section })} onDelete={deleteItem} />
+    {recordEditor && <RecordModal advanced={advanced} section={recordEditor.section} item={recordEditor.item} onClose={() => setRecordEditor(null)} onSave={saveItem} />}
+  </>;
 
-  const handleAddExpense = async () => {
-    if (!newExpense.name) return;
-    try {
-      await fetch(`/api/businesses/${business.id}/transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'expense',
-          amount: parseFloat(newExpense.amount) || 0,
-          date: new Date().toISOString().split('T')[0],
-          description: newExpense.name,
-          category: newExpense.category
-        })
-      });
-      triggerRefresh();
-      setNewExpense({ name: '', category: 'Tools', amount: '', frequency: 'Monthly' });
-      setIsAddExpenseOpen(false);
-    } catch(e) { console.error(e); }
-  };
+  const primary = items.filter(item => config.primaryTypes.includes(item.type));
+  const activePrimary = primary.filter(item => business.type === 'Store' ? item.status !== 'Discontinued' : item.status === 'Active');
+  const cashIn = transactions.filter(t => t.type === 'income' && paid(t)).reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  const cashOut = transactions.filter(t => t.type === 'expense' && paid(t)).reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  const receivables = transactions.filter(t => t.type === 'income' && !paid(t)).reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  const pipelineTypes = config.sections['business-sales'].types;
+  const pipelineValue = items.filter(item => pipelineTypes.includes(item.type) && !['Won', 'Lost', 'Cancelled'].includes(item.status)).reduce((sum, item) => sum + Number(item.value || 0), 0);
+  const currentMonth = today().slice(0, 7);
+  const monthlyValue = business.type === 'Store'
+    ? transactions.filter(t => t.type === 'income' && paid(t) && String(t.date || '').startsWith(currentMonth)).reduce((sum, t) => sum + Number(t.amount || 0), 0)
+    : activePrimary.reduce((sum, item) => sum + Number(item.value || 0), 0);
+  const targetProgress = business.target ? Math.min(100, Math.round(monthlyValue / business.target * 100)) : 0;
 
-  if (currentTab === 'business-mrr') {
-    return (
-      <div className="space-y-6">
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <h3 className="font-bold text-xl mb-6 flex items-center gap-2"><Activity className={isAdvanced ? 'text-violet-400' : 'text-blue-500'} size={24} /> MRR & Churn Metrics</h3>
-          <div className="grid md:grid-cols-2 gap-6">
-            <div className={`p-6 rounded-2xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-              <p className="text-sm text-slate-500 mb-1">Total MRR</p>
-              <p className="font-black text-3xl text-emerald-500">₱{business.mrr.toLocaleString()}</p>
-              <p className="text-xs text-slate-500 mt-2">{users.length > 0 ? "+12%" : "0%"} from last month</p>
-            </div>
-            <div className={`p-6 rounded-2xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-              <p className="text-sm text-slate-500 mb-1">Revenue Churn</p>
-              <p className="font-black text-3xl text-rose-500">{users.length > 0 ? "4.2%" : "0%"}</p>
-              <p className="text-xs text-slate-500 mt-2">{users.length > 0 ? "-0.5%" : "0%"} from last month</p>
-            </div>
-            <div className={`p-6 rounded-2xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-              <p className="text-sm text-slate-500 mb-1">ARPU</p>
-              <p className="font-black text-3xl">₱{(business.mrr / Math.max(1, business.customers)).toFixed(0)}</p>
-            </div>
-            <div className={`p-6 rounded-2xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-              <p className="text-sm text-slate-500 mb-1">LTV (Lifetime Value)</p>
-              <p className="font-black text-3xl">₱{((business.mrr / Math.max(1, business.customers)) / 0.042).toFixed(0)}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (currentTab === 'business-users') {
-    return (
-      <div className="space-y-6">
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="font-bold text-xl flex items-center gap-2"><Users className={isAdvanced ? 'text-violet-400' : 'text-indigo-500'} size={24} /> Subscriptions</h3>
-            <button onClick={() => setIsAddUserOpen(true)} className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
-              <Plus size={16} /> Add User
-            </button>
-          </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className={`border-b ${isAdvanced ? 'border-slate-700 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
-                  <th className="pb-3 font-medium">User ID</th>
-                  <th className="pb-3 font-medium">Email</th>
-                  <th className="pb-3 font-medium">Plan</th>
-                  <th className="pb-3 font-medium text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-dashed dark:divide-slate-700">
-                {users.map(u => (
-                  <tr key={u.id} className={`${isAdvanced ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50'}`}>
-                    <td className="py-4 font-mono text-xs text-slate-500">{u.id}</td>
-                    <td className="py-4 font-bold">{u.email}</td>
-                    <td className="py-4">{u.plan}</td>
-                    <td className="py-4 text-right">
-                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-md ${u.status === 'Active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'}`}>
-                        {u.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {isAddUserOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setIsAddUserOpen(false)}>
-            <div className={`w-full max-w-md rounded-3xl p-6 shadow-xl ${isAdvanced ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4">Add Subscription</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Email</label>
-                  <input type="text" value={newUser.email} onChange={e => setNewUser({...newUser, email: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Plan</label>
-                  <select value={newUser.plan} onChange={e => setNewUser({...newUser, plan: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`}>
-                    <option value="Basic">Basic</option>
-                    <option value="Pro">Pro</option>
-                    <option value="Enterprise">Enterprise</option>
-                  </select>
-                </div>
-                <div className="flex gap-4 mt-6">
-                  <button onClick={() => setIsAddUserOpen(false)} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}>Cancel</button>
-                  <button onClick={handleAddUser} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-violet-600 text-white' : 'bg-emerald-600 text-white'}`}>Save</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (currentTab === 'business-acquisition') {
-    return (
-      <div className="space-y-6">
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="font-bold text-xl flex items-center gap-2"><Megaphone className={isAdvanced ? 'text-violet-400' : 'text-orange-500'} size={24} /> Acquisition</h3>
-            <button onClick={() => setIsAddCampaignOpen(true)} className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
-              <Plus size={16} /> Add Campaign
-            </button>
-          </div>
-          
-          <div className="space-y-4">
-            {campaigns.map(c => (
-              <div key={c.id} className="flex justify-between items-center p-4 rounded-xl border dark:border-slate-700">
-                <div>
-                  <h4 className="font-bold">{c.name}</h4>
-                  <p className="text-xs text-slate-500">Spend: ₱{c.spend.toLocaleString()}</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-emerald-500">{c.signups} Signups</p>
-                  <p className="text-xs text-slate-500">CAC: ₱{(c.spend / Math.max(1, c.signups)).toFixed(0)}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {isAddCampaignOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setIsAddCampaignOpen(false)}>
-            <div className={`w-full max-w-md rounded-3xl p-6 shadow-xl ${isAdvanced ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4">Add Campaign</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Campaign Name</label>
-                  <input type="text" value={newCampaign.name} onChange={e => setNewCampaign({...newCampaign, name: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Spend (₱)</label>
-                  <input type="number" value={newCampaign.spend} onChange={e => setNewCampaign({...newCampaign, spend: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                </div>
-                <div className="flex gap-4 mt-6">
-                  <button onClick={() => setIsAddCampaignOpen(false)} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}>Cancel</button>
-                  <button onClick={handleAddCampaign} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-violet-600 text-white' : 'bg-emerald-600 text-white'}`}>Save</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-
-  if (currentTab === 'business-expenditure') {
-    const totalMonthly = expenses.filter(e => e.frequency === 'Monthly').reduce((acc, curr) => acc + curr.amount, 0);
-    const totalAnnual = expenses.filter(e => e.frequency === 'Yearly').reduce((acc, curr) => acc + curr.amount, 0);
-
-    return (
-      <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <h3 className="font-bold text-xl">Tools & Subscriptions</h3>
-          <button onClick={() => setIsAddExpenseOpen(true)} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${isAdvanced ? 'bg-violet-600 text-white hover:bg-violet-700 shadow-violet-900/20' : 'bg-slate-900 text-white hover:bg-slate-800'}`}>
-            <Plus size={16} /> Add Expense
-          </button>
-        </div>
-
-        <div className="grid md:grid-cols-2 gap-6">
-          <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-            <p className="text-sm font-bold text-slate-500 mb-2">Monthly Expenditure</p>
-            <p className="font-black text-3xl text-rose-500">₱{totalMonthly.toLocaleString()}</p>
-          </div>
-          <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-            <p className="text-sm font-bold text-slate-500 mb-2">Annual Expenditure</p>
-            <p className="font-black text-3xl text-rose-500">₱{totalAnnual.toLocaleString()}</p>
-          </div>
-        </div>
-
-        {isAddExpenseOpen && (
-          <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-            <div className="flex justify-between items-center mb-4">
-              <h4 className="font-bold">New Subscription/Tool</h4>
-              <button onClick={() => setIsAddExpenseOpen(false)} className="text-slate-500 hover:text-slate-700"><X size={20} /></button>
-            </div>
-            <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-              <input 
-                type="text"
-                placeholder="Name (e.g., Claude API)"
-                value={newExpense.name}
-                onChange={(e) => setNewExpense({...newExpense, name: e.target.value})}
-                className={`w-full p-3 rounded-xl border ${isAdvanced ? 'bg-slate-900/50 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
-              />
-              <select
-                value={newExpense.category}
-                onChange={(e) => setNewExpense({...newExpense, category: e.target.value})}
-                className={`w-full p-3 rounded-xl border ${isAdvanced ? 'bg-slate-900/50 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
-              >
-                <option value="Tools">Tools</option>
-                <option value="AI Tools">AI Tools</option>
-                <option value="Infrastructure">Infrastructure</option>
-                <option value="Marketing">Marketing</option>
-                <option value="Other">Other</option>
-              </select>
-              <input 
-                type="number"
-                placeholder="Amount (₱)"
-                value={newExpense.amount}
-                onChange={(e) => setNewExpense({...newExpense, amount: e.target.value})}
-                className={`w-full p-3 rounded-xl border ${isAdvanced ? 'bg-slate-900/50 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
-              />
-              <select
-                value={newExpense.frequency}
-                onChange={(e) => setNewExpense({...newExpense, frequency: e.target.value})}
-                className={`w-full p-3 rounded-xl border ${isAdvanced ? 'bg-slate-900/50 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
-              >
-                <option value="Monthly">Monthly</option>
-                <option value="Yearly">Yearly</option>
-                <option value="One-time">One-time</option>
-              </select>
-            </div>
-            <div className="flex justify-end">
-              <button onClick={handleAddExpense} className={`px-6 py-2 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
-                Save Expense
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className={`rounded-3xl border overflow-hidden ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className={`${isAdvanced ? 'bg-slate-900/50 text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
-                <tr>
-                  <th className="p-4 font-medium">Tool / Subscription</th>
-                  <th className="p-4 font-medium">Category</th>
-                  <th className="p-4 font-medium">Amount</th>
-                  <th className="p-4 font-medium">Frequency</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                {expenses.map((expense) => (
-                  <tr key={expense.id} className={`${isAdvanced ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50/50'}`}>
-                    <td className="p-4 font-medium">{expense.name}</td>
-                    <td className="p-4"><span className={`px-2 py-1 rounded-full text-xs font-bold ${isAdvanced ? 'bg-slate-900 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>{expense.category}</span></td>
-                    <td className="p-4 font-bold text-rose-500">₱{expense.amount.toLocaleString()}</td>
-                    <td className="p-4">{expense.frequency}</td>
-                  </tr>
-                ))}
-                {expenses.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="p-8 text-center text-slate-500">
-                      No expenses recorded. Add your first tool or subscription!
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6 mt-6">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Total MRR</p>
-          <p className="font-black text-2xl">₱{business.mrr.toLocaleString()}</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {users.length > 0 ? "+8.4%" : "0%"} this month</p>
-        </div>
-        <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Active Users</p>
-          <p className="font-black text-2xl">{business.customers}</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {users.length > 0 ? "+12.1%" : "0%"} this month</p>
-        </div>
-        <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Churn Rate</p>
-          <p className="font-black text-2xl text-rose-500">{users.length > 0 ? "4.2%" : "0%"}</p>
-          <p className="text-[10px] text-rose-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {users.length > 0 ? "+0.5%" : "0%"} this month</p>
-        </div>
-        <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">ARPU</p>
-          <p className="font-black text-2xl">₱{(business.mrr / Math.max(1, business.customers)).toFixed(0)}</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {users.length > 0 ? "+2.1%" : "0%"} this month</p>
-        </div>
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-6">
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Activity className={isAdvanced ? 'text-violet-400' : 'text-blue-500'} size={20} /> Subscription Activity</h3>
-          <div className="space-y-3">
-            <div className="flex justify-between text-sm p-3 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
-               <span>New Signups (Today)</span>
-               <span className="font-bold">+12</span>
-            </div>
-            <div className="flex justify-between text-sm p-3 rounded-xl bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400">
-               <span>Upgrades to Pro</span>
-               <span className="font-bold">+4</span>
-            </div>
-            <div className="flex justify-between text-sm p-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400">
-               <span>Cancellations</span>
-               <span className="font-bold">-2</span>
-            </div>
-          </div>
-        </div>
-        
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Users className={isAdvanced ? 'text-violet-400' : 'text-indigo-500'} size={20} /> User Pipeline</h3>
-          <div className="space-y-3">
-             <div className="flex justify-between items-center p-2 border-b border-dashed dark:border-slate-700">
-               <span className="text-sm">Trial Users</span>
-               <span className="text-sm font-bold text-amber-500">45</span>
-             </div>
-             <div className="flex justify-between items-center p-2 border-b border-dashed dark:border-slate-700">
-               <span className="text-sm">Expiring Trials (Next 7 days)</span>
-               <span className="text-sm font-bold text-rose-500">12</span>
-             </div>
-             <div className="flex justify-between items-center p-2 border-b border-dashed dark:border-slate-700">
-               <span className="text-sm">Active Subscribers</span>
-               <span className="text-sm font-bold">{business.customers}</span>
-             </div>
-          </div>
-        </div>
-
-        <div className={`p-6 rounded-3xl border shadow-sm md:col-span-2 ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-bold text-lg flex items-center gap-2"><Megaphone className={isAdvanced ? 'text-violet-400' : 'text-orange-500'} size={20} /> Marketing & Acquisition</h3>
-            <button onClick={() => onNavigate('business-acquisition')} className={`text-sm font-bold ${isAdvanced ? 'text-violet-400 hover:text-violet-300' : 'text-slate-600 hover:text-slate-900'}`}>View Details</button>
-          </div>
-          <div className="grid sm:grid-cols-3 gap-4">
-             <div className={`p-4 rounded-xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-               <p className="text-xs text-slate-500 mb-1">Customer Acquisition Cost</p>
-               <p className="font-bold text-xl">₱450</p>
-               <p className="text-[10px] text-emerald-500 mt-1">{users.length > 0 ? "-5%" : "0%"} vs last month</p>
-             </div>
-             <div className={`p-4 rounded-xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-               <p className="text-xs text-slate-500 mb-1">Organic Traffic</p>
-               <p className="font-bold text-xl">12,450 /mo</p>
-               <p className="text-[10px] text-emerald-500 mt-1">{users.length > 0 ? "+15%" : "0%"} vs last month</p>
-             </div>
-             <div className={`p-4 rounded-xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-               <p className="text-xs text-slate-500 mb-1">Trial Conversion Rate</p>
-               <p className="font-bold text-xl">{users.length > 0 ? "12.8%" : "0%"}</p>
-               <p className="text-[10px] text-emerald-500 mt-1">{users.length > 0 ? "+1.2%" : "0%"} vs last month</p>
-             </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return <div className="space-y-6 pb-10">
+    <WorkspaceHeader business={business} advanced={advanced} onBack={() => { setSelectedBusiness(null); onNavigate('business'); }} />
+    <div className={`overflow-hidden rounded-3xl border p-6 sm:p-8 ${advanced ? 'border-violet-500/20 bg-gradient-to-br from-violet-950/50 to-slate-800' : 'border-emerald-100 bg-gradient-to-br from-emerald-50 to-white'}`}><div className="max-w-2xl"><p className={`text-xs font-bold uppercase tracking-[0.16em] ${advanced ? 'text-violet-300' : 'text-emerald-700'}`}>{business.type}</p><h2 className="mt-2 text-2xl font-black sm:text-3xl">{config.headline}</h2><p className="mt-2 text-sm text-slate-500">Use the workspace sidebar to keep operational records and cash flow separate. This dashboard summarises only what you add.</p></div><div className="mt-6 flex flex-wrap gap-2"><button onClick={() => onNavigate('business-records')} className={button(advanced)}><Plus size={16} /> Add {config.sections['business-records'].title.replace(/s$/, '')}</button><button onClick={() => onNavigate('business-finance')} className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold ${advanced ? 'border-slate-700 hover:bg-slate-800' : 'border-slate-200 hover:bg-white'}`}><CreditCard size={16} /> Record cash flow</button></div></div>
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Metric advanced={advanced} icon={Users} label={config.primaryMetric} value={String(activePrimary.length)} helper={`${primary.length} total records`} /><Metric advanced={advanced} icon={TrendingUp} label="Cash collected" value={money(cashIn)} helper="Paid income records" color="emerald" /><Metric advanced={advanced} icon={TrendingDown} label="Cash paid out" value={money(cashOut)} helper="Paid expense records" color="rose" /><Metric advanced={advanced} icon={DollarSign} label="Open receivables" value={money(receivables)} helper="Draft, pending, scheduled, or overdue" color="amber" /></div>
+    <div className="grid gap-6 xl:grid-cols-3"><div className={`xl:col-span-2 rounded-3xl border p-6 ${card(advanced)}`}><div className="mb-5 flex items-center justify-between"><div><h3 className="font-bold">Operating snapshot</h3><p className="mt-1 text-sm text-slate-500">Current work and cash health, without extrapolated trends.</p></div><Activity className={advanced ? 'text-violet-300' : 'text-emerald-600'} /></div><div className="grid gap-4 sm:grid-cols-3"><Snapshot label="Recorded net cash" value={money(cashIn - cashOut)} tone={cashIn - cashOut >= 0 ? 'emerald' : 'rose'} /><Snapshot label="Open pipeline value" value={money(pipelineValue)} tone="violet" /><Snapshot label="Monthly target" value={business.target ? `${targetProgress}%` : 'Not set'} tone="slate" /></div>{business.target ? <div className="mt-6"><div className="mb-2 flex justify-between text-sm text-slate-500"><span>Current value against target</span><span>{money(monthlyValue)} / {money(business.target)}</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700"><div className={`h-full rounded-full ${advanced ? 'bg-violet-500' : 'bg-emerald-500'}`} style={{ width: `${targetProgress}%` }} /></div></div> : null}</div><div className={`rounded-3xl border p-6 ${card(advanced)}`}><h3 className="font-bold">Next best actions</h3><div className="mt-4 space-y-3"><ActionRow text={primary.length ? `Review ${primary.length} ${config.sections['business-records'].title.toLowerCase()} record${primary.length === 1 ? '' : 's'}` : `Add your first ${config.sections['business-records'].title.toLowerCase()} record`} onClick={() => onNavigate('business-records')} /><ActionRow text={pipelineValue ? `Follow up ${money(pipelineValue)} in open pipeline` : `Start a ${config.sections['business-sales'].title.toLowerCase()} record`} onClick={() => onNavigate('business-sales')} /><ActionRow text={receivables ? `Resolve ${money(receivables)} in receivables` : 'Keep cash flow up to date'} onClick={() => onNavigate('business-finance')} /></div></div></div>
+    <div className="grid gap-6 lg:grid-cols-2"><RecentRecords advanced={advanced} title={config.sections['business-records'].title} items={primary.slice(0, 5)} empty="No records yet. Add the people, products, subscriptions, or partnerships that drive this venture." onOpen={() => onNavigate('business-records')} /><RecentTransactions advanced={advanced} transactions={transactions.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 5)} onOpen={() => onNavigate('business-finance')} /></div>
+  </div>;
 }
 
-function AgencyDashboard({ business, isAdvanced, currentTab, onNavigate }: any) {
-  const { shouldRefresh, triggerRefresh } = useStore();
-  const [isAddClientOpen, setIsAddClientOpen] = React.useState(false);
-  const [clients, setClients] = React.useState<any[]>([]);
-  const [newClient, setNewClient] = React.useState({ name: '', type: 'Retainer', revenue: '' });
+function WorkspaceHeader({ business, advanced, onBack }: { business: Business; advanced: boolean; onBack: () => void }) { return <div className="flex items-center gap-4"><button onClick={onBack} aria-label="Back to business portfolio" className={`rounded-xl border p-2.5 ${advanced ? 'border-slate-700 bg-slate-800 hover:bg-slate-700' : 'border-slate-200 bg-white hover:bg-slate-50'}`}><ArrowLeft size={18} /></button><div><h2 className="text-xl font-bold">{business.name}</h2><p className="text-sm text-slate-500">{business.type} workspace</p></div></div>; }
+function Metric({ advanced, icon: Icon, label, value, helper, color = 'violet' }: { advanced: boolean; icon: React.ElementType; label: string; value: string; helper: string; color?: string }) { const tone: Record<string, string> = { emerald: advanced ? 'text-emerald-300 bg-emerald-500/10' : 'text-emerald-600 bg-emerald-50', rose: advanced ? 'text-rose-300 bg-rose-500/10' : 'text-rose-600 bg-rose-50', amber: advanced ? 'text-amber-300 bg-amber-500/10' : 'text-amber-600 bg-amber-50', violet: advanced ? 'text-violet-300 bg-violet-500/10' : 'text-violet-600 bg-violet-50' }; return <div className={`rounded-3xl border p-5 shadow-sm ${card(advanced)}`}><div className="flex items-start justify-between"><div className={`rounded-2xl p-3 ${tone[color] || tone.violet}`}><Icon size={21} /></div></div><p className="mt-5 text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p><p className="mt-1 text-2xl font-black">{value}</p><p className="mt-1 text-xs text-slate-500">{helper}</p></div>; }
+function Snapshot({ label, value, tone }: { label: string; value: string; tone: string }) { const classes: Record<string, string> = { emerald: 'text-emerald-600 dark:text-emerald-300', rose: 'text-rose-600 dark:text-rose-300', violet: 'text-violet-600 dark:text-violet-300', slate: 'text-slate-900 dark:text-slate-100' }; return <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900/50"><p className="text-xs text-slate-500">{label}</p><p className={`mt-1 text-xl font-black ${classes[tone]}`}>{value}</p></div>; }
+function ActionRow({ text, onClick }: { text: string; onClick: () => void }) { return <button onClick={onClick} className="flex w-full items-center justify-between rounded-xl bg-slate-50 p-3 text-left text-sm font-medium hover:bg-slate-100 dark:bg-slate-900/50 dark:hover:bg-slate-700"><span>{text}</span><ArrowRight size={15} className="text-slate-400" /></button>; }
+function EmptyState({ advanced, icon: Icon, title, text, action, actionLabel }: { advanced: boolean; icon: React.ElementType; title: string; text: string; action: () => void; actionLabel: string }) { return <div className={`rounded-3xl border border-dashed p-12 text-center ${advanced ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-white/70'}`}><div className={`mx-auto mb-4 w-fit rounded-2xl p-4 ${advanced ? 'bg-slate-800 text-violet-300' : 'bg-slate-50 text-slate-500'}`}><Icon size={30} /></div><h3 className="font-bold">{title}</h3><p className="mx-auto mt-2 max-w-md text-sm text-slate-500">{text}</p><button onClick={action} className={`${button(advanced)} mt-5`}><Plus size={16} /> {actionLabel}</button></div>; }
 
-  const [isAddLeadOpen, setIsAddLeadOpen] = React.useState(false);
-  const [leads, setLeads] = React.useState<any[]>([]);
-  const [newLead, setNewLead] = React.useState({ name: '', status: 'Warm', value: '' });
+function RecentRecords({ advanced, title, items, empty, onOpen }: { advanced: boolean; title: string; items: Item[]; empty: string; onOpen: () => void }) { return <div className={`rounded-3xl border p-6 ${card(advanced)}`}><div className="flex items-center justify-between"><h3 className="font-bold">{title}</h3><button onClick={onOpen} className="text-sm font-bold text-emerald-600 hover:underline dark:text-violet-300">View all</button></div>{items.length ? <div className="mt-4 space-y-3">{items.map(item => <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-900/50"><div className="min-w-0"><p className="truncate text-sm font-bold">{item.name}</p><p className="mt-0.5 text-xs text-slate-500">{item.status}</p></div><p className="shrink-0 text-sm font-bold">{money(item.value)}</p></div>)}</div> : <p className="mt-4 text-sm text-slate-500">{empty}</p>}</div>; }
+function RecentTransactions({ advanced, transactions, onOpen }: { advanced: boolean; transactions: Transaction[]; onOpen: () => void }) { return <div className={`rounded-3xl border p-6 ${card(advanced)}`}><div className="flex items-center justify-between"><h3 className="font-bold">Recent cash flow</h3><button onClick={onOpen} className="text-sm font-bold text-emerald-600 hover:underline dark:text-violet-300">Manage</button></div>{transactions.length ? <div className="mt-4 space-y-3">{transactions.map(transaction => <div key={transaction.id} className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-900/50"><div className="min-w-0"><p className="truncate text-sm font-bold">{transaction.description}</p><p className="mt-0.5 text-xs text-slate-500">{transaction.date} - {transaction.status || 'Paid'}</p></div><p className={`shrink-0 text-sm font-bold ${transaction.type === 'income' ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-600 dark:text-rose-300'}`}>{transaction.type === 'income' ? '+' : '-'}{money(transaction.amount)}</p></div>)}</div> : <p className="mt-4 text-sm text-slate-500">No cash flow has been recorded for this venture.</p>}</div>; }
 
-  const [isAddProposalOpen, setIsAddProposalOpen] = React.useState(false);
-  const [proposals, setProposals] = React.useState<any[]>([]);
-  const [newProposal, setNewProposal] = React.useState({ title: '', status: 'Pending', value: '' });
+function RecordManager({ advanced, section, items, onAdd, onEdit, onDelete }: { advanced: boolean; section: WorkspaceConfig['sections'][string]; items: Item[]; onAdd: () => void; onEdit: (item: Item) => void; onDelete: (item: Item) => void }) { const Icon = section.icon; return <div className="space-y-6"><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><h3 className="flex items-center gap-2 text-2xl font-bold"><Icon className={advanced ? 'text-violet-300' : 'text-emerald-600'} /> {section.title}</h3><p className="mt-1 text-sm text-slate-500">{section.description}</p></div><button onClick={onAdd} className={button(advanced)}><Plus size={16} /> Add record</button></div>{items.length === 0 ? <EmptyState advanced={advanced} icon={Icon} title={`No ${section.title.toLowerCase()} yet`} text="Add a real record when you are ready. This space intentionally starts empty." action={onAdd} actionLabel="Add record" /> : <div className="grid gap-4 lg:grid-cols-2">{items.map(item => <div key={item.id}><RecordCard advanced={advanced} item={item} section={section} onEdit={() => onEdit(item)} onDelete={() => onDelete(item)} /></div>)}</div>}</div>; }
+function RecordCard({ advanced, item, section, onEdit, onDelete }: { advanced: boolean; item: Item; section: WorkspaceConfig['sections'][string]; onEdit: () => void; onDelete: () => void }) { const extra = parseExtra(item.extra_info); return <div className={`rounded-3xl border p-5 ${card(advanced)}`}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h4 className="truncate font-bold">{item.name}</h4><p className="mt-1 text-sm text-slate-500">{extra.detail || 'No additional detail'}</p></div><span className="rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase text-slate-600 dark:bg-slate-700 dark:text-slate-300">{item.status}</span></div><div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/50"><p className="text-xs text-slate-500">{section.valueLabel}</p><p className="mt-1 font-black">{money(item.value)}</p></div><div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/50"><p className="text-xs text-slate-500">{section.dateLabel}</p><p className="mt-1 truncate font-bold">{extra.date || 'Not set'}</p></div></div>{extra.note ? <p className="mt-4 line-clamp-2 text-sm text-slate-500">{extra.note}</p> : null}<div className="mt-5 flex justify-end gap-2"><button onClick={onEdit} className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm font-bold ${advanced ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}><Pencil size={14} /> Edit</button><button onClick={onDelete} className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"><Trash2 size={14} /> Delete</button></div></div>; }
 
-  const [isAddInvoiceOpen, setIsAddInvoiceOpen] = React.useState(false);
-  const [invoices, setInvoices] = React.useState<any[]>([]);
-  const [newInvoice, setNewInvoice] = React.useState({ client: '', status: 'Sent', amount: '' });
+function TransactionManager({ advanced, transactions, onAdd, onEdit, onDelete }: { advanced: boolean; transactions: Transaction[]; onAdd: () => void; onEdit: (transaction: Transaction) => void; onDelete: (transaction: Transaction) => void }) { const sorted = [...transactions].sort((a, b) => String(b.date).localeCompare(String(a.date))); return <div className="space-y-6"><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><h3 className="flex items-center gap-2 text-2xl font-bold"><ReceiptText className={advanced ? 'text-violet-300' : 'text-emerald-600'} /> Cash flow</h3><p className="mt-1 text-sm text-slate-500">Record actual income and expenses. Pending income remains a receivable until you mark it paid.</p></div><button onClick={onAdd} className={button(advanced)}><Plus size={16} /> Add transaction</button></div>{sorted.length === 0 ? <EmptyState advanced={advanced} icon={ReceiptText} title="No cash flow yet" text="Add an income, invoice, supplier payment, payroll cost, or other business transaction." action={onAdd} actionLabel="Add transaction" /> : <div className={`overflow-hidden rounded-3xl border ${card(advanced)}`}><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700"><tr><th className="px-5 py-4">Date</th><th className="px-5 py-4">Description</th><th className="px-5 py-4">Category</th><th className="px-5 py-4">Status</th><th className="px-5 py-4 text-right">Amount</th><th className="px-5 py-4" /></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-700">{sorted.map(transaction => <tr key={transaction.id}><td className="px-5 py-4 text-slate-500">{transaction.date}</td><td className="max-w-[240px] truncate px-5 py-4 font-bold">{transaction.description}</td><td className="px-5 py-4 text-slate-500">{transaction.category || 'Uncategorised'}</td><td className="px-5 py-4"><span className="rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase text-slate-600 dark:bg-slate-700 dark:text-slate-300">{transaction.status || 'Paid'}</span></td><td className={`px-5 py-4 text-right font-bold ${transaction.type === 'income' ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-600 dark:text-rose-300'}`}>{transaction.type === 'income' ? '+' : '-'}{money(transaction.amount)}</td><td className="px-5 py-4"><div className="flex justify-end gap-1"><button aria-label="Edit transaction" onClick={() => onEdit(transaction)} className="rounded-lg p-2 hover:bg-slate-100 dark:hover:bg-slate-700"><Pencil size={15} /></button><button aria-label="Delete transaction" onClick={() => onDelete(transaction)} className="rounded-lg p-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"><Trash2 size={15} /></button></div></td></tr>)}</tbody></table></div></div>}</div>; }
 
-  React.useEffect(() => {
-    Promise.all([
-      fetch(`/api/businesses/${business.id}/items`),
-      fetch(`/api/businesses/${business.id}/transactions`)
-    ]).then(async ([itemsRes, txRes]) => {
-      const itemsData = await itemsRes.json();
-      const txData = await txRes.json();
-      
-      const clis = itemsData.filter((i:any) => i.type === 'client').map((i:any) => {
-        let extra = {};
-        try { extra = JSON.parse(i.extra_info || '{}'); } catch(e){}
-        return { id: i.id, name: i.name, type: (extra as any).type || 'Project', revenue: i.value, status: i.status };
-      });
-      setClients(clis);
-
-      const lds = itemsData.filter((i:any) => i.type === 'lead').map((i:any) => {
-        return { id: i.id, name: i.name, status: i.status, value: i.value };
-      });
-      setLeads(lds);
-
-      const props = itemsData.filter((i:any) => i.type === 'proposal').map((i:any) => {
-        return { id: i.id, title: i.name, status: i.status, value: i.value };
-      });
-      setProposals(props);
-
-      const invs = txData.filter((t:any) => t.type === 'income').map((t:any) => ({
-        id: t.id, client: t.description, amount: t.amount, status: t.status
-      }));
-      setInvoices(invs);
-
-    }).catch(console.error);
-  }, [business.id, shouldRefresh]);
-
-  const handleAddClient = async () => {
-    if (!newClient.name) return;
-    try {
-      await fetch(`/api/businesses/${business.id}/items`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'client',
-          name: newClient.name,
-          status: 'Active',
-          value: parseFloat(newClient.revenue) || 0,
-          extra_info: { type: newClient.type }
-        })
-      });
-      triggerRefresh();
-      setNewClient({ name: '', type: 'Retainer', revenue: '' });
-      setIsAddClientOpen(false);
-    } catch(e) { console.error(e); }
-  };
-
-  const handleAddLead = async () => {
-    if (!newLead.name) return;
-    try {
-      await fetch(`/api/businesses/${business.id}/items`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'lead',
-          name: newLead.name,
-          status: newLead.status,
-          value: parseFloat(newLead.value) || 0
-        })
-      });
-      triggerRefresh();
-      setNewLead({ name: '', status: 'Warm', value: '' });
-      setIsAddLeadOpen(false);
-    } catch(e) { console.error(e); }
-  };
-
-  const handleAddProposal = async () => {
-    if (!newProposal.title) return;
-    try {
-      await fetch(`/api/businesses/${business.id}/items`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'proposal',
-          name: newProposal.title,
-          status: newProposal.status,
-          value: parseFloat(newProposal.value) || 0
-        })
-      });
-      triggerRefresh();
-      setNewProposal({ title: '', status: 'Pending', value: '' });
-      setIsAddProposalOpen(false);
-    } catch(e) { console.error(e); }
-  };
-
-  const handleAddInvoice = async () => {
-    if (!newInvoice.client) return;
-    try {
-      await fetch(`/api/businesses/${business.id}/transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'income',
-          amount: parseFloat(newInvoice.amount) || 0,
-          date: new Date().toISOString().split('T')[0],
-          description: newInvoice.client,
-          status: newInvoice.status
-        })
-      });
-      triggerRefresh();
-      setNewInvoice({ client: '', status: 'Sent', amount: '' });
-      setIsAddInvoiceOpen(false);
-    } catch(e) { console.error(e); }
-  };
-
-  if (currentTab === 'business-clients') {
-    return (
-      <div className="space-y-6">
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="font-bold text-xl flex items-center gap-2"><Users className={isAdvanced ? 'text-violet-400' : 'text-blue-500'} size={24} /> Active Clients</h3>
-            <button onClick={() => setIsAddClientOpen(true)} className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
-              <Plus size={16} /> Add Client
-            </button>
-          </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className={`border-b ${isAdvanced ? 'border-slate-700 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
-                  <th className="pb-3 font-medium">Client</th>
-                  <th className="pb-3 font-medium">Type</th>
-                  <th className="pb-3 font-medium text-right">Revenue</th>
-                  <th className="pb-3 font-medium text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-dashed dark:divide-slate-700">
-                {clients.map(c => (
-                  <tr key={c.id} className={`${isAdvanced ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50'}`}>
-                    <td className="py-4 font-bold">{c.name}</td>
-                    <td className="py-4 text-slate-500">{c.type}</td>
-                    <td className="py-4 text-right font-mono">₱{c.revenue.toLocaleString()}</td>
-                    <td className="py-4 text-right">
-                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-md ${c.status === 'Active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400'}`}>
-                        {c.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {isAddClientOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setIsAddClientOpen(false)}>
-            <div className={`w-full max-w-md rounded-3xl p-6 shadow-xl ${isAdvanced ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4">Add Client</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Client Name</label>
-                  <input type="text" value={newClient.name} onChange={e => setNewClient({...newClient, name: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Type</label>
-                    <select value={newClient.type} onChange={e => setNewClient({...newClient, type: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`}>
-                      <option value="Retainer">Retainer</option>
-                      <option value="Project">Project</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Revenue (₱)</label>
-                    <input type="number" value={newClient.revenue} onChange={e => setNewClient({...newClient, revenue: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                  </div>
-                </div>
-                <div className="flex gap-4 mt-6">
-                  <button onClick={() => setIsAddClientOpen(false)} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}>Cancel</button>
-                  <button onClick={handleAddClient} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-violet-600 text-white' : 'bg-emerald-600 text-white'}`}>Save</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (currentTab === 'business-pipeline') {
-    return (
-      <div className="space-y-6">
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="font-bold text-xl flex items-center gap-2"><Briefcase className={isAdvanced ? 'text-violet-400' : 'text-indigo-500'} size={24} /> Pipeline</h3>
-            <button onClick={() => setIsAddLeadOpen(true)} className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
-              <Plus size={16} /> Add Lead
-            </button>
-          </div>
-          
-          <div className="space-y-4">
-            {leads.map(l => (
-              <div key={l.id} className="flex justify-between items-center p-4 rounded-xl border dark:border-slate-700">
-                <div>
-                  <h4 className="font-bold">{l.name}</h4>
-                  <p className="text-xs text-slate-500">Value: ₱{l.value.toLocaleString()}</p>
-                </div>
-                <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-md ${l.status === 'Hot' ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'}`}>
-                  {l.status} Lead
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {isAddLeadOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setIsAddLeadOpen(false)}>
-            <div className={`w-full max-w-md rounded-3xl p-6 shadow-xl ${isAdvanced ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4">Add Lead</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Lead Name</label>
-                  <input type="text" value={newLead.name} onChange={e => setNewLead({...newLead, name: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
-                    <select value={newLead.status} onChange={e => setNewLead({...newLead, status: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`}>
-                      <option value="Hot">Hot</option>
-                      <option value="Warm">Warm</option>
-                      <option value="Cold">Cold</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Value (₱)</label>
-                    <input type="number" value={newLead.value} onChange={e => setNewLead({...newLead, value: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                  </div>
-                </div>
-                <div className="flex gap-4 mt-6">
-                  <button onClick={() => setIsAddLeadOpen(false)} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}>Cancel</button>
-                  <button onClick={handleAddLead} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-violet-600 text-white' : 'bg-emerald-600 text-white'}`}>Save</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (currentTab === 'business-proposals') {
-    return (
-      <div className="space-y-6">
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="font-bold text-xl flex items-center gap-2"><FileText className={isAdvanced ? 'text-violet-400' : 'text-rose-500'} size={24} /> Proposals</h3>
-            <button onClick={() => setIsAddProposalOpen(true)} className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
-              <Plus size={16} /> Add Proposal
-            </button>
-          </div>
-          
-          <div className="space-y-4">
-            {proposals.map(p => (
-              <div key={p.id} className="flex justify-between items-center p-4 rounded-xl border dark:border-slate-700">
-                <div>
-                  <h4 className="font-bold">{p.title}</h4>
-                  <p className="text-xs text-slate-500">Value: ₱{p.value.toLocaleString()}</p>
-                </div>
-                <span className={`font-bold ${p.status === 'Accepted' ? 'text-emerald-500' : p.status === 'Pending' ? 'text-amber-500' : 'text-slate-500'}`}>
-                  {p.status}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {isAddProposalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setIsAddProposalOpen(false)}>
-            <div className={`w-full max-w-md rounded-3xl p-6 shadow-xl ${isAdvanced ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4">Add Proposal</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Proposal Title</label>
-                  <input type="text" value={newProposal.title} onChange={e => setNewProposal({...newProposal, title: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
-                    <select value={newProposal.status} onChange={e => setNewProposal({...newProposal, status: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`}>
-                      <option value="Pending">Pending</option>
-                      <option value="Accepted">Accepted</option>
-                      <option value="Rejected">Rejected</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Value (₱)</label>
-                    <input type="number" value={newProposal.value} onChange={e => setNewProposal({...newProposal, value: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                  </div>
-                </div>
-                <div className="flex gap-4 mt-6">
-                  <button onClick={() => setIsAddProposalOpen(false)} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}>Cancel</button>
-                  <button onClick={handleAddProposal} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-violet-600 text-white' : 'bg-emerald-600 text-white'}`}>Save</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (currentTab === 'business-invoices') {
-    return (
-      <div className="space-y-6">
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h3 className="font-bold text-xl flex items-center gap-2"><DollarSign className={isAdvanced ? 'text-violet-400' : 'text-emerald-500'} size={24} /> Invoices</h3>
-            <button onClick={() => setIsAddInvoiceOpen(true)} className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
-              <Plus size={16} /> Add Invoice
-            </button>
-          </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className={`border-b ${isAdvanced ? 'border-slate-700 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
-                  <th className="pb-3 font-medium">Inv ID</th>
-                  <th className="pb-3 font-medium">Client</th>
-                  <th className="pb-3 font-medium text-right">Amount</th>
-                  <th className="pb-3 font-medium text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-dashed dark:divide-slate-700">
-                {invoices.map(inv => (
-                  <tr key={inv.id} className={`${isAdvanced ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50'}`}>
-                    <td className="py-4 font-mono text-xs text-slate-500">{inv.id}</td>
-                    <td className="py-4 font-bold">{inv.client}</td>
-                    <td className="py-4 text-right">₱{inv.amount.toLocaleString()}</td>
-                    <td className="py-4 text-right">
-                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-md ${inv.status === 'Paid' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : inv.status === 'Overdue' ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400'}`}>
-                        {inv.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {isAddInvoiceOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setIsAddInvoiceOpen(false)}>
-            <div className={`w-full max-w-md rounded-3xl p-6 shadow-xl ${isAdvanced ? 'bg-slate-800 border border-slate-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4">Add Invoice</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Client Name</label>
-                  <input type="text" value={newInvoice.client} onChange={e => setNewInvoice({...newInvoice, client: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
-                    <select value={newInvoice.status} onChange={e => setNewInvoice({...newInvoice, status: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`}>
-                      <option value="Draft">Draft</option>
-                      <option value="Sent">Sent</option>
-                      <option value="Paid">Paid</option>
-                      <option value="Overdue">Overdue</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Amount (₱)</label>
-                    <input type="number" value={newInvoice.amount} onChange={e => setNewInvoice({...newInvoice, amount: e.target.value})} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
-                  </div>
-                </div>
-                <div className="flex gap-4 mt-6">
-                  <button onClick={() => setIsAddInvoiceOpen(false)} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}>Cancel</button>
-                  <button onClick={handleAddInvoice} className={`flex-1 py-3 rounded-xl font-bold ${isAdvanced ? 'bg-violet-600 text-white' : 'bg-emerald-600 text-white'}`}>Save</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6 mt-6">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Total Revenue</p>
-          <p className="font-black text-2xl">₱{(business?.mrr || 245000).toLocaleString()}</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {clients.length > 0 ? "+18.4%" : "0%"} this month</p>
-        </div>
-        <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Active Clients</p>
-          <p className="font-black text-2xl">{business?.customers || 12}</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> +2 this month</p>
-        </div>
-        <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Pipeline Value</p>
-          <p className="font-black text-2xl">₱380,000</p>
-          <p className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1"><ArrowUpRight size={12} /> {clients.length > 0 ? "+12%" : "0%"} this month</p>
-        </div>
-        <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Outstanding Inv</p>
-          <p className="font-black text-2xl text-amber-500">₱75,000</p>
-          <p className="text-[10px] text-rose-500 font-bold mt-2 flex items-center gap-1">2 invoices overdue</p>
-        </div>
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-6">
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-bold text-lg flex items-center gap-2"><Users className={isAdvanced ? 'text-violet-400' : 'text-blue-500'} size={20} /> Top Clients</h3>
-            <button onClick={() => onNavigate('business-clients')} className={`text-sm font-bold ${isAdvanced ? 'text-violet-400 hover:text-violet-300' : 'text-slate-600 hover:text-slate-900'}`}>View All</button>
-          </div>
-          <div className="space-y-3">
-            <div className="flex justify-between items-center p-2 border-b border-dashed dark:border-slate-700">
-               <div>
-                  <p className="text-sm font-bold">Client A</p>
-                  <p className="text-xs text-slate-500">Retainer</p>
-               </div>
-               <span className="text-sm font-bold text-emerald-500">₱40,000/mo</span>
-            </div>
-            <div className="flex justify-between items-center p-2 border-b border-dashed dark:border-slate-700">
-               <div>
-                  <p className="text-sm font-bold">Client B</p>
-                  <p className="text-xs text-slate-500">Project Based</p>
-               </div>
-               <span className="text-sm font-bold text-blue-500">₱150,000 Total</span>
-            </div>
-            <div className="flex justify-between items-center p-2 border-b border-dashed dark:border-slate-700">
-               <div>
-                  <p className="text-sm font-bold">Client C</p>
-                  <p className="text-xs text-slate-500">Retainer</p>
-               </div>
-               <span className="text-sm font-bold text-emerald-500">₱25,000/mo</span>
-            </div>
-          </div>
-        </div>
-
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-bold text-lg flex items-center gap-2"><Briefcase className={isAdvanced ? 'text-violet-400' : 'text-indigo-500'} size={20} /> Pipeline Overview</h3>
-            <button onClick={() => onNavigate('business-pipeline')} className={`text-sm font-bold ${isAdvanced ? 'text-violet-400 hover:text-violet-300' : 'text-slate-600 hover:text-slate-900'}`}>Manage Leads</button>
-          </div>
-          <div className="space-y-3">
-             <div className={`p-3 rounded-xl flex justify-between items-center ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-                <div>
-                   <p className="text-sm font-bold">Hot Leads</p>
-                   <p className="text-xs text-slate-500">High probability to close</p>
-                </div>
-                <p className="font-black text-xl text-orange-500">3</p>
-             </div>
-             <div className={`p-3 rounded-xl flex justify-between items-center ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-                <div>
-                   <p className="text-sm font-bold">Warm Leads</p>
-                   <p className="text-xs text-slate-500">In discussion/discovery</p>
-                </div>
-                <p className="font-black text-xl text-yellow-500">8</p>
-             </div>
-             <div className={`p-3 rounded-xl flex justify-between items-center ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-                <div>
-                   <p className="text-sm font-bold">Cold Leads</p>
-                   <p className="text-xs text-slate-500">Initial contact</p>
-                </div>
-                <p className="font-black text-xl text-slate-500">12</p>
-             </div>
-          </div>
-        </div>
-
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><FileText className={isAdvanced ? 'text-violet-400' : 'text-rose-500'} size={20} /> Recent Proposals</h3>
-          <div className="space-y-3">
-             <div className="flex justify-between text-sm p-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400">
-               <span className="font-bold">Website Redesign - XYZ Corp</span>
-               <span>Pending (₱120k)</span>
-             </div>
-             <div className="flex justify-between text-sm p-3 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
-               <span className="font-bold">SEO Audit - ABC Inc</span>
-               <span>Accepted (₱25k)</span>
-             </div>
-             <div className="flex justify-between text-sm p-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-400">
-               <span className="font-bold">App Dev - Startup LLC</span>
-               <span>Drafting (₱350k)</span>
-             </div>
-          </div>
-        </div>
-
-        <div className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><DollarSign className={isAdvanced ? 'text-violet-400' : 'text-emerald-500'} size={20} /> Financial Status</h3>
-          <div className="space-y-3">
-             <div className="flex justify-between text-sm p-2 border-b border-dashed dark:border-slate-700">
-               <span>Collected this month</span>
-               <span className="font-bold text-emerald-500">₱140,000</span>
-             </div>
-             <div className="flex justify-between text-sm p-2 border-b border-dashed dark:border-slate-700">
-               <span>Outstanding (Sent)</span>
-               <span className="font-bold text-amber-500">₱105,000</span>
-             </div>
-             <div className="flex justify-between text-sm p-2 border-b border-dashed dark:border-slate-700">
-               <span>Overdue</span>
-               <span className="font-bold text-rose-500">₱75,000</span>
-             </div>
-             <button onClick={() => onNavigate('business-invoices')} className={`w-full mt-2 py-2 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-200 hover:bg-slate-300'}`}>
-               Manage Invoices
-             </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-
+function VentureModal({ advanced, business, onClose, onSave }: { advanced: boolean; business: Business | null; onClose: () => void; onSave: (values: Omit<Business, 'id'>) => void }) { const [form, setForm] = useState({ name: business?.name || '', type: business?.type || 'Store', status: business?.status || 'Active', target: String(business?.target || '') }); return <Modal advanced={advanced} title={business ? 'Edit venture' : 'Create venture'} onClose={onClose}><div className="space-y-4"><label className="block text-sm font-bold">Venture name<input autoFocus value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} className={`${input(advanced)} mt-1.5`} placeholder="e.g. Northline Studio" /></label><label className="block text-sm font-bold">Business model<select value={form.type} onChange={event => setForm({ ...form, type: event.target.value })} className={`${input(advanced)} mt-1.5`}>{VENTURE_TYPES.map(type => <option key={type.type} value={type.type}>{type.label} - {type.description}</option>)}</select></label><div className="grid grid-cols-2 gap-3"><label className="block text-sm font-bold">Status<select value={form.status} onChange={event => setForm({ ...form, status: event.target.value })} className={`${input(advanced)} mt-1.5`}><option>Active</option><option>Planning</option><option>Paused</option><option>Archived</option></select></label><label className="block text-sm font-bold">Monthly target<input type="number" min="0" value={form.target} onChange={event => setForm({ ...form, target: event.target.value })} className={`${input(advanced)} mt-1.5`} placeholder="0" /></label></div><button disabled={!form.name.trim()} onClick={() => onSave({ name: form.name.trim(), type: form.type, status: form.status, target: Number(form.target) || 0 })} className={`${button(advanced)} mt-2 w-full disabled:cursor-not-allowed disabled:opacity-50`}>{business ? 'Save changes' : 'Create workspace'}</button></div></Modal>; }
+function RecordModal({ advanced, section, item, onClose, onSave }: { advanced: boolean; section: WorkspaceConfig['sections'][string]; item?: Item; onClose: () => void; onSave: (values: Omit<Item, 'id' | 'business_id'>, editing?: Item) => void }) { const extra = parseExtra(item?.extra_info); const [form, setForm] = useState({ name: item?.name || '', type: item?.type || section.types[0], status: item?.status || section.statuses[0], value: String(item?.value || ''), detail: extra.detail || '', date: extra.date || '', note: extra.note || '' }); return <Modal advanced={advanced} title={item ? `Edit ${section.title.replace(/s$/, '')}` : `Add ${section.title.replace(/s$/, '')}`} onClose={onClose}><div className="space-y-4"><label className="block text-sm font-bold">Name<input autoFocus value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} className={`${input(advanced)} mt-1.5`} /></label>{section.types.length > 1 ? <label className="block text-sm font-bold">Record type<select value={form.type} onChange={event => setForm({ ...form, type: event.target.value })} className={`${input(advanced)} mt-1.5`}>{section.types.map(type => <option key={type} value={type}>{type[0].toUpperCase() + type.slice(1)}</option>)}</select></label> : null}<div className="grid grid-cols-2 gap-3"><label className="block text-sm font-bold">Status<select value={form.status} onChange={event => setForm({ ...form, status: event.target.value })} className={`${input(advanced)} mt-1.5`}>{section.statuses.map(status => <option key={status}>{status}</option>)}</select></label><label className="block text-sm font-bold">{section.valueLabel}<input type="number" min="0" value={form.value} onChange={event => setForm({ ...form, value: event.target.value })} className={`${input(advanced)} mt-1.5`} placeholder="0" /></label></div><label className="block text-sm font-bold">{section.detailLabel}<input value={form.detail} onChange={event => setForm({ ...form, detail: event.target.value })} className={`${input(advanced)} mt-1.5`} /></label><label className="block text-sm font-bold">{section.dateLabel}<input type="date" value={form.date} onChange={event => setForm({ ...form, date: event.target.value })} className={`${input(advanced)} mt-1.5`} /></label><label className="block text-sm font-bold">Notes<textarea rows={3} value={form.note} onChange={event => setForm({ ...form, note: event.target.value })} className={`${input(advanced)} mt-1.5 resize-none`} /></label><button disabled={!form.name.trim()} onClick={() => onSave({ type: form.type, name: form.name.trim(), status: form.status, value: Number(form.value) || 0, extra_info: JSON.stringify({ detail: form.detail, date: form.date, note: form.note }) }, item)} className={`${button(advanced)} w-full disabled:cursor-not-allowed disabled:opacity-50`}>{item ? 'Save changes' : 'Add record'}</button></div></Modal>; }
+function TransactionModal({ advanced, transaction, onClose, onSave }: { advanced: boolean; transaction: Transaction | null; onClose: () => void; onSave: (values: Omit<Transaction, 'id' | 'business_id'>, editing?: Transaction) => void }) { const [form, setForm] = useState({ type: transaction?.type || 'income', description: transaction?.description || '', amount: String(transaction?.amount || ''), date: transaction?.date || today(), status: transaction?.status || 'Paid', category: transaction?.category || '' }); return <Modal advanced={advanced} title={transaction ? 'Edit transaction' : 'Add cash-flow record'} onClose={onClose}><div className="space-y-4"><div className="grid grid-cols-2 gap-3"><label className="block text-sm font-bold">Type<select value={form.type} onChange={event => setForm({ ...form, type: event.target.value as Transaction['type'] })} className={`${input(advanced)} mt-1.5`}><option value="income">Income / receivable</option><option value="expense">Expense</option></select></label><label className="block text-sm font-bold">Amount<input type="number" min="0" value={form.amount} onChange={event => setForm({ ...form, amount: event.target.value })} className={`${input(advanced)} mt-1.5`} placeholder="0" /></label></div><label className="block text-sm font-bold">Description<input autoFocus value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} className={`${input(advanced)} mt-1.5`} placeholder="e.g. July retainer - Acme" /></label><div className="grid grid-cols-2 gap-3"><label className="block text-sm font-bold">Date<input type="date" value={form.date} onChange={event => setForm({ ...form, date: event.target.value })} className={`${input(advanced)} mt-1.5`} /></label><label className="block text-sm font-bold">Status<select value={form.status} onChange={event => setForm({ ...form, status: event.target.value })} className={`${input(advanced)} mt-1.5`}><option>Paid</option><option>Pending</option><option>Draft</option><option>Scheduled</option><option>Overdue</option></select></label></div><label className="block text-sm font-bold">Category<input value={form.category} onChange={event => setForm({ ...form, category: event.target.value })} className={`${input(advanced)} mt-1.5`} placeholder="e.g. Sales, Payroll, Software, Supplier" /></label><p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-900/50">Only paid income is counted as collected cash. Pending, draft, scheduled, and overdue income remain in receivables.</p><button disabled={!form.description.trim() || !form.amount} onClick={() => onSave({ type: form.type, description: form.description.trim(), amount: Number(form.amount) || 0, date: form.date, status: form.status, category: form.category.trim() }, transaction || undefined)} className={`${button(advanced)} w-full disabled:cursor-not-allowed disabled:opacity-50`}>{transaction ? 'Save changes' : 'Add transaction'}</button></div></Modal>; }
+function Modal({ advanced, title, onClose, children }: { advanced: boolean; title: string; onClose: () => void; children: React.ReactNode }) { return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onMouseDown={onClose}><div role="dialog" aria-modal="true" aria-label={title} onMouseDown={event => event.stopPropagation()} className={`max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border p-6 shadow-2xl ${card(advanced)}`}><div className="mb-5 flex items-center justify-between"><h3 className="text-xl font-bold">{title}</h3><button aria-label="Close" onClick={onClose} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"><X size={18} /></button></div>{children}</div></div>; }
