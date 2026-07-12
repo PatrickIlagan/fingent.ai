@@ -338,6 +338,15 @@ To run FinGent as a desktop application:
      }
   });
 
+  app.get("/api/copilot/accounts", async (req, res) => {
+    try {
+      const db = await getDb();
+      res.json(await db.all("SELECT id, name, type FROM accounts ORDER BY name COLLATE NOCASE"));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/categories", async (req, res) => {
     try {
       const db = await getDb();

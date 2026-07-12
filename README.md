@@ -27,4 +27,4 @@ The app stores its SQLite database locally in `data/`. It is intentionally exclu
 
 ## Local Copilot and privacy
 
-The FinGent Copilot is a browser-only workflow and navigation assistant. It has no API key, makes no AI or chat API request, and never reads accounts, transactions, balances, invoices, investments, or other client financial records. It can guide a user to the appropriate FinGent workspace, but it cannot inspect, calculate from, or write financial data.
+The FinGent Copilot is a local workflow, navigation, and command assistant. It can prepare an action such as “I spent 500 on groceries, cash,” match the account locally, and save it only after the user explicitly confirms. It has no API key and makes no request to an external AI or chat service. Financial values and account names stay in FinGent; any future external-AI integration must receive tokenized placeholders such as `[ACCOUNT]`, `[AMOUNT]`, and `[REASON]`, with the mapping retained locally.

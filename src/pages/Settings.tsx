@@ -131,7 +131,7 @@ export function Settings() {
             <div className={`mt-0.5 rounded-xl p-2 ${isAdvanced ? 'bg-emerald-500/10 text-emerald-300' : 'bg-emerald-50 text-emerald-600'}`}><LockKeyhole size={18} /></div>
             <div>
               <p className="font-bold">Local Copilot privacy</p>
-              <p className="mt-1 max-w-2xl text-sm text-slate-500">The copilot runs in this browser only. It has no API key, does not call a server or external AI service, and never reads your accounts, transactions, balances, invoices, or other client financial records.</p>
+              <p className="mt-1 max-w-2xl text-sm text-slate-500">The copilot can prepare actions from your commands and save them only after you confirm. Your account matching and financial details stay inside FinGent. It has no API key and does not send records to an external AI service. Any future AI request will use placeholder tokens such as [ACCOUNT], [AMOUNT], and [REASON].</p>
             </div>
           </div>
         </div>
@@ -211,7 +211,7 @@ export function Settings() {
         <h3 className="text-lg font-bold flex items-center gap-2 mb-4 text-rose-500"><AlertTriangle size={20} /> Disclaimers & Liability</h3>
         <div className={`p-4 rounded-xl text-sm space-y-3 ${isAdvanced ? 'bg-slate-900/50 text-slate-400' : 'bg-slate-50 text-slate-600'}`}>
           <p><strong>1. Data Privacy & Security:</strong> FinGent is designed to operate primarily via local/containerized storage to ensure the highest level of privacy. If you choose to use the Google Drive cloud sync, your data will be encrypted locally using AES-256-CBC before transmission. We do not store, access, or intercept your encryption password. You are solely responsible for securely storing your encryption password. If it is lost, your cloud backups cannot be recovered.</p>
-          <p><strong>2. Local Copilot:</strong> FinGent’s copilot is a browser-only navigation and workflow guide. It does not access financial records or provide personalised financial advice.</p>
+          <p><strong>2. Local Copilot:</strong> FinGent’s copilot can prepare and, after an explicit confirmation, save records locally. It does not send financial details to an external AI service and does not provide personalised financial advice.</p>
           <p><strong>3. Limitation of Liability:</strong> By using FinGent, you agree that the developers shall not be held liable for any data loss, financial losses, miscalculations, or any direct/indirect damages arising from the use of this application. Always verify critical financial information independently.</p>
         </div>
       </div>

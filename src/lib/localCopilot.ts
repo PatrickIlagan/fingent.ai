@@ -1,9 +1,19 @@
 export type CopilotAction = { label: string; tab: string };
 
+export type TransactionDraft = {
+  type: 'income' | 'expense';
+  amount: number;
+  category: string;
+  accountHint: string;
+  description: string;
+  redactedCommand: string;
+};
+
 export type CopilotReply = {
   text: string;
   actions?: CopilotAction[];
   navigateNow?: string;
+  transaction?: TransactionDraft;
 };
 
 const routes = [
@@ -37,26 +47,64 @@ function matchedRoute(message: string) {
   return routes.find(route => route.terms.some(term => normalized.includes(term)));
 }
 
+function titleCase(value: string) {
+  return value.split(/\s+/).filter(Boolean).map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
+}
+
+function cleanPhrase(value: string) {
+  return value.replace(/\b(?:from|using|via|with)\b.*$/i, '').replace(/[,.!?]+$/g, '').trim();
+}
+
+function parseTransactionCommand(message: string): TransactionDraft | null {
+  const normalized = message.trim();
+  const intent = /\b(spent|spend|paid|pay|bought|purchase|expense)\b/i.test(normalized) ? 'expense'
+    : /\b(earned|receive|received|income|salary|got paid)\b/i.test(normalized) ? 'income'
+      : null;
+  if (!intent) return null;
+  const amountMatch = normalized.match(/(?:\u20B1|php|pesos?|\$)?\s*(\d[\d,]*(?:\.\d{1,2})?)/i);
+  if (!amountMatch) return null;
+  const amount = Number(amountMatch[1].replace(/,/g, ''));
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  const accountMatch = normalized.match(/\b(?:from|using|via|with)\s+([^,.!?]+)/i) || normalized.match(/,\s*([^,.!?]+)\s*$/);
+  const accountHint = accountMatch ? cleanPhrase(accountMatch[1]) : '';
+  const reasonMatch = normalized.match(/\b(?:on|for)\s+(.+?)(?:\s*(?:,|\bfrom\b|\busing\b|\bvia\b|\bwith\b)|$)/i);
+  const category = titleCase(cleanPhrase(reasonMatch?.[1] || (intent === 'income' ? 'Income' : 'General')) || (intent === 'income' ? 'Income' : 'General'));
+  const description = category === 'General' || category === 'Income' ? '' : category;
+
+  return {
+    type: intent,
+    amount,
+    category,
+    accountHint,
+    description,
+    redactedCommand: 'Action: ' + intent.toUpperCase() + ' [AMOUNT] ' + (accountHint ? 'from [ACCOUNT] ' : '') + 'for [REASON].'
+  };
+}
+
 export function runLocalCopilot(message: string): CopilotReply {
   const trimmed = message.trim();
   const lower = trimmed.toLowerCase();
   const route = matchedRoute(trimmed);
 
-  if (/(\u20B1|\$|\bphp\b|\bpeso\b)\s*[\d,]+|\b(?:balance|salary|income|expense|debt)\b[^.]{0,24}\b\d[\d,]*/i.test(trimmed)) {
+  const transaction = parseTransactionCommand(trimmed);
+  if (transaction) {
+    const accountText = transaction.accountHint ? ' from “' + transaction.accountHint + '”' : '';
     return {
-      text: 'Please keep financial amounts and client details out of the copilot. I do not need them to guide you, and nothing is sent anywhere. Ask a general workflow question instead, such as "where do I record an expense?"'
+      text: 'I prepared a local ' + transaction.type + ' draft for ' + transaction.category + accountText + '. Review it, then explicitly save it. Your details stay in FinGent and are never sent to an AI service.',
+      transaction
     };
   }
 
   if (/\b(privacy|private|data|secure|security)\b/.test(lower)) {
     return {
-      text: 'This copilot runs only in your browser. It does not read accounts, transactions, investments, invoices, balances, or any other client records. It has no API key, no server request, and no external connection.'
+      text: 'This agent resolves commands and saves records locally in FinGent. It has no API key and sends no data to an external AI service. If an AI provider is added later, it will receive only a redacted command such as “Action: EXPENSE [AMOUNT] from [ACCOUNT] for [REASON].”'
     };
   }
 
   if (/\b(what can you do|help|commands|how do you work)\b/.test(lower)) {
     return {
-      text: 'I can guide you through FinGent and take you to the right workspace. Ask me to open Accounts, Investments, Plans, Career, Freelancing, Business Operations, Taxes, Calendar, Categories, Personal Space, or Settings. I can also explain where to record a transaction, create an invoice, add a task, or export a report without seeing your data.',
+      text: 'I can guide you through FinGent, open the right workspace, and prepare a local transaction from plain language. Try “I spent 500 on groceries, cash” or “I received 25000 salary via BDO.” I will always ask for an explicit save before recording anything.',
       actions: routes.slice(0, 6).map(({ label, tab }) => ({ label, tab }))
     };
   }
@@ -93,6 +141,6 @@ export function runLocalCopilot(message: string): CopilotReply {
   }
 
   return {
-    text: 'I am FinGent\'s local navigation copilot. I can guide you without accessing your records. Try "open career", "where do I create an invoice?", "take me to taxes", or "how do I export a report?".'
+    text: 'I am FinGent\'s local copilot. I can guide you, open workspaces, and prepare a transaction for your approval. Try “I spent 500 on groceries, cash”, “open career”, or “where do I create an invoice?”.'
   };
 }
