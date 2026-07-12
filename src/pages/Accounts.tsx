@@ -22,6 +22,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
 
   const [accountsData, setAccountsData] = useState<any[]>([]);
   const [goals, setGoals] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   
   const [selectedAccount, setSelectedAccount] = useState<any | null>(null);
   const [txAccount, setTxAccount] = useState<any | null>(null);
@@ -99,10 +100,11 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
   useEffect(() => {
     async function fetchData() {
       try {
-        const [accRes, txRes, goalsRes] = await Promise.all([
+        const [accRes, txRes, goalsRes, categoriesRes] = await Promise.all([
           fetch('/api/accounts').then(res => res.json()).catch(() => []),
           fetch('/api/transactions').then(res => res.json()).catch(() => []),
-          fetch('/api/goals').then(res => res.json()).catch(() => [])
+          fetch('/api/goals').then(res => res.json()).catch(() => []),
+          fetch('/api/categories').then(res => res.json()).catch(() => [])
         ]);
         
         const accountsList = Array.isArray(accRes) ? accRes : [];
@@ -122,6 +124,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
         
         setAccountsData(mappedAccounts);
         setGoals(goalsRes || []);
+        setCategories(Array.isArray(categoriesRes) ? categoriesRes : []);
         
         setSelectedAccount((currentSelected: any) => {
            if (!currentSelected) return null;
@@ -669,13 +672,13 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
               <div className="space-y-4">
                 <div className="flex rounded-xl overflow-hidden border dark:border-slate-700">
                   <button 
-                    onClick={() => setNewTx(prev => ({ ...prev, type: 'expense' }))} 
+                    onClick={() => setNewTx(prev => ({ ...prev, type: 'expense', category: prev.category === 'Income' ? 'Expenses' : prev.category }))}
                     className={`flex-1 py-2 font-medium text-sm transition-colors ${newTx.type === 'expense' ? (isAdvanced ? 'bg-rose-500/20 text-rose-400' : 'bg-rose-50 text-rose-600') : 'hover:bg-slate-50 dark:hover:bg-slate-700'}`}
                   >
                     Expense
                   </button>
                   <button 
-                    onClick={() => setNewTx(prev => ({ ...prev, type: 'income' }))} 
+                    onClick={() => setNewTx(prev => ({ ...prev, type: 'income', category: prev.category === 'Expenses' ? 'Income' : prev.category }))}
                     className={`flex-1 py-2 font-medium text-sm transition-colors ${newTx.type === 'income' ? (isAdvanced ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-50 text-emerald-600') : 'hover:bg-slate-50 dark:hover:bg-slate-700'}`}
                   >
                     Income
@@ -719,18 +722,17 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Category</label>
-                    <select 
+                    <input
+                      list="personal-category-options"
                       value={newTx.category}
                       onChange={(e) => setNewTx(prev => ({ ...prev, category: e.target.value }))}
-                      className={`w-full px-4 py-3 rounded-xl text-sm outline-none transition-colors appearance-none ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
-                    >
-                      <option>Expenses</option>
-                      <option>Bills</option>
-                      <option>Debts</option>
-                      <option>Installments</option>
-                      {txAccount?.type === 'Card' && <option>Credits</option>}
-                      <option>Other</option>
-                    </select>
+                      placeholder={newTx.type === 'income' ? 'e.g. Salary, Freelance' : 'e.g. Groceries, Transport'}
+                      className={`w-full px-4 py-3 rounded-xl text-sm outline-none transition-colors ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
+                    />
+                    <datalist id="personal-category-options">
+                      {categories.filter(category => category.type === newTx.type || category.type === 'both').map(category => <option key={category.id} value={category.name} />)}
+                    </datalist>
+                    <p className="mt-1 text-[11px] text-slate-500">Type a new category to save it automatically for future transactions.</p>
                   </div>
                 </div>
 

@@ -29,6 +29,7 @@ async function initDb(db: any) {
   await db.exec(`ALTER TABLE income_flows ADD COLUMN is_recurring BOOLEAN DEFAULT 0;`).catch(() => {});
   await db.exec(`ALTER TABLE income_flows ADD COLUMN budget_preset_id INTEGER;`).catch(() => {});
   await db.exec(`ALTER TABLE income_flows ADD COLUMN account_id INTEGER;`).catch(() => {});
+  await db.exec(`ALTER TABLE income_flows ADD COLUMN category TEXT;`).catch(() => {});
 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS portfolio_transactions (
@@ -76,6 +77,14 @@ async function initDb(db: any) {
       description TEXT,
       date TEXT NOT NULL,
       FOREIGN KEY(account_id) REFERENCES accounts(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+      type TEXT NOT NULL DEFAULT 'expense',
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS goals (
@@ -141,6 +150,30 @@ async function initDb(db: any) {
       status TEXT DEFAULT 'Open',
       notes TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS personal_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      body TEXT DEFAULT '',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS personal_routines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      frequency TEXT NOT NULL DEFAULT 'Daily',
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS personal_routine_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      routine_id INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      UNIQUE(routine_id, date),
+      FOREIGN KEY(routine_id) REFERENCES personal_routines(id)
     );
 
     CREATE TABLE IF NOT EXISTS calendar_events (

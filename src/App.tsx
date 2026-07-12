@@ -11,6 +11,8 @@ import { Business } from './pages/Business';
 import { Freelancing } from './pages/Freelancing';
 import { Taxes } from './pages/Taxes';
 import { Settings } from './pages/Settings';
+import { Categories } from './pages/Categories';
+import { Personal } from './pages/Personal';
 import { ChatSheet } from './components/ChatSheet';
 
 export default function App() {
@@ -30,6 +32,9 @@ export default function App() {
         {currentTab.startsWith('accounts') && <Accounts category={currentTab.split('-')[1]} onNavigate={setCurrentTab} />}
         {currentTab.startsWith('liabilities') && <Liabilities category={currentTab.split('-')[1]} onNavigate={setCurrentTab} />}
         {currentTab.startsWith('plans') && <Plans category={currentTab.split('-')[1]} onNavigate={setCurrentTab} />}
+        {currentTab === 'categories' && <Categories />}
+        {currentTab === 'personal' && <Personal />}
+        {currentTab.startsWith('personal-') && <Personal category={currentTab.split('-').slice(1).join('-')} />}
         {currentTab === 'settings' && <Settings />}
       </Layout>
       <ChatSheet isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />

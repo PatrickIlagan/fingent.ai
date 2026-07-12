@@ -18,10 +18,11 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
   const [dbIncomeFlows, setDbIncomeFlows] = useState<any[]>([]);
   const [budgetPresets, setBudgetPresets] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   
   const [incomeViewMode, setIncomeViewMode] = useState<"list" | "add" | "details">("list");
   const [selectedFlowId, setSelectedFlowId] = useState<number | null>(null);
-  const [incomeForm, setIncomeForm] = useState({ name: '', amount: '', date: '', is_recurring: false, budget_preset_id: '', account_id: '' });
+  const [incomeForm, setIncomeForm] = useState({ name: '', amount: '', date: '', category: 'Income', is_recurring: false, budget_preset_id: '', account_id: '' });
   const [calendarEvents, setCalendarEvents] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [isTaskOpen, setIsTaskOpen] = useState(false);
@@ -37,8 +38,9 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
         fetch('/api/budget_presets'),
         fetch('/api/accounts'),
         fetch('/api/calendar_events'),
-        fetch('/api/career/tasks')
-     ]).then(async ([c, i, b, a, events, taskResponse]) => {
+        fetch('/api/career/tasks'),
+        fetch('/api/categories')
+     ]).then(async ([c, i, b, a, events, taskResponse, categoryResponse]) => {
         const data = await c.json().catch(()=>null);
         if (data) {
            setCareer(data);
@@ -50,6 +52,7 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
         const aRes = await a.json().catch(()=>[]); setAccounts(Array.isArray(aRes) ? aRes : []);
         const eventRes = await events.json().catch(()=>[]); setCalendarEvents(Array.isArray(eventRes) ? eventRes : []);
         const taskRes = await taskResponse.json().catch(()=>[]); setTasks(Array.isArray(taskRes) ? taskRes : []);
+        const categoryRes = await categoryResponse.json().catch(()=>[]); setCategories(Array.isArray(categoryRes) ? categoryRes : []);
      });
   }, []);
   
@@ -184,6 +187,7 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
                is_recurring: incomeForm.is_recurring,
                budget_preset_id: parseInt(incomeForm.budget_preset_id) || null,
                account_id: parseInt(incomeForm.account_id) || null
+               ,category: incomeForm.category || 'Income'
             })
          });
          window.location.reload();
@@ -207,6 +211,13 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
                   <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Date</label>
                   <input required type="date" value={incomeForm.date} onChange={e=>setIncomeForm({...incomeForm, date: e.target.value})} className={`w-full px-5 py-4 rounded-xl outline-none font-bold text-lg ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
                </div>
+            </div>
+
+            <div>
+               <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Income Category</label>
+               <input list="career-income-categories" value={incomeForm.category} onChange={e=>setIncomeForm({...incomeForm, category: e.target.value})} className={`w-full px-5 py-4 rounded-xl outline-none font-bold ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} placeholder="e.g. Salary, Freelance" />
+               <datalist id="career-income-categories">{categories.filter(category => category.type === 'income' || category.type === 'both').map(category => <option key={category.id} value={category.name} />)}</datalist>
+               <p className="mt-1 text-xs text-slate-500">New categories are saved automatically.</p>
             </div>
             
             <label className={`flex items-center justify-between p-5 rounded-2xl cursor-pointer border-2 transition-all ${incomeForm.is_recurring ? (isAdvanced ? 'border-emerald-500 bg-emerald-500/10' : 'border-emerald-500 bg-emerald-50') : (isAdvanced ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-slate-50')}`}>
@@ -486,7 +497,7 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
               </button>
             </form>
 
-            <div className="grid sm:grid-cols-2 gap-4">
+                 <div className="grid sm:grid-cols-2 gap-4">
               {skills.map((skill) => (
                  <div
                    key={skill.id}
@@ -503,7 +514,7 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
                        : (isAdvanced ? 'border-2 border-slate-600 bg-slate-800' : 'border-2 border-slate-300 bg-slate-50')
                    }`}>
                      {skill.completed && <Check size={16} strokeWidth={3} />}
-                   </div>
+                  </div>
                    <p className={`flex-1 text-sm font-medium ${skill.completed ? (isAdvanced ? 'text-violet-300' : 'text-emerald-700 line-through opacity-70') : ''}`}>{skill.name}</p>
                    <button onClick={(e) => deleteSkill(e, skill.id)} className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-500 transition-opacity">
                      <X size={16} />

@@ -29,6 +29,18 @@ async function recalculateFreelanceServiceHours(db: any, serviceId: string | num
   );
 }
 
+async function upsertPersonalCategory(db: any, name: string, type: 'income' | 'expense') {
+  const normalized = String(name || '').trim();
+  if (!normalized) return;
+  const existing = await db.get("SELECT id, type FROM categories WHERE name = ? COLLATE NOCASE", [normalized]);
+  const categoryType = existing?.type === 'both' ? 'both' : existing && existing.type !== type ? 'both' : type;
+  if (existing) {
+    await db.run("UPDATE categories SET type = ?, active = 1 WHERE id = ?", [categoryType, existing.id]);
+  } else {
+    await db.run("INSERT INTO categories (name, type, active) VALUES (?, ?, 1)", [normalized, type]);
+  }
+}
+
 
 async function startServer() {
   const app = express();
@@ -327,6 +339,72 @@ To run FinGent as a desktop application:
      }
   });
 
+  app.get("/api/categories", async (req, res) => {
+    try {
+      const db = await getDb();
+      const historical = await db.all("SELECT category, GROUP_CONCAT(DISTINCT type) AS types FROM transactions WHERE TRIM(category) != '' GROUP BY LOWER(category)");
+      for (const row of historical) {
+        await upsertPersonalCategory(db, row.category, String(row.types || '').includes('income') ? 'income' : 'expense');
+        if (String(row.types || '').includes('income') && String(row.types || '').includes('expense')) {
+          const category = await db.get("SELECT id FROM categories WHERE name = ? COLLATE NOCASE", [row.category]);
+          if (category) await db.run("UPDATE categories SET type = 'both' WHERE id = ?", [category.id]);
+        }
+      }
+      const categories = await db.all(`
+        SELECT c.*, COUNT(t.id) AS transaction_count,
+          COALESCE(SUM(t.amount), 0) AS total_amount,
+          MAX(t.date) AS last_used
+        FROM categories c
+        LEFT JOIN transactions t ON LOWER(t.category) = LOWER(c.name)
+        WHERE c.active = 1
+        GROUP BY c.id
+        ORDER BY c.name COLLATE NOCASE
+      `);
+      res.json(categories);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/categories", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { name, type = 'expense' } = req.body;
+      const normalized = String(name || '').trim();
+      if (!normalized) return res.status(400).json({ error: 'A category name is required.' });
+      await upsertPersonalCategory(db, normalized, type === 'income' ? 'income' : 'expense');
+      const category = await db.get("SELECT * FROM categories WHERE name = ? COLLATE NOCASE", [normalized]);
+      res.json(category);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/categories/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { name, type } = req.body;
+      const category = await db.get("SELECT * FROM categories WHERE id = ?", [req.params.id]);
+      const normalized = String(name || '').trim();
+      if (!category || !normalized) return res.status(400).json({ error: 'Category not found or name is empty.' });
+      await db.run("UPDATE transactions SET category = ? WHERE category = ? COLLATE NOCASE", [normalized, category.name]);
+      await db.run("UPDATE categories SET name = ?, type = ?, active = 1 WHERE id = ?", [normalized, type || category.type, category.id]);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/categories/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      await db.run("UPDATE categories SET active = 0 WHERE id = ?", [req.params.id]);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/career/tasks", async (_req, res) => {
     try {
       const db = await getDb();
@@ -368,6 +446,107 @@ To run FinGent as a desktop application:
     try {
       const db = await getDb();
       await db.run("DELETE FROM career_tasks WHERE id = ?", [req.params.id]);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/personal/notes", async (_req, res) => {
+    try {
+      const db = await getDb();
+      res.json(await db.all("SELECT * FROM personal_notes ORDER BY updated_at DESC, id DESC"));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/personal/notes", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { title, body = '' } = req.body;
+      const result = await db.run("INSERT INTO personal_notes (title, body, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)", [title, body]);
+      res.json({ id: result.lastInsertRowid });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/personal/notes/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { title, body = '' } = req.body;
+      await db.run("UPDATE personal_notes SET title = ?, body = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [title, body, req.params.id]);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/personal/notes/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      await db.run("DELETE FROM personal_notes WHERE id = ?", [req.params.id]);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/personal/routines", async (_req, res) => {
+    try {
+      const db = await getDb();
+      const today = new Date().toISOString().slice(0, 10);
+      res.json(await db.all(`
+        SELECT r.*, EXISTS(SELECT 1 FROM personal_routine_logs l WHERE l.routine_id = r.id AND l.date = ?) AS completed_today,
+          (SELECT COUNT(*) FROM personal_routine_logs l WHERE l.routine_id = r.id AND l.date >= date(?, '-6 days')) AS completed_this_week
+        FROM personal_routines r WHERE r.active = 1 ORDER BY r.created_at DESC, r.id DESC
+      `, [today, today]));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/personal/routines", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { name, frequency = 'Daily' } = req.body;
+      const result = await db.run("INSERT INTO personal_routines (name, frequency) VALUES (?, ?)", [name, frequency]);
+      res.json({ id: result.lastInsertRowid });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/personal/routines/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { name, frequency, active = 1 } = req.body;
+      await db.run("UPDATE personal_routines SET name = ?, frequency = ?, active = ? WHERE id = ?", [name, frequency || 'Daily', active ? 1 : 0, req.params.id]);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/personal/routines/:id/check-in", async (req, res) => {
+    try {
+      const db = await getDb();
+      const date = req.body.date || new Date().toISOString().slice(0, 10);
+      const existing = await db.get("SELECT id FROM personal_routine_logs WHERE routine_id = ? AND date = ?", [req.params.id, date]);
+      if (existing) await db.run("DELETE FROM personal_routine_logs WHERE id = ?", [existing.id]);
+      else await db.run("INSERT INTO personal_routine_logs (routine_id, date) VALUES (?, ?)", [req.params.id, date]);
+      res.json({ completed: !existing });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/personal/routines/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      await db.run("DELETE FROM personal_routine_logs WHERE routine_id = ?", [req.params.id]);
+      await db.run("DELETE FROM personal_routines WHERE id = ?", [req.params.id]);
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -432,6 +611,7 @@ To run FinGent as a desktop application:
         "INSERT INTO transactions (account_id, type, amount, category, description, date) VALUES (?, ?, ?, ?, ?, ?)",
         [account_id, type, amount, category, description, date]
       );
+      await upsertPersonalCategory(db, category, type === 'income' ? 'income' : 'expense');
       res.json({ id: result.lastInsertRowid });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -825,8 +1005,9 @@ To run FinGent as a desktop application:
   app.post("/api/income_flows", async (req, res) => {
     try {
       const db = await getDb();
-      const { name, amount, date, is_recurring, budget_preset_id, account_id } = req.body;
-      const result = await db.run("INSERT INTO income_flows (name, amount, date, is_recurring, budget_preset_id, account_id) VALUES (?, ?, ?, ?, ?, ?)", [name, amount, date, is_recurring ? 1 : 0, budget_preset_id, account_id]);
+      const { name, amount, date, is_recurring, budget_preset_id, account_id, category = 'Income' } = req.body;
+      const result = await db.run("INSERT INTO income_flows (name, amount, date, is_recurring, budget_preset_id, account_id, category) VALUES (?, ?, ?, ?, ?, ?, ?)", [name, amount, date, is_recurring ? 1 : 0, budget_preset_id, account_id, category]);
+      await upsertPersonalCategory(db, category, 'income');
       
       // Also add to calendar_events
       await db.run("INSERT INTO calendar_events (name, type, amount, date, color, icon, provider, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [name, 'income', amount, date, 'emerald', 'ArrowDown', 'Manual', 'income_flow']);
