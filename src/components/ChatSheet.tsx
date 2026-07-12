@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, LockKeyhole, Send, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { runLocalCopilot, type CopilotAction, type TransactionDraft } from '../lib/localCopilot';
+import { runLocalCopilot, type CopilotAction, type OperationDraft, type TransactionDraft } from '../lib/localCopilot';
 
 export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; onClose: () => void; onNavigate: (tab: string) => void }) {
   const [input, setInput] = useState('');
@@ -27,7 +27,7 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
     window.setTimeout(async () => {
       const reply = runLocalCopilot(userMsg);
       const accountOptions = reply.transaction ? await getAccountOptions(reply.transaction.accountHint) : undefined;
-      setMessages(prev => [...prev, { role: 'agent', text: reply.text, actions: reply.actions, transaction: reply.transaction, accountOptions }]);
+      setMessages(prev => [...prev, { role: 'agent', text: reply.text, actions: reply.actions, transaction: reply.transaction, operation: reply.operation, accountOptions }]);
       if (reply.navigateNow) { onNavigate(reply.navigateNow); onClose(); }
       setIsTyping(false);
     }, 220);
@@ -53,6 +53,26 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
       triggerRefresh();
     } catch (error) {
       setMessages(prev => [...prev, { role: 'agent', text: error instanceof Error ? error.message : 'Unable to save the transaction.' }]);
+    }
+  };
+
+  const saveOperation = async (operation: OperationDraft) => {
+    const endpoint = {
+      'calendar-event': '/api/calendar_events',
+      'career-task': '/api/career/tasks',
+      note: '/api/personal/notes',
+      routine: '/api/personal/routines',
+      category: '/api/categories',
+      goal: '/api/goals',
+      budget: '/api/budgets'
+    }[operation.kind];
+    try {
+      const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(operation.payload) });
+      if (!response.ok) throw new Error('Unable to save this ' + operation.kind.replace('-', ' ') + '.');
+      setMessages(prev => [...prev, { role: 'agent', text: 'Saved locally: ' + operation.label + '.' }]);
+      triggerRefresh();
+    } catch (error) {
+      setMessages(prev => [...prev, { role: 'agent', text: error instanceof Error ? error.message : 'Unable to save this action.' }]);
     }
   };
 
@@ -104,6 +124,7 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
                   </div>
                   {m.actions?.length > 0 && <div className="mt-2 flex max-w-[95%] flex-wrap gap-2">{m.actions.map((action: CopilotAction) => <button key={action.tab} onClick={() => { onNavigate(action.tab); onClose(); }} className={`rounded-full border px-3 py-1.5 text-xs font-bold transition-colors ${isAdvanced ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-slate-50'}`}>{action.label}</button>)}</div>}
                   {m.transaction && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50'}`}><p className="text-xs font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Private action draft</p><p className="mt-1 text-sm font-bold">{m.transaction.type === 'expense' ? 'Expense' : 'Income'} · PHP {m.transaction.amount.toLocaleString()} · {m.transaction.category}</p><p className="mt-1 text-xs text-slate-500">External-AI-safe envelope: {m.transaction.redactedCommand}</p>{m.accountOptions?.length ? <div className="mt-3 flex flex-wrap gap-2">{m.accountOptions.map(account => <button key={account.id} onClick={() => saveTransaction(m.transaction!, account)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700">Save with {account.name}</button>)}</div> : <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">No matching local account was found. Add or select an account in Accounts first.</p>}</div>}
+                  {m.operation && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-violet-500/30 bg-violet-500/10' : 'border-violet-200 bg-violet-50'}`}><p className="text-xs font-black uppercase tracking-wider text-violet-700 dark:text-violet-300">Private action draft</p><p className="mt-1 text-sm font-bold">{m.operation.label}</p><p className="mt-1 text-xs text-slate-500">External-AI-safe envelope: {m.operation.redactedCommand}</p><button onClick={() => saveOperation(m.operation!)} className="mt-3 rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-700">Save locally</button></div>}
                 </div>
               ))}
               {isTyping && (
@@ -148,7 +169,7 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
 }
 
 type AccountOption = { id: number; name: string };
-type ChatMessage = { role: 'user' | 'agent'; text: string; actions?: CopilotAction[]; transaction?: TransactionDraft; accountOptions?: AccountOption[] };
+type ChatMessage = { role: 'user' | 'agent'; text: string; actions?: CopilotAction[]; transaction?: TransactionDraft; operation?: OperationDraft; accountOptions?: AccountOption[] };
 
 async function getAccountOptions(hint: string): Promise<AccountOption[]> {
   try {

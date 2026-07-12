@@ -9,34 +9,72 @@ export type TransactionDraft = {
   redactedCommand: string;
 };
 
+export type OperationDraft = {
+  kind: 'calendar-event' | 'career-task' | 'note' | 'routine' | 'category' | 'goal' | 'budget';
+  label: string;
+  tab: string;
+  payload: Record<string, unknown>;
+  redactedCommand: string;
+};
+
 export type CopilotReply = {
   text: string;
   actions?: CopilotAction[];
   navigateNow?: string;
   transaction?: TransactionDraft;
+  operation?: OperationDraft;
 };
 
 const routes = [
-  { terms: ['account', 'bank', 'cash', 'transaction', 'expense'], tab: 'accounts', label: 'Open Accounts' },
-  { terms: ['investment', 'portfolio', 'stock', 'crypto'], tab: 'investments', label: 'Open Investments' },
-  { terms: ['liability', 'debt', 'loan', 'credit card', 'bill'], tab: 'liabilities', label: 'Open Liabilities' },
-  { terms: ['budget', 'goal', 'plan', 'saving'], tab: 'plans', label: 'Open Plans' },
+  { terms: ['home', 'main dashboard', 'overview'], tab: 'home', label: 'Open Home' },
+  { terms: ['cash account', 'cash'], tab: 'accounts-cash', label: 'Open Cash Accounts' },
+  { terms: ['digital account', 'gcash', 'maya', 'digital wallet'], tab: 'accounts-digital', label: 'Open Digital Accounts' },
+  { terms: ['bank account', 'banking'], tab: 'accounts-bank', label: 'Open Bank Accounts' },
+  { terms: ['card account', 'credit card account'], tab: 'accounts-card', label: 'Open Card Accounts' },
+  { terms: ['account', 'bank', 'transaction', 'expense'], tab: 'accounts', label: 'Open Accounts' },
+  { terms: ['quick expense', 'quick expenses'], tab: 'liabilities-quick expenses', label: 'Open Quick Expenses' },
+  { terms: ['installment', 'installments'], tab: 'liabilities-installments', label: 'Open Installments' },
+  { terms: ['credit', 'credits'], tab: 'liabilities-credits', label: 'Open Credits' },
+  { terms: ['debt', 'debts', 'loan'], tab: 'liabilities-debts', label: 'Open Debts' },
+  { terms: ['bill', 'bills'], tab: 'liabilities-bills', label: 'Open Bills' },
+  { terms: ['liability', 'credit card'], tab: 'liabilities', label: 'Open Liabilities' },
+  { terms: ['budget', 'budgets'], tab: 'plans-budget', label: 'Open Budgets' },
+  { terms: ['goal', 'goals', 'saving goal'], tab: 'plans-goals', label: 'Open Goals' },
+  { terms: ['plan', 'saving'], tab: 'plans', label: 'Open Plans' },
   { terms: ['calendar', 'event', 'schedule'], tab: 'calendar', label: 'Open Calendar' },
+  { terms: ['real estate'], tab: 'investments-real estate', label: 'Open Real Estate' },
+  { terms: ['stock', 'stocks'], tab: 'investments-stocks', label: 'Open Stocks' },
+  { terms: ['crypto', 'cryptos'], tab: 'investments-cryptos', label: 'Open Crypto' },
+  { terms: ['investment', 'portfolio'], tab: 'investments', label: 'Open Investments' },
+  { terms: ['career calendar', 'interview calendar'], tab: 'career-calendar', label: 'Open Career Calendar' },
+  { terms: ['career task', 'career tasks', 'to-do', 'todo'], tab: 'career-tasks', label: 'Open Career Tasks' },
+  { terms: ['upskilling', 'course', 'learning'], tab: 'career-upskilling', label: 'Open Upskilling' },
+  { terms: ['career income', 'salary progression'], tab: 'career-income', label: 'Open Career Income' },
   { terms: ['career', 'job', 'interview', 'skill', 'upskill', 'task'], tab: 'career', label: 'Open Career' },
-  { terms: ['freelance', 'client', 'contract', 'invoice', 'time log', 'timer'], tab: 'freelancing', label: 'Open Freelancing' },
-  { terms: ['business', 'venture', 'store', 'saas', 'agency', 'pipeline'], tab: 'business', label: 'Open Business Operations' },
+  { terms: ['business cash flow', 'business finance'], tab: 'business-finance', label: 'Open Business Cash Flow' },
+  { terms: ['business operations', 'marketing', 'supply', 'product support'], tab: 'business-operations', label: 'Open Business Operations' },
+  { terms: ['business sales', 'pipeline', 'proposal', 'acquisition'], tab: 'business-sales', label: 'Open Business Sales' },
+  { terms: ['business records', 'catalogue', 'catalog', 'subscriptions', 'clients'], tab: 'business-records', label: 'Open Business Records' },
+  { terms: ['business', 'venture', 'store', 'saas', 'agency'], tab: 'business', label: 'Open Business Operations' },
+  { terms: ['freelance time', 'time log', 'timer'], tab: 'freelance-time', label: 'Open Freelance Time Logs' },
+  { terms: ['freelance invoice', 'invoice'], tab: 'freelance-invoices', label: 'Open Freelance Invoices' },
+  { terms: ['freelance contract', 'contract'], tab: 'freelance-contracts', label: 'Open Freelance Contracts' },
+  { terms: ['freelance dashboard', 'service dashboard'], tab: 'freelance-dashboard', label: 'Open Freelance Dashboard' },
+  { terms: ['freelance', 'client'], tab: 'freelancing', label: 'Open Freelancing' },
   { terms: ['tax', 'bir', 'sss', 'philhealth', 'pag-ibig'], tab: 'taxes', label: 'Open Taxes' },
   { terms: ['category', 'categories'], tab: 'categories', label: 'Open Categories' },
-  { terms: ['note', 'routine', 'personal'], tab: 'personal', label: 'Open Personal Space' },
+  { terms: ['personal notes', 'note', 'notes'], tab: 'personal-notes', label: 'Open Personal Notes' },
+  { terms: ['personal routines', 'routine', 'routines'], tab: 'personal-routines', label: 'Open Personal Routines' },
+  { terms: ['personal'], tab: 'personal', label: 'Open Personal Space' },
   { terms: ['setting', 'backup', 'export', 'import', 'theme'], tab: 'settings', label: 'Open Settings' }
 ];
 
 const directNavigation = /\b(open|go to|take me to|show me|navigate to)\b/i;
 
 const workflows = [
-  { terms: ['invoice'], text: 'To create an invoice, open Freelancing, choose the relevant service, then use its Invoices tab. Add the client and line items there; the copilot never sees those details.', tab: 'freelancing', label: 'Open Freelancing' },
+  { terms: ['invoice'], text: 'To create an invoice, open Freelancing, choose the relevant service, then use its Invoices tab. Add the client and line items there; details remain local in FinGent.', tab: 'freelancing', label: 'Open Freelancing' },
   { terms: ['time log', 'timer', 'track time'], text: 'To track time, open Freelancing and select the relevant service. Start a timer or add a completed time log, then optionally link it to a contract yourself.', tab: 'freelancing', label: 'Open Freelancing' },
-  { terms: ['record an expense', 'add expense', 'log expense'], text: 'To record an expense, open Accounts and use New Transaction. Choose the account, category, date, and amount directly in the form; the copilot never reads that information.', tab: 'accounts', label: 'Open Accounts' },
+  { terms: ['record an expense', 'add expense', 'log expense'], text: 'You can say “I spent 500 on groceries, cash” to create a private transaction draft, or open Accounts to use the full transaction form.', tab: 'accounts', label: 'Open Accounts' },
   { terms: ['create a budget', 'add budget'], text: 'To create a budget, open Plans and use the budget workspace to set a month, total, and category allocations yourself.', tab: 'plans', label: 'Open Plans' },
   { terms: ['add task', 'create task', 'to-do', 'todo'], text: 'To add a career task, open Career and use the tasks workspace. You can set a due date and priority there.', tab: 'career', label: 'Open Career' },
   { terms: ['add event', 'schedule meeting', 'create event'], text: 'To schedule an event or meeting, open Calendar and use the new-event control. Career events can also be created from the Career calendar.', tab: 'calendar', label: 'Open Calendar' }
@@ -44,7 +82,9 @@ const workflows = [
 
 function matchedRoute(message: string) {
   const normalized = message.toLowerCase();
-  return routes.find(route => route.terms.some(term => normalized.includes(term)));
+  return routes
+    .flatMap(route => route.terms.filter(term => normalized.includes(term)).map(term => ({ route, score: term.length })))
+    .sort((left, right) => right.score - left.score)[0]?.route;
 }
 
 function titleCase(value: string) {
@@ -82,6 +122,48 @@ function parseTransactionCommand(message: string): TransactionDraft | null {
   };
 }
 
+function amountFrom(value: string) {
+  const match = value.match(/(?:\u20B1|php|pesos?|\$)?\s*(\d[\d,]*(?:\.\d{1,2})?)/i);
+  const amount = match ? Number(match[1].replace(/,/g, '')) : 0;
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function operation(kind: OperationDraft['kind'], label: string, tab: string, payload: Record<string, unknown>): OperationDraft {
+  return { kind, label, tab, payload, redactedCommand: 'Action: CREATE [' + kind.toUpperCase() + '] using [PRIVATE FIELDS].' };
+}
+
+function parseOperationCommand(message: string): OperationDraft | null {
+  const trimmed = message.trim();
+  const task = trimmed.match(/^(?:add|create|remind me about)\s+(?:a\s+)?(?:career\s+)?task\s+(.+?)(?:\s+due\s+(\d{4}-\d{2}-\d{2}))?$/i);
+  if (task) return operation('career-task', 'Career task: ' + task[1], 'career-tasks', { title: task[1], due_date: task[2] || null, priority: 'Medium', notes: '' });
+
+  const event = trimmed.match(/^(?:add|create|schedule)\s+(?:an?\s+)?(?:event|meeting|interview)\s+(.+?)\s+(?:on|for)\s+(\d{4}-\d{2}-\d{2})$/i);
+  if (event) return operation('calendar-event', 'Calendar event: ' + event[1], 'calendar', { name: event[1], type: 'general', amount: null, date: event[2], color: 'blue', icon: 'Calendar', provider: 'Local Copilot', source: 'copilot' });
+
+  const note = trimmed.match(/^(?:add|create|save)\s+(?:a\s+)?note\s+([^:]+)(?::\s*(.+))?$/i);
+  if (note) return operation('note', 'Note: ' + note[1].trim(), 'personal-notes', { title: note[1].trim(), body: note[2]?.trim() || '' });
+
+  const routine = trimmed.match(/^(?:add|create)\s+(?:a\s+)?routine\s+(.+?)(?:\s+(daily|weekdays|weekly))?$/i);
+  if (routine) return operation('routine', 'Routine: ' + routine[1], 'personal-routines', { name: routine[1], frequency: titleCase(routine[2] || 'Daily') });
+
+  const category = trimmed.match(/^(?:add|create)\s+(?:an?\s+)?(?:income |expense )?category\s+(.+?)(?:\s+as\s+(income|expense))?$/i);
+  if (category) return operation('category', 'Category: ' + category[1], 'categories', { name: category[1], type: (category[2] || (/income category/i.test(trimmed) ? 'income' : 'expense')).toLowerCase() });
+
+  const goal = trimmed.match(/^(?:add|create)\s+(?:a\s+)?goal\s+(.+?)\s+(?:target|for)\s+(.+)$/i);
+  if (goal) {
+    const target = amountFrom(goal[2]);
+    if (target > 0) return operation('goal', 'Goal: ' + goal[1], 'plans-goals', { name: goal[1], target, saved: 0, date: null, color: 'emerald', icon: 'Target', sources: [], transactions: [] });
+  }
+
+  const budget = trimmed.match(/^(?:add|create)\s+(?:a\s+)?budget\s+(.+?)\s+(?:amount|for|of)\s+(.+)$/i);
+  if (budget) {
+    const total = amountFrom(budget[2]);
+    if (total > 0) return operation('budget', 'Budget: ' + budget[1], 'plans-budget', { name: budget[1], total_amount: total, categories: [], month: new Date().toISOString().slice(0, 7) });
+  }
+
+  return null;
+}
+
 export function runLocalCopilot(message: string): CopilotReply {
   const trimmed = message.trim();
   const lower = trimmed.toLowerCase();
@@ -96,6 +178,14 @@ export function runLocalCopilot(message: string): CopilotReply {
     };
   }
 
+  const operationDraft = parseOperationCommand(trimmed);
+  if (operationDraft) {
+    return {
+      text: 'I prepared a local ' + operationDraft.kind.replace('-', ' ') + ' draft. Review it, then explicitly save it. Private fields stay inside FinGent.',
+      operation: operationDraft
+    };
+  }
+
   if (/\b(privacy|private|data|secure|security)\b/.test(lower)) {
     return {
       text: 'This agent resolves commands and saves records locally in FinGent. It has no API key and sends no data to an external AI service. If an AI provider is added later, it will receive only a redacted command such as “Action: EXPENSE [AMOUNT] from [ACCOUNT] for [REASON].”'
@@ -104,8 +194,23 @@ export function runLocalCopilot(message: string): CopilotReply {
 
   if (/\b(what can you do|help|commands|how do you work)\b/.test(lower)) {
     return {
-      text: 'I can guide you through FinGent, open the right workspace, and prepare a local transaction from plain language. Try “I spent 500 on groceries, cash” or “I received 25000 salary via BDO.” I will always ask for an explicit save before recording anything.',
-      actions: routes.slice(0, 6).map(({ label, tab }) => ({ label, tab }))
+      text: 'I can open every FinGent workspace and sidebar sub-tab: for example “open stocks”, “open career tasks”, “open business cash flow”, “open freelance invoices”, or “open personal notes”. I can also prepare local drafts: “I spent 500 on groceries, cash”, “add task update resume due 2026-07-20”, “schedule meeting Alex on 2026-07-20”, “create note ideas: outline launch”, “create routine stretch daily”, “create expense category Transport”, “create goal Emergency Fund target 50000”, or “create budget July amount 30000”. Every write needs an explicit Save locally click.',
+      actions: [
+        { label: 'Open Home', tab: 'home' },
+        { label: 'Open Accounts', tab: 'accounts' },
+        { label: 'Open Career Tasks', tab: 'career-tasks' },
+        { label: 'Open Calendar', tab: 'calendar' },
+        { label: 'Open Freelancing', tab: 'freelancing' },
+        { label: 'Open Business', tab: 'business' }
+      ]
+    };
+  }
+
+  if (route && directNavigation.test(trimmed)) {
+    return {
+      text: 'Opening ' + route.label.replace('Open ', '') + '.',
+      actions: [{ label: route.label, tab: route.tab }],
+      navigateNow: route.tab
     };
   }
 
