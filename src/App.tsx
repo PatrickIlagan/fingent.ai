@@ -37,7 +37,7 @@ export default function App() {
         {currentTab.startsWith('personal-') && <Personal category={currentTab.split('-').slice(1).join('-')} />}
         {currentTab === 'settings' && <Settings />}
       </Layout>
-      <ChatSheet isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
+      <ChatSheet isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} onNavigate={setCurrentTab} />
     </>
   );
 }

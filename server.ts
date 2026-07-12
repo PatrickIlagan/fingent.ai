@@ -5,7 +5,6 @@ import crypto from "crypto";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { getDb } from "./server/db";
-import { handleAgentChat } from "./server/agent";
 import YahooFinance from 'yahoo-finance2';
 const yahooFinance = new YahooFinance();
 
@@ -1098,8 +1097,6 @@ To run FinGent as a desktop application:
       res.json({ success: true });
     } catch(err: any) { res.status(500).json({error: err.message}); }
   });
-
-  app.post("/api/chat", handleAgentChat);
 
   // Vite middleware for development
     app.get("/api/businesses", async (req, res) => {

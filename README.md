@@ -6,7 +6,7 @@ FinGent is a local-first dashboard for personal finance, ventures, freelancing, 
 
 1. Install Node.js 20 or later.
 2. Run `npm install`.
-3. Copy `.env.example` to `.env.local` and add `GEMINI_API_KEY` only if you choose to enable the assistant.
+3. Copy `.env.example` to `.env.local` if you need to override deployment settings.
 4. Start the app with `npm run dev`.
 5. Open http://localhost:3000.
 
@@ -25,4 +25,6 @@ The app stores its SQLite database locally in `data/`. It is intentionally exclu
 - Freelance services, contracts, invoices, time tracking, and PDF invoices
 - Career tracking and settings
 
-The Gemini assistant is optional and is not required for the finance dashboard to work.
+## Local Copilot and privacy
+
+The FinGent Copilot is a browser-only workflow and navigation assistant. It has no API key, makes no AI or chat API request, and never reads accounts, transactions, balances, invoices, investments, or other client financial records. It can guide a user to the appropriate FinGent workspace, but it cannot inspect, calculate from, or write financial data.

@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useStore } from '../store/useStore';
-import { Settings as SettingsIcon, Download, Upload, Shield, Key, Moon, Sun, Save, RefreshCw, Cloud, CloudUpload, CloudDownload, AlertTriangle, Monitor } from 'lucide-react';
+import { Settings as SettingsIcon, Download, Upload, Shield, LockKeyhole, Moon, Sun, RefreshCw, CloudUpload, CloudDownload, AlertTriangle, Monitor } from 'lucide-react';
 import { auth, googleProvider } from '../lib/firebase';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 
@@ -9,7 +9,6 @@ export function Settings() {
   const isAdvanced = themeMode === 'advanced';
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
-  const [apiKey, setApiKey] = useState('');
   const [encPassword, setEncPassword] = useState('');
   const [driveSyncing, setDriveSyncing] = useState(false);
 
@@ -128,17 +127,11 @@ export function Settings() {
             </button>
           </div>
 
-          <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-700">
-            <div className="max-w-md w-full">
-              <p className="font-bold flex items-center gap-2"><Key size={18} /> Gemini API Key</p>
-              <p className="text-sm text-slate-500 mb-2">Provide your own API key for the AI agent (FinGent) to have memory and run. Saved locally in your browser.</p>
-              <input 
-                type="password" 
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="AIzaSy..." 
-                className={`w-full px-4 py-2 rounded-xl text-sm outline-none transition-colors ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500 text-white' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
-              />
+          <div className="flex items-start gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">
+            <div className={`mt-0.5 rounded-xl p-2 ${isAdvanced ? 'bg-emerald-500/10 text-emerald-300' : 'bg-emerald-50 text-emerald-600'}`}><LockKeyhole size={18} /></div>
+            <div>
+              <p className="font-bold">Local Copilot privacy</p>
+              <p className="mt-1 max-w-2xl text-sm text-slate-500">The copilot runs in this browser only. It has no API key, does not call a server or external AI service, and never reads your accounts, transactions, balances, invoices, or other client financial records.</p>
             </div>
           </div>
         </div>
@@ -218,7 +211,7 @@ export function Settings() {
         <h3 className="text-lg font-bold flex items-center gap-2 mb-4 text-rose-500"><AlertTriangle size={20} /> Disclaimers & Liability</h3>
         <div className={`p-4 rounded-xl text-sm space-y-3 ${isAdvanced ? 'bg-slate-900/50 text-slate-400' : 'bg-slate-50 text-slate-600'}`}>
           <p><strong>1. Data Privacy & Security:</strong> FinGent is designed to operate primarily via local/containerized storage to ensure the highest level of privacy. If you choose to use the Google Drive cloud sync, your data will be encrypted locally using AES-256-CBC before transmission. We do not store, access, or intercept your encryption password. You are solely responsible for securely storing your encryption password. If it is lost, your cloud backups cannot be recovered.</p>
-          <p><strong>2. Accuracy of Information:</strong> The financial tools, projections, and AI recommendations provided by FinGent are for informational and educational purposes only. They do not constitute professional financial, tax, or legal advice.</p>
+          <p><strong>2. Local Copilot:</strong> FinGent’s copilot is a browser-only navigation and workflow guide. It does not access financial records or provide personalised financial advice.</p>
           <p><strong>3. Limitation of Liability:</strong> By using FinGent, you agree that the developers shall not be held liable for any data loss, financial losses, miscalculations, or any direct/indirect damages arising from the use of this application. Always verify critical financial information independently.</p>
         </div>
       </div>

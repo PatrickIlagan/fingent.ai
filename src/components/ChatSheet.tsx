@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, Send, X } from 'lucide-react';
+import { Bot, LockKeyhole, Send, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { runLocalCopilot, type CopilotAction } from '../lib/localCopilot';
 
-export function ChatSheet({ isOpen, onClose }: any) {
+export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; onClose: () => void; onNavigate: (tab: string) => void }) {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<any[]>([]);
   const [isTyping, setIsTyping] = useState(false);
-  const { themeMode, triggerRefresh } = useStore();
+  const { themeMode } = useStore();
   const isAdvanced = themeMode === 'advanced';
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -23,73 +24,12 @@ export function ChatSheet({ isOpen, onClose }: any) {
     setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
     setIsTyping(true);
 
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMsg })
-      });
-
-      if (!response.body) return;
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      
-      let systemLogs: string[] = [];
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\\n\\n').filter(Boolean);
-        
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.type === 'log') {
-                systemLogs.push(data.message);
-                // We can show logs inline or just update a status
-              } else if (data.type === 'done') {
-                setMessages(prev => [...prev, { role: 'agent', text: data.data.text, logs: systemLogs }]);
-                if (data.data.requires_refresh) {
-                  triggerRefresh();
-                }
-              }
-            } catch(e) {}
-          }
-        }
-      }
-    } catch(e) {
-      setMessages(prev => [...prev, { role: 'agent', text: "Sorry, I encountered an error." }]);
-    } finally {
+    window.setTimeout(() => {
+      const reply = runLocalCopilot(userMsg);
+      setMessages(prev => [...prev, { role: 'agent', text: reply.text, actions: reply.actions }]);
+      if (reply.navigateNow) { onNavigate(reply.navigateNow); onClose(); }
       setIsTyping(false);
-    }
-  };
-
-  const handleMicClick = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Speech Recognition is not supported in this browser.");
-      return;
-    }
-    
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setInput(prev => prev + ' ' + transcript);
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error("Speech recognition error", event.error);
-    };
-
-    recognition.start();
+    }, 220);
   };
 
   return (
@@ -114,7 +54,7 @@ export function ChatSheet({ isOpen, onClose }: any) {
           >
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
-              <h2 className="font-bold text-lg">FinGent AI</h2>
+              <div><h2 className="font-bold text-lg">FinGent Copilot</h2><p className="mt-0.5 flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400"><LockKeyhole size={12} /> Local only · no financial data access</p></div>
               <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
                 <X size={20} />
               </button>
@@ -124,8 +64,9 @@ export function ChatSheet({ isOpen, onClose }: any) {
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {messages.length === 0 && (
                 <div className="text-center text-slate-500 dark:text-slate-400 mt-10">
-                  <BotIcon className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p>How can I help you manage your wealth today?</p>
+                  <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p>I can guide you around FinGent without reading your financial records.</p>
+                  <p className="mt-2 text-xs">Try “open career” or “where do I create an invoice?”</p>
                 </div>
               )}
               {messages.map((m, i) => (
@@ -137,11 +78,7 @@ export function ChatSheet({ isOpen, onClose }: any) {
                   }`}>
                     {m.text}
                   </div>
-                  {m.logs && m.logs.length > 0 && (
-                    <div className="mt-2 text-xs font-mono text-slate-400">
-                      {m.logs.map((l: string, idx: number) => <div key={idx}>{l}</div>)}
-                    </div>
-                  )}
+                  {m.actions?.length > 0 && <div className="mt-2 flex max-w-[95%] flex-wrap gap-2">{m.actions.map((action: CopilotAction) => <button key={action.tab} onClick={() => { onNavigate(action.tab); onClose(); }} className={`rounded-full border px-3 py-1.5 text-xs font-bold transition-colors ${isAdvanced ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-slate-50'}`}>{action.label}</button>)}</div>}
                 </div>
               ))}
               {isTyping && (
@@ -157,15 +94,12 @@ export function ChatSheet({ isOpen, onClose }: any) {
             {/* Input */}
             <div className={`p-4 border-t ${isAdvanced ? 'border-slate-700' : 'border-slate-200'}`}>
               <div className="flex items-center space-x-2">
-                <button onClick={handleMicClick} className="p-3 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-emerald-500">
-                  <Mic size={20} />
-                </button>
                 <input
                   type="text"
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleSend()}
-                  placeholder="Ask FinGent..."
+                  placeholder="Ask for guidance, not data..."
                   className={`flex-1 rounded-full px-4 py-3 outline-none ${
                     isAdvanced ? 'bg-slate-800 text-white placeholder-slate-400' : 'bg-slate-100 text-slate-900 placeholder-slate-500'
                   }`}
@@ -185,18 +119,5 @@ export function ChatSheet({ isOpen, onClose }: any) {
         </>
       )}
     </AnimatePresence>
-  );
-}
-
-function BotIcon(props: any) {
-  return (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 8V4H8" />
-      <rect width="16" height="12" x="4" y="8" rx="2" />
-      <path d="M2 14h2" />
-      <path d="M20 14h2" />
-      <path d="M15 13v2" />
-      <path d="M9 13v2" />
-    </svg>
   );
 }
