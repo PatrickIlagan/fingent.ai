@@ -50,6 +50,7 @@ async function initDb(db: any) {
   await db.exec(`ALTER TABLE accounts ADD COLUMN credit_limit REAL;`).catch(() => {});
   await db.exec(`ALTER TABLE accounts ADD COLUMN statement_date INTEGER;`).catch(() => {});
   await db.exec(`ALTER TABLE accounts ADD COLUMN due_date INTEGER;`).catch(() => {});
+  await db.exec(`ALTER TABLE transactions ADD COLUMN notes TEXT;`).catch(() => {});
 
   
   await db.exec(`
@@ -75,6 +76,7 @@ async function initDb(db: any) {
       amount REAL NOT NULL,
       category TEXT NOT NULL,
       description TEXT,
+      notes TEXT,
       date TEXT NOT NULL,
       FOREIGN KEY(account_id) REFERENCES accounts(id)
     );

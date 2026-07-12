@@ -541,8 +541,8 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                 )}
               </div>
               
-              <button className={`w-full mt-6 py-3 rounded-xl font-bold text-sm border-2 border-dashed transition-colors ${isAdvanced ? 'border-slate-700 hover:border-violet-500 text-slate-400 hover:text-violet-400' : 'border-slate-200 hover:border-slate-400 text-slate-500 hover:text-slate-800'}`}>
-                + Log Expense
+              <button onClick={() => onNavigate?.('accounts')} className={`w-full mt-6 py-3 rounded-xl font-bold text-sm border-2 border-dashed transition-colors ${isAdvanced ? 'border-slate-700 hover:border-violet-500 text-slate-400 hover:text-violet-400' : 'border-slate-200 hover:border-slate-400 text-slate-500 hover:text-slate-800'}`}>
+                + Record Expense in Accounts
               </button>
             </div>
           </div>

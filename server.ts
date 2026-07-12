@@ -284,7 +284,7 @@ To run FinGent as a desktop application:
         SELECT t.*, a.name as account_name 
         FROM transactions t 
         JOIN accounts a ON t.account_id = a.id 
-        ORDER BY date DESC LIMIT 10
+        ORDER BY date DESC, t.id DESC
       `);
       res.json(tx);
     } catch (error: any) {
@@ -598,7 +598,7 @@ To run FinGent as a desktop application:
   app.post("/api/transactions", async (req, res) => {
     try {
       const db = await getDb();
-      const { account_id, type, amount, category, description, date } = req.body;
+      const { account_id, type, amount, category, description, notes = '', date } = req.body;
       
       // Update account balance
       const account = await db.get("SELECT balance FROM accounts WHERE id = ?", [account_id]);
@@ -608,8 +608,8 @@ To run FinGent as a desktop application:
       }
 
       const result = await db.run(
-        "INSERT INTO transactions (account_id, type, amount, category, description, date) VALUES (?, ?, ?, ?, ?, ?)",
-        [account_id, type, amount, category, description, date]
+        "INSERT INTO transactions (account_id, type, amount, category, description, notes, date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [account_id, type, amount, category, description, notes, date]
       );
       await upsertPersonalCategory(db, category, type === 'income' ? 'income' : 'expense');
       res.json({ id: result.lastInsertRowid });
@@ -1201,6 +1201,34 @@ To run FinGent as a desktop application:
      } catch(e: any) {
         res.status(500).json({ error: e.message });
      }
+  });
+
+  app.put("/api/transactions/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { account_id, type, amount, category, description, notes = '', date } = req.body;
+      const previous = await db.get("SELECT * FROM transactions WHERE id = ?", [req.params.id]);
+      if (!previous) return res.status(404).json({ error: 'Transaction not found.' });
+
+      const previousAccount = await db.get("SELECT balance FROM accounts WHERE id = ?", [previous.account_id]);
+      if (previousAccount) {
+        const restored = previous.type === 'income' ? previousAccount.balance - Number(previous.amount) : previousAccount.balance + Number(previous.amount);
+        await db.run("UPDATE accounts SET balance = ? WHERE id = ?", [restored, previous.account_id]);
+      }
+
+      const nextAccount = await db.get("SELECT balance FROM accounts WHERE id = ?", [account_id]);
+      if (!nextAccount) return res.status(400).json({ error: 'Account not found.' });
+      const nextBalance = type === 'income' ? nextAccount.balance + Number(amount) : nextAccount.balance - Number(amount);
+      await db.run("UPDATE accounts SET balance = ? WHERE id = ?", [nextBalance, account_id]);
+      await db.run(
+        "UPDATE transactions SET account_id = ?, type = ?, amount = ?, category = ?, description = ?, notes = ?, date = ? WHERE id = ?",
+        [account_id, type, amount, category, description, notes, date, req.params.id]
+      );
+      await upsertPersonalCategory(db, category, type === 'income' ? 'income' : 'expense');
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   app.delete("/api/business_deals/:id", async (req, res) => {

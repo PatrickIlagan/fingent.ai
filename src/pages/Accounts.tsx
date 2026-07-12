@@ -26,6 +26,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
   
   const [selectedAccount, setSelectedAccount] = useState<any | null>(null);
   const [txAccount, setTxAccount] = useState<any | null>(null);
+  const [editingTransaction, setEditingTransaction] = useState<any | null>(null);
   const [editingAccount, setEditingAccount] = useState<any | null>(null);
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
   const [newTx, setNewTx] = useState({ type: 'expense', title: '', amount: '', date: '', notes: '', category: 'Expenses', goalId: '' });
@@ -142,8 +143,23 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
   const handleOpenTransactionModal = (acc: any, type: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setTxAccount(acc);
-    setNewTx(prev => ({ ...prev, type, date: new Date().toISOString().split('T')[0] }));
+    setEditingTransaction(null);
+    setNewTx({ type, title: '', amount: '', date: new Date().toISOString().split('T')[0], notes: '', category: type === 'income' ? 'Income' : 'Expenses', goalId: '' });
     setIsTransactionModalOpen(true);
+  };
+
+  const handleEditTransaction = (transaction: any) => {
+    if (!selectedAccount) return;
+    setTxAccount(selectedAccount);
+    setEditingTransaction(transaction);
+    setNewTx({ type: transaction.type, title: transaction.description || transaction.title || '', amount: String(transaction.amount || ''), date: transaction.date || new Date().toISOString().split('T')[0], notes: transaction.notes || '', category: transaction.category || (transaction.type === 'income' ? 'Income' : 'Expenses'), goalId: '' });
+    setIsTransactionModalOpen(true);
+  };
+
+  const handleDeleteTransaction = async (transaction: any) => {
+    if (!window.confirm(`Delete ${transaction.title || transaction.description || 'this transaction'}?`)) return;
+    const response = await fetch(`/api/transactions/${transaction.id}`, { method: 'DELETE' });
+    if (response.ok) triggerRefresh();
   };
 
   const handleDeleteAccount = async (e: React.MouseEvent) => {
@@ -163,8 +179,8 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
     try {
       const amount = parseFloat(newTx.amount);
       
-      await fetch('/api/transactions', {
-        method: 'POST',
+      const response = await fetch(editingTransaction ? `/api/transactions/${editingTransaction.id}` : '/api/transactions', {
+        method: editingTransaction ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           account_id: txAccount.id,
@@ -172,11 +188,13 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
           amount,
           category: newTx.category,
           description: newTx.title,
+          notes: newTx.notes,
           date: newTx.date || new Date().toISOString().split('T')[0]
         })
       });
+      if (!response.ok) return;
       
-      if (newTx.type === 'income' && newTx.goalId) {
+      if (!editingTransaction && newTx.type === 'income' && newTx.goalId) {
         const goal = goals.find(g => g.id.toString() === newTx.goalId);
         if (goal) {
           const newTransaction = {
@@ -211,6 +229,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
       triggerRefresh();
       
       setIsTransactionModalOpen(false);
+      setEditingTransaction(null);
       setNewTx({ type: 'expense', title: '', amount: '', date: '', notes: '', category: 'Expenses', goalId: '' });
     } catch (err) {
       console.error("Failed to add transaction:", err);
@@ -319,7 +338,12 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold flex items-center gap-2"><History size={20} /> Transaction History</h3>
             <button 
-              onClick={() => setIsTransactionModalOpen(true)}
+              onClick={() => {
+                setTxAccount(selectedAccount);
+                setEditingTransaction(null);
+                setNewTx({ type: 'expense', title: '', amount: '', date: new Date().toISOString().split('T')[0], notes: '', category: 'Expenses', goalId: '' });
+                setIsTransactionModalOpen(true);
+              }}
               className={`px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white'}`}
             >
               + Add Transaction
@@ -357,9 +381,13 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                             </div>
                           </div>
                         </div>
-                        <span className={`font-black text-lg ${tx.type === 'income' ? 'text-emerald-500 dark:text-emerald-400' : ''}`}>
-                          {tx.type === 'income' ? '+' : '-'}₱{tx.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
+                        <div className="flex items-center gap-2 self-end sm:self-auto">
+                          <span className={`font-black text-lg ${tx.type === 'income' ? 'text-emerald-500 dark:text-emerald-400' : ''}`}>
+                            {tx.type === 'income' ? '+' : '-'}₱{tx.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                          <button aria-label={`Edit ${tx.title}`} onClick={() => handleEditTransaction(tx)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"><Edit2 size={15} /></button>
+                          <button aria-label={`Delete ${tx.title}`} onClick={() => handleDeleteTransaction(tx)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10"><Trash2 size={15} /></button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -659,14 +687,14 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
 
       {/* Transaction Modal */}
         {isTransactionModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsTransactionModalOpen(false)}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => { setIsTransactionModalOpen(false); setEditingTransaction(null); }}>
             <div 
               className={`w-full max-w-md rounded-3xl shadow-xl flex flex-col p-6 ${isAdvanced ? 'bg-slate-800 border border-slate-700 text-white' : 'bg-white border border-slate-100'}`}
               onClick={e => e.stopPropagation()}
             >
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-bold">New Transaction</h3>
-                <button onClick={() => setIsTransactionModalOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20} /></button>
+                <h3 className="text-xl font-bold">{editingTransaction ? 'Edit Transaction' : 'New Transaction'}</h3>
+                <button onClick={() => { setIsTransactionModalOpen(false); setEditingTransaction(null); }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20} /></button>
               </div>
 
               <div className="space-y-4">
@@ -767,7 +795,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                   disabled={!newTx.title || !newTx.amount}
                   className={`w-full py-4 rounded-xl font-bold mt-2 disabled:opacity-50 transition-colors ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white'}`}
                 >
-                  Save Transaction
+                  {editingTransaction ? 'Save Changes' : 'Save Transaction'}
                 </button>
               </div>
             </div>
