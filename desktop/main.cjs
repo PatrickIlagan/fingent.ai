@@ -1,9 +1,20 @@
 const { app, BrowserWindow, shell } = require('electron');
+const fs = require('node:fs');
 const http = require('node:http');
 const net = require('node:net');
 const path = require('node:path');
 
 let mainWindow;
+
+function writeStartupLog(message) {
+  try {
+    const dataDir = app.getPath('userData');
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.appendFileSync(path.join(dataDir, 'desktop-startup.log'), `[${new Date().toISOString()}] ${message}\n`);
+  } catch {
+    // Logging must never prevent the desktop app from starting.
+  }
+}
 
 function findOpenPort() {
   return new Promise((resolve, reject) => {
@@ -66,6 +77,7 @@ function createWindow(port) {
 }
 
 app.whenReady().then(async () => {
+  writeStartupLog('Starting FinGent desktop app.');
   const port = await findOpenPort();
   process.env.NODE_ENV = 'production';
   process.env.PORT = String(port);
@@ -75,17 +87,26 @@ app.whenReady().then(async () => {
 
   // This starts the same Express and SQLite application used by the web version.
   // Its data directory is Electron's per-user app-data directory, never the installer.
-  require(path.join(app.getAppPath(), 'dist', 'server.cjs'));
+  const serverPath = path.join(app.getAppPath(), 'dist', 'server.cjs');
+  writeStartupLog(`Starting bundled local server from ${serverPath}.`);
+  require(serverPath);
   await waitForLocalServer(port);
+  writeStartupLog(`Local server is ready on 127.0.0.1:${port}.`);
   createWindow(port);
+  writeStartupLog('Main window created.');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow(port);
   });
 }).catch(error => {
-  console.error(error);
+  const detail = error && error.stack ? error.stack : String(error);
+  console.error(detail);
+  writeStartupLog(`Startup failed: ${detail}`);
   app.quit();
 });
+
+process.on('uncaughtException', error => writeStartupLog(`Uncaught exception: ${error.stack || error}`));
+process.on('unhandledRejection', error => writeStartupLog(`Unhandled rejection: ${error && error.stack ? error.stack : error}`));
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

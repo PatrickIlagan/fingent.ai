@@ -4,9 +4,10 @@ import fsModule from "fs";
 import crypto from "crypto";
 import path from "path";
 import Database from "better-sqlite3";
-import { createServer as createViteServer } from "vite";
 import { closeDb, getDataDir, getDb } from "./server/db";
-import YahooFinance from 'yahoo-finance2';
+// yahoo-finance2 exposes its constructor as CommonJS's `.default`. Using an
+// explicit require keeps the production CJS bundle compatible with Electron.
+const YahooFinance = require('yahoo-finance2').default;
 const yahooFinance = new YahooFinance();
 
 // Category families keep English, Tagalog, and Taglish labels in one budget/reporting bucket.
@@ -1754,6 +1755,7 @@ To run FinGent as a desktop application:
 
 
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
