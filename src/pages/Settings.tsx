@@ -221,14 +221,8 @@ export function Settings() {
             <div className={`rounded-2xl border p-4 ${isAdvanced ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50'}`}><h4 className="font-bold flex items-center gap-2"><Download size={18} /> Complete database backup</h4><p className="mt-1 text-sm text-slate-500">Export an unencrypted <code>.db</code> file for full-fidelity restore into FinGent.</p><button onClick={handleExport} className={`mt-3 rounded-xl px-3 py-2 text-sm font-bold border ${isAdvanced ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-white'}`}>Export database</button></div>
           </div>
           <div className="md:col-span-2 mb-2">
-            <h4 className="font-bold flex items-center gap-2 mb-2"><Monitor size={18} /> Desktop App</h4>
-            <p className="text-sm text-slate-500 mb-4">Download an Electron wrapper to run FinGent as a standalone desktop application on Windows, Mac, or Linux.</p>
-            <button 
-              onClick={() => window.location.href = '/api/system/desktop-wrapper'}
-              className={`w-full max-w-md py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 transition-colors ${isAdvanced ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'}`}
-            >
-              <Download size={16} /> Download Desktop Wrapper
-            </button>
+            <h4 className="font-bold flex items-center gap-2 mb-2"><Monitor size={18} /> FinGent for Windows</h4>
+            <p className="text-sm text-slate-500">Use the official <code>FinGent-Setup.exe</code> installer distributed with a release. The installed app runs its own loopback-only server and stores your SQLite database in your Windows user profile—not in the installer folder or a hosted service.</p>
           </div>
         </div>
         <div className="pt-6 border-t border-slate-100 dark:border-slate-700 grid md:grid-cols-2 gap-4">

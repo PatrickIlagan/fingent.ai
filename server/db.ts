@@ -5,9 +5,15 @@ import fs from 'fs';
 let dbInstance: any = null;
 let sqliteInstance: Database.Database | null = null;
 
+export function getDataDir() {
+  return process.env.FINGENT_DATA_DIR
+    ? path.resolve(process.env.FINGENT_DATA_DIR)
+    : path.join(process.cwd(), 'data');
+}
+
 export async function getDb() {
   if (!dbInstance) {
-    const dataDir = path.join(process.cwd(), 'data');
+    const dataDir = getDataDir();
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }

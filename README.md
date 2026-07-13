@@ -12,6 +12,16 @@ FinGent is a local-first dashboard for personal finance, ventures, freelancing, 
 
 The app stores its SQLite database locally in `data/`. It is intentionally excluded from Git so personal financial records stay on your machine.
 
+## Windows desktop installer
+
+Build a standalone Windows installer with:
+
+```powershell
+npm run desktop:dist
+```
+
+The release artifacts are written to `release/`. Install the `FinGent-<version>-x64.exe` setup file (or use the portable `.exe`). The desktop app uses a loopback-only local server and stores its database under `%APPDATA%\FinGent\fingent.db`; uninstalling or updating the app does not remove that data. Use the in-app database backup export before moving computers.
+
 ## Checks
 
 - `npm run lint` validates TypeScript.

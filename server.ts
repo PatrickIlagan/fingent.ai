@@ -5,7 +5,7 @@ import crypto from "crypto";
 import path from "path";
 import Database from "better-sqlite3";
 import { createServer as createViteServer } from "vite";
-import { closeDb, getDb } from "./server/db";
+import { closeDb, getDataDir, getDb } from "./server/db";
 import YahooFinance from 'yahoo-finance2';
 const yahooFinance = new YahooFinance();
 
@@ -113,9 +113,13 @@ function validateDatabase(databasePath: string) {
 
 async function startServer() {
   const app = express();
-const upload = multer({ dest: 'data/uploads/' });
-
-  const PORT = 3000;
+  const dataDir = getDataDir();
+  const uploadDir = path.join(dataDir, 'uploads');
+  fsModule.mkdirSync(uploadDir, { recursive: true });
+  const upload = multer({ dest: uploadDir });
+  const PORT = Number(process.env.PORT || 3000);
+  const HOST = process.env.FINGENT_HOST || '127.0.0.1';
+  const appRoot = process.env.FINGENT_APP_ROOT || process.cwd();
 
   app.use(express.json());
 
@@ -197,7 +201,7 @@ To run FinGent as a desktop application:
       const { accessToken, password } = req.body;
       if (!accessToken || !password) return res.status(400).json({ error: "Missing token or password" });
 
-      const dbPath = path.join(process.cwd(), 'data', 'fingent.db');
+      const dbPath = path.join(dataDir, 'fingent.db');
       if (!fsModule.existsSync(dbPath)) return res.status(404).json({ error: 'Local database not found.' });
       const encrypted = encryptBackup(fsModule.readFileSync(dbPath), password);
 
@@ -265,7 +269,7 @@ To run FinGent as a desktop application:
       const arrayBuffer = await downloadRes.arrayBuffer();
       const encrypted = Buffer.from(arrayBuffer);
 
-      const dbPath = path.join(process.cwd(), 'data', 'fingent.db');
+      const dbPath = path.join(dataDir, 'fingent.db');
       const stagedPath = dbPath + '.restore-' + crypto.randomUUID();
       fsModule.writeFileSync(stagedPath, decryptBackup(encrypted, password));
       try {
@@ -284,7 +288,7 @@ To run FinGent as a desktop application:
   });
 
   app.get("/api/system/export", (req, res) => {
-    const dbPath = path.join(process.cwd(), 'data', 'fingent.db');
+    const dbPath = path.join(dataDir, 'fingent.db');
     if (fsModule.existsSync(dbPath)) {
       res.download(dbPath, 'fingent_backup.db');
     } else {
@@ -297,7 +301,7 @@ To run FinGent as a desktop application:
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
-      const dbPath = path.join(process.cwd(), 'data', 'fingent.db');
+      const dbPath = path.join(dataDir, 'fingent.db');
       validateDatabase(req.file.path);
       await closeDb();
       fsModule.copyFileSync(req.file.path, dbPath);
@@ -1756,14 +1760,14 @@ To run FinGent as a desktop application:
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = path.join(appRoot, 'dist');
     app.use(express.static(distPath));
     app.get('*all', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, HOST, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }
