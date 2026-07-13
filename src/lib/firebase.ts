@@ -2,15 +2,16 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 
 const firebaseConfig = {
-  projectId: "vast-connection-dn50x",
-  appId: "1:562923369745:web:258d07261e30c964ff48b0",
-  apiKey: "AIzaSyCWEwyZkN4l1Glv5h-HkHM7KI6uAOYe8ek",
-  authDomain: "vast-connection-dn50x.firebaseapp.com",
-  storageBucket: "vast-connection-dn50x.firebasestorage.app",
-  messagingSenderId: "562923369745"
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID
 };
 
-export const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+export const isFirebaseConfigured = Boolean(firebaseConfig.projectId && firebaseConfig.appId && firebaseConfig.apiKey && firebaseConfig.authDomain);
+export const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
+export const auth = app ? getAuth(app) : null;
 export const googleProvider = new GoogleAuthProvider();
-googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
+googleProvider.addScope('https://www.googleapis.com/auth/drive.appdata');

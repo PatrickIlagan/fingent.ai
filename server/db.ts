@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 
 let dbInstance: any = null;
+let sqliteInstance: Database.Database | null = null;
 
 export async function getDb() {
   if (!dbInstance) {
@@ -11,6 +12,7 @@ export async function getDb() {
       fs.mkdirSync(dataDir, { recursive: true });
     }
     const sqliteDb = new Database(path.join(dataDir, 'fingent.db'));
+    sqliteInstance = sqliteDb;
     
     dbInstance = {
       get: async (sql: string, params: any[] = []) => sqliteDb.prepare(sql).get(...params),
@@ -22,6 +24,12 @@ export async function getDb() {
     await initDb(dbInstance);
   }
   return dbInstance;
+}
+
+export async function closeDb() {
+  if (sqliteInstance) sqliteInstance.close();
+  sqliteInstance = null;
+  dbInstance = null;
 }
 
 async function initDb(db: any) {

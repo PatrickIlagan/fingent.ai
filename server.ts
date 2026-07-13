@@ -3,8 +3,9 @@ import multer from "multer";
 import fsModule from "fs";
 import crypto from "crypto";
 import path from "path";
+import Database from "better-sqlite3";
 import { createServer as createViteServer } from "vite";
-import { getDb } from "./server/db";
+import { closeDb, getDb } from "./server/db";
 import YahooFinance from 'yahoo-finance2';
 const yahooFinance = new YahooFinance();
 
@@ -37,6 +38,46 @@ async function upsertPersonalCategory(db: any, name: string, type: 'income' | 'e
     await db.run("UPDATE categories SET type = ?, active = 1 WHERE id = ?", [categoryType, existing.id]);
   } else {
     await db.run("INSERT INTO categories (name, type, active) VALUES (?, ?, 1)", [normalized, type]);
+  }
+}
+
+const DRIVE_BACKUP_NAME = 'fingent-backup.enc';
+
+function encryptBackup(source: Buffer, password: string) {
+  const salt = crypto.randomBytes(16);
+  const iv = crypto.randomBytes(12);
+  const key = crypto.scryptSync(password, salt, 32);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(source), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([Buffer.from('FGDB2'), salt, iv, tag, encrypted]);
+}
+
+function decryptBackup(payload: Buffer, password: string) {
+  if (payload.subarray(0, 5).toString() === 'FGDB2') {
+    const salt = payload.subarray(5, 21);
+    const iv = payload.subarray(21, 33);
+    const tag = payload.subarray(33, 49);
+    const data = payload.subarray(49);
+    const key = crypto.scryptSync(password, salt, 32);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(data), decipher.final()]);
+  }
+  const key = crypto.scryptSync(password, 'fingent_salt', 32);
+  const iv = payload.subarray(0, 16);
+  const data = payload.subarray(16);
+  const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+  return Buffer.concat([decipher.update(data), decipher.final()]);
+}
+
+function validateDatabase(databasePath: string) {
+  const candidate = new Database(databasePath, { readonly: true });
+  try {
+    const result = candidate.pragma('quick_check', { simple: true });
+    if (result !== 'ok') throw new Error('The selected file is not a healthy SQLite database.');
+  } finally {
+    candidate.close();
   }
 }
 
@@ -128,21 +169,14 @@ To run FinGent as a desktop application:
       if (!accessToken || !password) return res.status(400).json({ error: "Missing token or password" });
 
       const dbPath = path.join(process.cwd(), 'data', 'fingent.db');
-      const encPath = path.join(process.cwd(), 'data', 'fingent.db.enc');
-      
-      // Encrypt
-      const algorithm = 'aes-256-cbc';
-      const key = crypto.scryptSync(password, 'fingent_salt', 32);
-      const iv = crypto.randomBytes(16);
-      const cipher = crypto.createCipheriv(algorithm, key, iv);
-      const input = fsModule.readFileSync(dbPath);
-      const encrypted = Buffer.concat([iv, cipher.update(input), cipher.final()]);
-      fsModule.writeFileSync(encPath, encrypted);
+      if (!fsModule.existsSync(dbPath)) return res.status(404).json({ error: 'Local database not found.' });
+      const encrypted = encryptBackup(fsModule.readFileSync(dbPath), password);
 
-      // Check if file exists in Drive
-      const searchRes = await fetch("https://www.googleapis.com/drive/v3/files?q=name='fingent.db.enc' and trashed=false", {
+      const searchParams = new URLSearchParams({ q: "name='" + DRIVE_BACKUP_NAME + "' and trashed=false", spaces: 'appDataFolder', fields: 'files(id,name,modifiedTime)' });
+      const searchRes = await fetch("https://www.googleapis.com/drive/v3/files?" + searchParams, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
+      if (!searchRes.ok) throw new Error('Google Drive search failed. Check that Drive API access is enabled.');
       const searchData = await searchRes.json();
       let fileId = null;
       if (searchData.files && searchData.files.length > 0) {
@@ -151,8 +185,8 @@ To run FinGent as a desktop application:
 
       // Upload to Drive (Simple upload for media, then update metadata, or multipart. We'll use multipart)
       const form = new FormData();
-      form.append('metadata', new Blob([JSON.stringify({ name: 'fingent.db.enc' })], { type: 'application/json' }));
-      form.append('file', new Blob([fsModule.readFileSync(encPath)]), 'fingent.db.enc');
+      form.append('metadata', new Blob([JSON.stringify({ name: DRIVE_BACKUP_NAME, parents: ['appDataFolder'], appProperties: { product: 'FinGent', format: 'FGDB2' } })], { type: 'application/json' }));
+      form.append('file', new Blob([encrypted]), DRIVE_BACKUP_NAME);
 
       let uploadUrl = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
       let method = "POST";
@@ -170,8 +204,7 @@ To run FinGent as a desktop application:
       const uploadData = await uploadRes.json();
       if (uploadData.error) throw new Error(uploadData.error.message);
 
-      fsModule.unlinkSync(encPath); // cleanup
-      res.json({ success: true, fileId: uploadData.id });
+      res.json({ success: true, fileId: uploadData.id, modifiedTime: uploadData.modifiedTime || new Date().toISOString() });
     } catch (err: any) {
       console.error(err);
       res.status(500).json({ error: err.message });
@@ -183,10 +216,11 @@ To run FinGent as a desktop application:
       const { accessToken, password } = req.body;
       if (!accessToken || !password) return res.status(400).json({ error: "Missing token or password" });
 
-      // Find file
-      const searchRes = await fetch("https://www.googleapis.com/drive/v3/files?q=name='fingent.db.enc' and trashed=false", {
+      const searchParams = new URLSearchParams({ q: "name='" + DRIVE_BACKUP_NAME + "' and trashed=false", spaces: 'appDataFolder', fields: 'files(id,name,modifiedTime)' });
+      const searchRes = await fetch("https://www.googleapis.com/drive/v3/files?" + searchParams, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
+      if (!searchRes.ok) throw new Error('Google Drive search failed. Check that Drive API access is enabled.');
       const searchData = await searchRes.json();
       if (!searchData.files || searchData.files.length === 0) {
         return res.status(404).json({ error: "No backup found on Google Drive" });
@@ -202,19 +236,18 @@ To run FinGent as a desktop application:
       const arrayBuffer = await downloadRes.arrayBuffer();
       const encrypted = Buffer.from(arrayBuffer);
 
-      // Decrypt
-      const algorithm = 'aes-256-cbc';
-      const key = crypto.scryptSync(password, 'fingent_salt', 32);
-      const iv = encrypted.slice(0, 16);
-      const data = encrypted.slice(16);
-      const decipher = crypto.createDecipheriv(algorithm, key, iv);
-      const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
-
-      // Overwrite DB
       const dbPath = path.join(process.cwd(), 'data', 'fingent.db');
-      fsModule.writeFileSync(dbPath, decrypted);
+      const stagedPath = dbPath + '.restore-' + crypto.randomUUID();
+      fsModule.writeFileSync(stagedPath, decryptBackup(encrypted, password));
+      try {
+        validateDatabase(stagedPath);
+        await closeDb();
+        fsModule.copyFileSync(stagedPath, dbPath);
+      } finally {
+        if (fsModule.existsSync(stagedPath)) fsModule.unlinkSync(stagedPath);
+      }
 
-      res.json({ success: true });
+      res.json({ success: true, modifiedTime: searchData.files[0].modifiedTime || null });
     } catch (err: any) {
       console.error(err);
       res.status(500).json({ error: err.message });
@@ -236,15 +269,15 @@ To run FinGent as a desktop application:
         return res.status(400).json({ error: "No file uploaded" });
       }
       const dbPath = path.join(process.cwd(), 'data', 'fingent.db');
-      
-      // Close existing connections if possible, though better-sqlite3 handles it okay if overwritten usually, 
-      // but to be safe we just replace the file. The next getDb() might need a restart, but in a simple setup:
+      validateDatabase(req.file.path);
+      await closeDb();
       fsModule.copyFileSync(req.file.path, dbPath);
-      fsModule.unlinkSync(req.file.path); // cleanup uploaded file
       
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    } finally {
+      if (req.file && fsModule.existsSync(req.file.path)) fsModule.unlinkSync(req.file.path);
     }
   });
 

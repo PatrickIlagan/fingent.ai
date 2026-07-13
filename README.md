@@ -27,4 +27,15 @@ The app stores its SQLite database locally in `data/`. It is intentionally exclu
 
 ## Local Copilot and privacy
 
-The FinGent Copilot is a local workflow, navigation, and command assistant. It can prepare an action such as “I spent 500 on groceries, cash,” match the account locally, and save it only after the user explicitly confirms. It has no API key and makes no request to an external AI or chat service. Financial values and account names stay in FinGent; any future external-AI integration must receive tokenized placeholders such as `[ACCOUNT]`, `[AMOUNT]`, and `[REASON]`, with the mapping retained locally.
+The FinGent Copilot is a local workflow, navigation, and command assistant. It can prepare an action such as “I spent 500 on groceries, cash,” match the account locally, and save it only after the user explicitly confirms.
+
+Optional Gemini BYOK guidance can be enabled in Settings. Its API key is stored only in that browser, and FinGent sends Gemini a tokenized intent envelope such as `[ACCOUNT]`, `[AMOUNT]`, and `[REASON]`—never raw financial records, account names, balances, client details, or the original command text.
+
+## Google Drive backup setup
+
+1. Create or select a Firebase project and enable Google as a sign-in provider.
+2. Enable the Google Drive API for the same Google Cloud project and add your app URL to Firebase Authentication’s authorized domains.
+3. Copy the Firebase web-app values into `.env.local` using the `VITE_FIREBASE_*` keys in `.env.example`.
+4. Restart FinGent, choose an encryption password in Settings, then use **Sync to Drive**.
+
+Backups are encrypted locally with AES-256-GCM and stored in the app’s private Google Drive application-data folder. A restore decrypts and validates the SQLite database before replacing the local copy.
