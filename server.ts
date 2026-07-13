@@ -9,6 +9,35 @@ import { closeDb, getDb } from "./server/db";
 import YahooFinance from 'yahoo-finance2';
 const yahooFinance = new YahooFinance();
 
+// Category families keep English, Tagalog, and Taglish labels in one budget/reporting bucket.
+// The user's existing preferred category label is preserved whenever possible.
+const CATEGORY_ALIAS_GROUPS = [
+  { canonical: 'Food', aliases: ['food', 'pagkain', 'food & dining', 'dining', 'groceries', 'grocery'] },
+  { canonical: 'Transport', aliases: ['transport', 'transportation', 'pamasahe', 'commute'] },
+  { canonical: 'Housing', aliases: ['housing', 'bahay', 'rent', 'upa'] },
+  { canonical: 'Utilities', aliases: ['utilities', 'utility', 'kuryente', 'tubig', 'internet', 'load'] },
+  { canonical: 'Health', aliases: ['health', 'kalusugan', 'gamot', 'medical'] },
+  { canonical: 'Education', aliases: ['education', 'edukasyon', 'tuition', 'school', 'paaralan'] },
+  { canonical: 'Entertainment', aliases: ['entertainment', 'aliwan', 'sine', 'laro'] },
+  { canonical: 'Shopping', aliases: ['shopping', 'pamimili', 'clothing', 'damit'] }
+];
+
+function normalizedCategoryName(value: string) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+async function resolveCategoryAlias(db: any, value: string) {
+  const supplied = String(value || '').trim();
+  const normalized = normalizedCategoryName(supplied);
+  const group = CATEGORY_ALIAS_GROUPS.find(item => item.aliases.includes(normalized));
+  if (!group) return supplied;
+
+  const placeholders = group.aliases.map(() => '?').join(', ');
+  const existing = await db.all(`SELECT name FROM categories WHERE active = 1 AND LOWER(name) IN (${placeholders})`, group.aliases);
+  const canonical = existing.find((item: { name: string }) => normalizedCategoryName(item.name) === normalizedCategoryName(group.canonical));
+  return canonical?.name || existing[0]?.name || group.canonical;
+}
+
 function formatTicker(ticker: string, type: string) {
   if (!ticker) return ticker;
   let t = ticker.toUpperCase().trim();
@@ -705,7 +734,8 @@ To run FinGent as a desktop application:
   app.post("/api/transactions", async (req, res) => {
     try {
       const db = await getDb();
-      const { account_id, type, amount, category, description, notes = '', date } = req.body;
+      const { account_id, type, amount, category: suppliedCategory, description, notes = '', date } = req.body;
+      const category = await resolveCategoryAlias(db, suppliedCategory);
       
       // Update account balance
       const account = await db.get("SELECT balance FROM accounts WHERE id = ?", [account_id]);
@@ -1313,7 +1343,8 @@ To run FinGent as a desktop application:
   app.put("/api/transactions/:id", async (req, res) => {
     try {
       const db = await getDb();
-      const { account_id, type, amount, category, description, notes = '', date } = req.body;
+      const { account_id, type, amount, category: suppliedCategory, description, notes = '', date } = req.body;
+      const category = await resolveCategoryAlias(db, suppliedCategory);
       const previous = await db.get("SELECT * FROM transactions WHERE id = ?", [req.params.id]);
       if (!previous) return res.status(404).json({ error: 'Transaction not found.' });
 
