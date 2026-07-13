@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, LockKeyhole, Send, X } from 'lucide-react';
+import { Bot, LockKeyhole, Send, Trash2, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { runLocalCopilot, type CopilotAction, type InvestmentDraft, type OperationDraft, type TransactionDraft, type TransferDraft } from '../lib/localCopilot';
 import { getByokGuidance } from '../lib/byokAssistant';
@@ -128,10 +128,13 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
           >
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
-              <div><h2 className="font-bold text-lg">FinGent Copilot</h2><p className="mt-0.5 flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400"><LockKeyhole size={12} /> Local processing · no external AI</p></div>
-              <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
-                <X size={20} />
-              </button>
+              <div><h2 className="font-bold text-lg">FinGent Copilot</h2><p className="mt-0.5 flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400"><LockKeyhole size={12} /> Chats stay local · BYOK never receives chat text</p></div>
+              <div className="flex items-center gap-1">
+                {messages.length > 0 && <button onClick={() => setMessages([])} aria-label="Clear local chat" title="Clear local chat" className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"><Trash2 size={18} /></button>}
+                <button onClick={onClose} aria-label="Close copilot" className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
             {/* Messages */}
@@ -139,7 +142,7 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
               {messages.length === 0 && (
                 <div className="text-center text-slate-500 dark:text-slate-400 mt-10">
                   <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p>I can guide you and prepare local actions without sending your records anywhere.</p>
+                  <p>I can guide you and prepare local actions without sending your chat or records anywhere.</p>
                   <p className="mt-2 text-xs">Try “I spent 500 on groceries, cash” or “open career”.</p>
                 </div>
               )}
@@ -153,7 +156,7 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
                     {m.text}
                   </div>
                   {m.actions?.length > 0 && <div className="mt-2 flex max-w-[95%] flex-wrap gap-2">{m.actions.map((action: CopilotAction) => <button key={action.tab} onClick={() => { onNavigate(action.tab); onClose(); }} className={`rounded-full border px-3 py-1.5 text-xs font-bold transition-colors ${isAdvanced ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-slate-50'}`}>{action.label}</button>)}</div>}
-                  {m.byokGuidance && <div className={`mt-2 max-w-[95%] rounded-xl border p-3 text-sm ${isAdvanced ? 'border-violet-500/30 bg-violet-500/10 text-violet-100' : 'border-violet-200 bg-violet-50 text-violet-950'}`}><p className="text-[11px] font-black uppercase tracking-wider text-violet-600 dark:text-violet-300">BYOK guidance · tokenized intent only</p><p className="mt-1 whitespace-pre-wrap">{m.byokGuidance}</p></div>}
+                  {m.byokGuidance && <div className={`mt-2 max-w-[95%] rounded-xl border p-3 text-sm ${isAdvanced ? 'border-violet-500/30 bg-violet-500/10 text-violet-100' : 'border-violet-200 bg-violet-50 text-violet-950'}`}><p className="text-[11px] font-black uppercase tracking-wider text-violet-600 dark:text-violet-300">BYOK guidance · generic intent only, no chat shared</p><p className="mt-1 whitespace-pre-wrap">{m.byokGuidance}</p></div>}
                   {m.transaction && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50'}`}><p className="text-xs font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Private action draft</p><p className="mt-1 text-sm font-bold">{m.transaction.type === 'expense' ? 'Expense' : 'Income'} · PHP {m.transaction.amount.toLocaleString()} · {m.transaction.category}</p><p className="mt-1 text-xs text-slate-500">Date: {m.transaction.date} · External-AI-safe envelope: {m.transaction.redactedCommand}</p>{m.accountOptions?.length ? <div className="mt-3 flex flex-wrap gap-2">{m.accountOptions.map(account => <button key={account.id} onClick={() => saveTransaction(m.transaction!, account)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700">Save with {account.name}</button>)}</div> : <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">No matching local account was found. Add or select an account in Accounts first.</p>}</div>}
                   {m.operation && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-violet-500/30 bg-violet-500/10' : 'border-violet-200 bg-violet-50'}`}><p className="text-xs font-black uppercase tracking-wider text-violet-700 dark:text-violet-300">Private action draft</p><p className="mt-1 text-sm font-bold">{m.operation.label}</p><p className="mt-1 text-xs text-slate-500">External-AI-safe envelope: {m.operation.redactedCommand}</p><button onClick={() => saveOperation(m.operation!)} className="mt-3 rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-700">Save locally</button></div>}
                   {m.investment && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-sky-500/30 bg-sky-500/10' : 'border-sky-200 bg-sky-50'}`}><p className="text-xs font-black uppercase tracking-wider text-sky-700 dark:text-sky-300">Private investment draft</p><p className="mt-1 text-sm font-bold">{m.investment.ticker} · {m.investment.type} · USD {m.investment.invested.toLocaleString()}</p><p className="mt-1 text-xs text-slate-500">{m.investment.shares ? m.investment.shares + ' shares' : 'Share count will be auto-calculated from the current price when saved.'} Date: {m.investment.date}</p><p className="mt-1 text-xs text-slate-500">External-AI-safe envelope: {m.investment.redactedCommand}</p><button onClick={() => saveInvestment(m.investment!)} className="mt-3 rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white hover:bg-sky-700">Save investment locally</button></div>}

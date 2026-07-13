@@ -29,7 +29,7 @@ The app stores its SQLite database locally in `data/`. It is intentionally exclu
 
 The FinGent Copilot is a local workflow, navigation, and command assistant. It can prepare an action such as “I spent 500 on groceries, cash,” match the account locally, and save it only after the user explicitly confirms.
 
-Optional Gemini BYOK guidance can be enabled in Settings. Its API key is stored only in that browser, and FinGent sends Gemini a tokenized intent envelope such as `[ACCOUNT]`, `[AMOUNT]`, and `[REASON]`—never raw financial records, account names, balances, client details, or the original command text.
+Optional Gemini BYOK guidance can be enabled in Settings. It never receives a chat message or chat history. FinGent sends Gemini only a fixed generic intent class such as `TRANSACTION_RECORDING`—never raw commands, names, categories, dates, amounts, balances, account details, client details, or financial records. The API key is held only for the active browser session and is cleared when that session ends.
 
 ## Google Drive backup setup
 

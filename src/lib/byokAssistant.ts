@@ -4,10 +4,19 @@ const SETTINGS_KEY = 'fingent-byok-settings';
 const MODEL = 'gemini-2.5-flash';
 
 export type ByokSettings = { enabled: boolean; apiKey: string };
+export type ByokIntentClass =
+  | 'TRANSACTION_RECORDING'
+  | 'INVESTMENT_RECORDING'
+  | 'TRANSFER_RECORDING'
+  | 'RECORD_CREATION'
+  | 'NAVIGATION'
+  | 'GENERAL_WORKFLOW';
 
 export function getByokSettings(): ByokSettings {
   try {
-    const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    // A BYOK key is never written to the app database or a persistent browser store.
+    // Closing the browser session clears it.
+    const parsed = JSON.parse(sessionStorage.getItem(SETTINGS_KEY) || '{}');
     return { enabled: Boolean(parsed.enabled), apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey : '' };
   } catch {
     return { enabled: false, apiKey: '' };
@@ -15,16 +24,34 @@ export function getByokSettings(): ByokSettings {
 }
 
 export function saveByokSettings(settings: ByokSettings) {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  sessionStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+/** This classification happens locally and intentionally exposes no chat data. */
+export function getByokIntentClass(reply: CopilotReply): ByokIntentClass {
+  if (reply.transaction) return 'TRANSACTION_RECORDING';
+  if (reply.investment) return 'INVESTMENT_RECORDING';
+  if (reply.transfer) return 'TRANSFER_RECORDING';
+  if (reply.operation) return 'RECORD_CREATION';
+  if (reply.navigateNow) return 'NAVIGATION';
+  return 'GENERAL_WORKFLOW';
 }
 
 export function createByokEnvelope(reply: CopilotReply) {
-  if (reply.transaction) return reply.transaction.redactedCommand;
-  if (reply.investment) return reply.investment.redactedCommand;
-  if (reply.transfer) return reply.transfer.redactedCommand;
-  if (reply.operation) return reply.operation.redactedCommand;
-  if (reply.navigateNow) return 'Action: NAVIGATE to [' + reply.navigateNow.toUpperCase() + '].';
-  return 'Action: Provide general FinGent workflow guidance. No client data, names, amounts, balances, or raw user text is available.';
+  return 'Intent class: ' + getByokIntentClass(reply) + '.';
+}
+
+/**
+ * The only dynamic value in this prompt is one of six fixed intent classes.
+ * Never append chat text, chat history, fields, placeholders, IDs, or records here.
+ */
+export function createByokPrompt(reply: CopilotReply) {
+  return [
+    'You are FinGent\'s optional BYOK workflow assistant.',
+    'Privacy boundary: you receive exactly one generic intent class generated locally. You never receive the original chat message, chat history, names, account labels, categories, dates, amounts, balances, notes, client details, device information, or financial records.',
+    'Do not ask for, infer, repeat, or mention private data. Give a concise, generic workflow tip only. All writes require the user\'s explicit confirmation inside FinGent.',
+    createByokEnvelope(reply)
+  ].join('\n');
 }
 
 async function callGemini(apiKey: string, prompt: string) {
@@ -44,17 +71,11 @@ async function callGemini(apiKey: string, prompt: string) {
 }
 
 export async function testByokKey(apiKey: string) {
-  await callGemini(apiKey, 'Reply with exactly: FinGent BYOK connected.');
+  await callGemini(apiKey, 'Reply with exactly: FinGent BYOK connected. Do not use or request any client information.');
 }
 
 export async function getByokGuidance(reply: CopilotReply) {
   const settings = getByokSettings();
   if (!settings.enabled || !settings.apiKey) return null;
-  const prompt = [
-    'You are FinGent’s optional BYOK workflow assistant.',
-    'The app only supplies a tokenized intent envelope. Do not request, infer, or mention account names, balances, amounts, client details, or financial recommendations.',
-    'Give a concise, practical workflow explanation for the intent. The user must explicitly confirm all writes locally.',
-    'Tokenized intent: ' + createByokEnvelope(reply)
-  ].join('\n');
-  return callGemini(settings.apiKey, prompt);
+  return callGemini(settings.apiKey, createByokPrompt(reply));
 }
