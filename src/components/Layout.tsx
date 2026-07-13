@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Home, Calendar, Briefcase, Bot, PieChart, Settings, CreditCard, Clock, Receipt, Target, ChevronDown, ChevronRight, Building, FileText, Download, ArrowLeft, Megaphone, Package, ShoppingCart, Activity, Users, DollarSign, TrendingUp, Tags, UserRound, FileSpreadsheet } from 'lucide-react';
+import { Home, Calendar, Briefcase, Bot, PieChart, Settings, CreditCard, Clock, Receipt, Target, ChevronDown, ChevronRight, Building, FileText, Download, ArrowLeft, Megaphone, Package, ShoppingCart, Activity, Users, DollarSign, TrendingUp, Tags, UserRound, FileSpreadsheet, Menu, MoreHorizontal, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { exportEverythingWorkbook } from '../lib/workbookExport';
@@ -8,6 +8,7 @@ import { exportEverythingPdfStatement } from '../lib/export';
 export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any) {
   const { themeMode, setThemeMode, selectedBusiness, setSelectedBusiness, selectedFreelance, setSelectedFreelance } = useStore();
   const [expandedTabs, setExpandedTabs] = useState<Record<string, boolean>>({});
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const isAdvanced = themeMode === 'advanced';
 
@@ -110,7 +111,7 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
           </div>
           <h1 className="font-extrabold text-lg tracking-tight">FinGent</h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <button onClick={toggleChat} className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm hover:scale-105 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-violet-900/20' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}>
             <span className="text-lg leading-none">+</span> Quick Add
           </button>
@@ -119,6 +120,9 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
             className={`p-2 rounded-full transition-colors ${currentTab === 'settings' ? (isAdvanced ? 'bg-slate-700 text-violet-400' : 'bg-emerald-100 text-emerald-700') : (isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-400' : 'bg-white shadow-sm border border-emerald-100 hover:bg-emerald-50 text-emerald-600')}`}
           >
             <Settings size={20} />
+          </button>
+          <button onClick={() => setIsMobileMenuOpen(true)} aria-label="Open navigation" className={`p-2 rounded-full md:hidden ${isAdvanced ? 'bg-slate-800 text-slate-200' : 'bg-white border border-emerald-100 text-emerald-700 shadow-sm'}`}>
+            <Menu size={20} />
           </button>
         </div>
       </header>
@@ -240,7 +244,27 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 pb-24 md:pb-8 pt-20 md:pt-24 px-4 md:pl-72 md:pr-8 max-w-[1920px] mx-auto w-full min-h-screen overflow-y-auto hide-scrollbar">
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <>
+            <motion.button aria-label="Close navigation" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsMobileMenuOpen(false)} className="fixed inset-0 z-50 bg-slate-950/45 backdrop-blur-sm md:hidden" />
+            <motion.aside initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }} transition={{ type: 'spring', damping: 28, stiffness: 280 }} className={`fixed inset-y-0 left-0 z-[60] flex w-[min(20rem,88vw)] flex-col border-r shadow-2xl md:hidden ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-white border-emerald-100'}`}>
+              <div className={`flex h-16 shrink-0 items-center justify-between border-b px-4 ${isAdvanced ? 'border-slate-700' : 'border-emerald-100'}`}><div className="flex items-center gap-2 font-black"><div className={`flex h-8 w-8 items-center justify-center rounded-xl text-sm text-white ${isAdvanced ? 'bg-violet-600' : 'bg-emerald-500'}`}>F</div>FinGent</div><button onClick={() => setIsMobileMenuOpen(false)} aria-label="Close navigation" className="rounded-xl p-2 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={20} /></button></div>
+              <nav className="flex-1 overflow-y-auto p-3 pb-6">
+                {selectedBusiness && <button onClick={() => { setSelectedBusiness(null); setCurrentTab('business'); setIsMobileMenuOpen(false); }} className={`mb-3 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold ${isAdvanced ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-emerald-50'}`}><ArrowLeft size={16} /> Back to Portfolio</button>}
+                {selectedFreelance && <button onClick={() => { setSelectedFreelance(null); setCurrentTab('freelancing'); setIsMobileMenuOpen(false); }} className={`mb-3 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold ${isAdvanced ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-emerald-50'}`}><ArrowLeft size={16} /> Back to Services</button>}
+                <div className="space-y-1">
+                  {tabs.map(tab => { const Icon = tab.icon; const active = currentTab === tab.id || currentTab.startsWith(tab.id + '-'); return <div key={tab.id}><button onClick={() => { setCurrentTab(tab.id); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-bold ${active ? (isAdvanced ? 'bg-violet-600/20 text-violet-300' : 'bg-emerald-100 text-emerald-800') : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}><Icon size={18} />{tab.label}</button>{tab.subItems && <div className="ml-8 border-l border-slate-200 py-1 pl-2 dark:border-slate-700">{tab.subItems.map(sub => { const id = `${tab.id}-${sub.toLowerCase()}`; return <button key={id} onClick={() => { setCurrentTab(id); setIsMobileMenuOpen(false); }} className={`block w-full rounded-lg px-3 py-2 text-left text-xs ${currentTab === id ? 'font-bold text-emerald-700 dark:text-violet-300' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>{sub}</button>; })}</div>}</div>; })}
+                </div>
+                <div className={`mt-4 border-t pt-4 ${isAdvanced ? 'border-slate-700' : 'border-emerald-100'}`}><p className="px-3 pb-2 text-[10px] font-bold tracking-[0.15em] text-slate-400">PERSONAL SPACE</p><button onClick={() => { setCurrentTab('categories'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm ${currentTab === 'categories' ? 'font-bold text-emerald-700 dark:text-violet-300' : 'text-slate-600 dark:text-slate-300'}`}><Tags size={18} /> Categories</button><button onClick={() => { setCurrentTab('personal'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm ${currentTab.startsWith('personal') ? 'font-bold text-emerald-700 dark:text-violet-300' : 'text-slate-600 dark:text-slate-300'}`}><UserRound size={18} /> Personal</button><div className="ml-8 space-y-1 py-1"><button onClick={() => { setCurrentTab('personal-notes'); setIsMobileMenuOpen(false); }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">Notes</button><button onClick={() => { setCurrentTab('personal-routines'); setIsMobileMenuOpen(false); }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">Routines</button></div></div>
+              </nav>
+              <div className={`shrink-0 space-y-2 border-t p-3 ${isAdvanced ? 'border-slate-700' : 'border-emerald-100'}`}><button onClick={() => exportEverythingWorkbook().catch(console.error)} className={`flex w-full items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-bold text-white ${isAdvanced ? 'bg-violet-600' : 'bg-emerald-500'}`}><FileSpreadsheet size={17} /> Export Excel</button><button onClick={() => exportEverythingPdfStatement().catch(console.error)} className={`flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold ${isAdvanced ? 'text-slate-300 hover:bg-slate-800' : 'text-emerald-700 hover:bg-emerald-50'}`}><Download size={15} /> Export PDF statement</button></div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+
+      <main className="flex-1 pb-[calc(6.75rem+env(safe-area-inset-bottom))] md:pb-8 pt-20 md:pt-24 px-4 md:pl-72 md:pr-8 max-w-[1920px] mx-auto w-full min-h-screen overflow-y-auto hide-scrollbar">
         {children}
       </main>
 
@@ -258,50 +282,12 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
       </button>
 
       {/* Mobile Bottom Navigation */}
-      <div className={`md:hidden fixed bottom-0 left-0 right-0 h-20 ${isAdvanced ? 'bg-slate-800 border-t border-slate-700' : 'bg-white border-t border-slate-200'} rounded-t-3xl shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-40`}>
-        <div className="max-w-md mx-auto flex items-center justify-around h-full px-2 relative">
-          {tabs.map((tab, idx) => {
-            const Icon = tab.icon;
-            const isActive = currentTab === tab.id;
-            
-            if (idx === 2) {
-              return (
-                <React.Fragment key="fab-container">
-                  <div className="relative flex justify-center w-16">
-                    <button
-                      onClick={toggleChat}
-                      className={`absolute -top-10 flex items-center justify-center w-16 h-16 rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95 text-white bg-gradient-to-tr ${
-                        isAdvanced 
-                          ? 'from-violet-600 to-fuchsia-500 shadow-violet-500/50' 
-                          : 'from-emerald-400 to-teal-500 shadow-emerald-500/50'
-                      }`}
-                    >
-                      <Bot size={28} />
-                    </button>
-                  </div>
-                  <button
-                    key={tab.id}
-                    onClick={() => setCurrentTab(tab.id)}
-                    className={`flex flex-col items-center justify-center w-16 transition-colors ${isActive ? (isAdvanced ? 'text-violet-400' : 'text-emerald-500') : 'text-slate-400 hover:text-slate-500'}`}
-                  >
-                    <Icon size={24} strokeWidth={isActive ? 2.5 : 2} />
-                    <span className="text-[10px] mt-1 font-medium">{tab.label}</span>
-                  </button>
-                </React.Fragment>
-              )
-            }
-
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setCurrentTab(tab.id)}
-                className={`flex flex-col items-center justify-center w-16 transition-colors ${isActive ? (isAdvanced ? 'text-violet-400' : 'text-emerald-500') : 'text-slate-400 hover:text-slate-500'}`}
-              >
-                <Icon size={24} strokeWidth={isActive ? 2.5 : 2} />
-                <span className="text-[10px] mt-1 font-medium">{tab.label}</span>
-              </button>
-            );
-          })}
+      <div className={`fixed bottom-0 left-0 right-0 z-40 h-[calc(5.25rem+env(safe-area-inset-bottom))] rounded-t-3xl border-t pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(0,0,0,0.05)] md:hidden ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <div className="mx-auto flex h-[5.25rem] max-w-md items-center justify-around px-2">
+          {tabs.slice(0, 2).map(tab => { const Icon = tab.icon; const active = currentTab === tab.id || currentTab.startsWith(tab.id + '-'); return <button key={tab.id} onClick={() => setCurrentTab(tab.id)} className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 ${active ? (isAdvanced ? 'text-violet-400' : 'text-emerald-600') : 'text-slate-400'}`}><Icon size={22} strokeWidth={active ? 2.5 : 2} /><span className="max-w-full truncate text-[10px] font-semibold">{tab.label}</span></button>; })}
+          <div className="relative flex min-w-0 flex-1 justify-center"><button onClick={toggleChat} aria-label="Open FinGent Copilot" className={`absolute -top-9 flex h-16 w-16 items-center justify-center rounded-full text-white shadow-lg transition-transform active:scale-95 ${isAdvanced ? 'bg-gradient-to-tr from-violet-600 to-fuchsia-500 shadow-violet-500/50' : 'bg-gradient-to-tr from-emerald-400 to-teal-500 shadow-emerald-500/50'}`}><Bot size={27} /></button></div>
+          {tabs[2] && (() => { const tab = tabs[2]; const Icon = tab.icon; const active = currentTab === tab.id || currentTab.startsWith(tab.id + '-'); return <button onClick={() => setCurrentTab(tab.id)} className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 ${active ? (isAdvanced ? 'text-violet-400' : 'text-emerald-600') : 'text-slate-400'}`}><Icon size={22} strokeWidth={active ? 2.5 : 2} /><span className="max-w-full truncate text-[10px] font-semibold">{tab.label}</span></button>; })()}
+          <button onClick={() => setIsMobileMenuOpen(true)} className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 ${isMobileMenuOpen || !tabs.slice(0, 3).some(tab => currentTab === tab.id || currentTab.startsWith(tab.id + '-')) ? (isAdvanced ? 'text-violet-400' : 'text-emerald-600') : 'text-slate-400'}`}><MoreHorizontal size={23} /><span className="text-[10px] font-semibold">More</span></button>
         </div>
       </div>
     </div>

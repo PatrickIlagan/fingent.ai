@@ -20,3 +20,47 @@
 body {
   font-family: "Plus Jakarta Sans", sans-serif;
 }
+
+html,
+body,
+#root {
+  min-height: 100%;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
+@media (max-width: 767px) {
+  /* Prevent iOS from zooming into form fields and keep long dashboard content contained. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  [role="dialog"] {
+    max-height: calc(100dvh - 2rem);
+  }
+
+  /* Older page modals do not all use role="dialog" yet. Keep every full-screen
+     overlay's content reachable on short phones. */
+  .fixed.inset-0 > .w-full {
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+  }
+
+  .fixed.inset-0 .grid.grid-cols-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .recharts-responsive-container {
+    min-width: 0;
+  }
+}
