@@ -97,6 +97,9 @@ const routes = [
 const directNavigation = /\b(open|go to|take me to|show me|navigate to)\b/i;
 
 const workflows = [
+  { terms: ['monthly review', 'month end', 'month-end', 'financial review', 'reconcile'], text: 'For a local monthly review, check Accounts for recorded transactions, Plans for budgets and goals, Taxes for obligations, and use the statement export when you are ready. No external AI is needed for this workflow.', tab: 'home', label: 'Open Home' },
+  { terms: ['statement', 'account report', 'export report', 'export excel', 'export pdf'], text: 'You can export a formatted local statement or workbook from Settings. The workbook includes the dashboard data and charts, while the PDF is designed as a readable statement rather than a screen print.', tab: 'settings', label: 'Open Settings' },
+  { terms: ['expense breakdown', 'spending breakdown', 'where did my money go', 'spending review'], text: 'Open Accounts to review transactions and category totals, then use the dashboard or Excel export for a visual breakdown. Your financial records stay local.', tab: 'accounts', label: 'Open Accounts' },
   { terms: ['invoice'], text: 'To create an invoice, open Freelancing, choose the relevant service, then use its Invoices tab. Add the client and line items there; details remain local in FinGent.', tab: 'freelancing', label: 'Open Freelancing' },
   { terms: ['time log', 'timer', 'track time'], text: 'To track time, open Freelancing and select the relevant service. Start a timer or add a completed time log, then optionally link it to a contract yourself.', tab: 'freelancing', label: 'Open Freelancing' },
   { terms: ['record an expense', 'add expense', 'log expense'], text: 'You can say “I spent 500 on groceries, cash” to create a private transaction draft, or open Accounts to use the full transaction form.', tab: 'accounts', label: 'Open Accounts' },
@@ -120,8 +123,24 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function dateFromMessage(message: string) {
+  const iso = message.match(/\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b/);
+  if (iso) return iso[1] + '-' + iso[2].padStart(2, '0') + '-' + iso[3].padStart(2, '0');
+  if (/\byesterday\b/i.test(message)) {
+    const date = new Date();
+    date.setDate(date.getDate() - 1);
+    return date.toISOString().slice(0, 10);
+  }
+  if (/\btomorrow\b/i.test(message)) {
+    const date = new Date();
+    date.setDate(date.getDate() + 1);
+    return date.toISOString().slice(0, 10);
+  }
+  return today();
+}
+
 function cleanPhrase(value: string) {
-  return value.replace(/\b(?:from|using|via|with|through)\b.*$/i, '').replace(/\bmy\s+/i, '').replace(/[,.!?]+$/g, '').trim();
+  return value.replace(/\b(?:from|using|via|with|through)\b.*$/i, '').replace(/\bmy\s+/i, '').replace(/\b(?:today|yesterday|tomorrow)\b/ig, '').replace(/[,.!?]+$/g, '').trim();
 }
 
 function inferExpenseCategory(value: string) {
@@ -139,17 +158,24 @@ function inferExpenseCategory(value: string) {
   return categories.find(([pattern]) => pattern.test(normalized))?.[1] || titleCase(value);
 }
 
-function transactionAccountHint(message: string) {
-  const account = message.match(/\b(?:from|using|via|with|through)\s+(?:my\s+)?([^,.!?]+)/i)
+function transactionAccountHint(message: string, intent: TransactionDraft['type']) {
+  const destination = intent === 'income'
+    ? message.match(/\b(?:to|into)\s+(?:my\s+)?([^,.!?]+)/i)
+    : null;
+  const account = destination
+    || message.match(/\b(?:from|using|via|with|through)\s+(?:my\s+)?([^,.!?]+)/i)
     || message.match(/\b(?:paid|paying)\s+(?:by|with)\s+(?:my\s+)?([^,.!?]+)/i)
+    || message.match(/\bused\s+(?:my\s+)?(.+?)\s+to\s+(?:buy|pay|purchase|order)\b/i)
     || message.match(/,\s*(?:my\s+)?([^,.!?]+)\s*$/);
   return account ? cleanPhrase(account[1]) : '';
 }
 
 function parseTransactionCommand(message: string): TransactionDraft | null {
   const normalized = message.trim();
-  const intent = /\b(spent|spend|paid|pay|bought|buy|purchase|purchased|charged|charge|ordered|order|expense)\b/i.test(normalized) ? 'expense'
-    : /\b(earned|receive|received|income|salary|got paid|made|sold|sale|deposited|deposit)\b/i.test(normalized) ? 'income'
+  const isExpense = /\b(spent|spend|paid|pay|bought|buy|purchase|purchased|charged|charge|ordered|order|expense|cash out)\b/i.test(normalized)
+    || (/\bused\b/i.test(normalized) && /\b(?:for|to\s+(?:buy|pay)|at)\b/i.test(normalized));
+  const intent = isExpense ? 'expense'
+    : /\b(earned|receive|received|income|salary|got paid|made|sold|sale|deposited|deposit|credited|credit)\b/i.test(normalized) ? 'income'
       : null;
   if (!intent) return null;
   const amountMatch = normalized.match(/(?:\u20B1|php|pesos?|\$)?\s*(\d[\d,]*(?:\.\d{1,2})?)/i);
@@ -157,7 +183,7 @@ function parseTransactionCommand(message: string): TransactionDraft | null {
   const amount = Number(amountMatch[1].replace(/,/g, ''));
   if (!Number.isFinite(amount) || amount <= 0) return null;
 
-  const accountHint = transactionAccountHint(normalized);
+  const accountHint = transactionAccountHint(normalized, intent);
   const reasonMatch = normalized.match(/\b(?:on|for)\s+(.+?)(?:\s*(?:,|\bfrom\b|\busing\b|\bvia\b|\bwith\b)|$)/i);
   // Covers natural purchase wording such as "bought food for 400 pesos".
   // Prefer the item before the amount over the generic "for <...>" phrase.
@@ -165,7 +191,10 @@ function parseTransactionCommand(message: string): TransactionDraft | null {
     ? normalized.match(/\b(?:bought|buy|purchase(?:d)?|ordered|order)\s+(.+?)\s+(?:for|worth)\s+(?:(?:\u20B1|php|pesos?)?\s*\d)/i)?.[1]
     : undefined;
   const leadingReason = normalized.match(/^(?:for|on)\s+(.+?)[,;:-]\s*(?:i\s+)?(?:spent|paid|bought|purchased|ordered)\b/i)?.[1];
-  const rawReason = cleanPhrase(purchaseReason || leadingReason || reasonMatch?.[1] || (intent === 'income' ? 'Income' : 'General')) || (intent === 'income' ? 'Income' : 'General');
+  const paidToReason = intent === 'expense'
+    ? normalized.match(/\b(?:paid|pay)\s+(?:(?:\u20B1|php|pesos?)?\s*\d[\d,]*(?:\.\d{1,2})?)\s+to\s+(.+?)(?:\s+(?:from|using|via|with|through)|$)/i)?.[1]
+    : undefined;
+  const rawReason = cleanPhrase(purchaseReason || leadingReason || paidToReason || reasonMatch?.[1] || (intent === 'income' ? 'Income' : 'General')).replace(/\b(?:today|yesterday|tomorrow)\b/ig, '').trim() || (intent === 'income' ? 'Income' : 'General');
   const category = intent === 'expense' ? inferExpenseCategory(rawReason) : titleCase(rawReason);
   const description = category === 'General' || category === 'Income' ? '' : category;
 
@@ -175,7 +204,7 @@ function parseTransactionCommand(message: string): TransactionDraft | null {
     category,
     accountHint,
     description,
-    date: today(),
+    date: dateFromMessage(normalized),
     redactedCommand: 'Action: ' + intent.toUpperCase() + ' [AMOUNT] ' + (accountHint ? 'from [ACCOUNT] ' : '') + 'for [REASON].'
   };
 }
@@ -187,8 +216,8 @@ function amountFrom(value: string) {
 }
 
 function parseInvestmentCommand(message: string): InvestmentDraft | null {
-  if (!/\b(bought|buy|purchased|purchase|invested|invest)\b/i.test(message)) return null;
-  const tickerMatch = message.match(/\b(?:on|of|in)\s+([a-z][a-z0-9.-]{0,9})\b/i);
+  if (!/\b(bought|buy|purchased|purchase|invested|invest|added|add|put)\b/i.test(message)) return null;
+  const tickerMatch = message.match(/\b(?:on|of|in|into)\s+(?:shares?\s+of\s+)?([a-z][a-z0-9.-]{0,9})\b/i);
   if (!tickerMatch) return null;
   const ticker = tickerMatch[1].toUpperCase();
   if (['CASH', 'FOOD', 'GROCERIES', 'THIS', 'THAT', 'IT'].includes(ticker)) return null;
@@ -210,19 +239,21 @@ function parseInvestmentCommand(message: string): InvestmentDraft | null {
     avg_price: avgPrice,
     currency: 'USD',
     platform: '',
-    date: today(),
+    date: dateFromMessage(message),
     redactedCommand: 'Action: CREATE [INVESTMENT] ticker [TICKER], amount [AMOUNT], currency [CURRENCY].'
   };
 }
 
 function parseTransferCommand(message: string): TransferDraft | null {
-  const match = message.match(/^(?:transfer|move|send)\s+(.+?)\s+from\s+(.+?)\s+to\s+(.+?)\.?$/i);
-  if (!match) return null;
-  const amount = amountFrom(match[1]);
-  const fromHint = cleanPhrase(match[2]);
-  const toHint = cleanPhrase(match[3]);
+  if (!/\b(?:transfer|move|send|cash\s?-?in|top\s?-?up)\b/i.test(message)) return null;
+  const topUp = message.match(/\b(?:top\s?-?up|cash\s?-?in)\s+(?:my\s+)?(.+?)\s+(?:with|for)\s+(.+?)(?:\s+from\s+(.+))?$/i);
+  const amount = topUp ? amountFrom(topUp[2]) : amountFrom(message);
+  const fromMatch = message.match(/\bfrom\s+(.+?)(?:\s+to\s+|\s+into\s+|$)/i);
+  const toMatch = message.match(/\b(?:to|into)\s+(.+?)(?:\s+from\s+|$)/i);
+  const fromHint = cleanPhrase(topUp?.[3] || fromMatch?.[1] || '');
+  const toHint = cleanPhrase(topUp?.[1] || toMatch?.[1] || '');
   if (!amount || !fromHint || !toHint) return null;
-  return { amount, fromHint, toHint, date: today(), redactedCommand: 'Action: TRANSFER [AMOUNT] from [SOURCE ACCOUNT] to [DESTINATION ACCOUNT].' };
+  return { amount, fromHint, toHint, date: dateFromMessage(message), redactedCommand: 'Action: TRANSFER [AMOUNT] from [SOURCE ACCOUNT] to [DESTINATION ACCOUNT].' };
 }
 
 function operation(kind: OperationDraft['kind'], label: string, tab: string, payload: Record<string, unknown>): OperationDraft {
