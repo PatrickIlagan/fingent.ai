@@ -138,7 +138,12 @@ function parseTransactionCommand(message: string): TransactionDraft | null {
   const accountMatch = normalized.match(/\b(?:from|using|via|with)\s+([^,.!?]+)/i) || normalized.match(/,\s*([^,.!?]+)\s*$/);
   const accountHint = accountMatch ? cleanPhrase(accountMatch[1]) : '';
   const reasonMatch = normalized.match(/\b(?:on|for)\s+(.+?)(?:\s*(?:,|\bfrom\b|\busing\b|\bvia\b|\bwith\b)|$)/i);
-  const category = titleCase(cleanPhrase(reasonMatch?.[1] || (intent === 'income' ? 'Income' : 'General')) || (intent === 'income' ? 'Income' : 'General'));
+  // Covers natural purchase wording such as "bought food for 400 pesos".
+  // Prefer the item before the amount over the generic "for <...>" phrase.
+  const purchaseReason = intent === 'expense'
+    ? normalized.match(/\b(?:bought|purchase(?:d)?)\s+(.+?)\s+(?:for|worth)\s+(?:(?:\u20B1|php|pesos?)?\s*\d)/i)?.[1]
+    : undefined;
+  const category = titleCase(cleanPhrase(purchaseReason || reasonMatch?.[1] || (intent === 'income' ? 'Income' : 'General')) || (intent === 'income' ? 'Income' : 'General'));
   const description = category === 'General' || category === 'Income' ? '' : category;
 
   return {
