@@ -6,6 +6,7 @@ type JsonRecord = Record<string, unknown>;
 const DATABASE = 'fingent_mobile';
 const originalFetch = window.fetch.bind(window);
 let database: SQLiteDBConnection | null = null;
+let databaseMode: 'secret' | 'encryption' = 'secret';
 
 const collections: Record<string, string> = {
   '/api/accounts': 'accounts',
@@ -47,7 +48,7 @@ async function getDatabase() {
   const existing = await sqlite.isConnection(DATABASE, false);
   database = existing.result
     ? await sqlite.retrieveConnection(DATABASE, false)
-    : await sqlite.createConnection(DATABASE, false, 'no-encryption', 1, false);
+    : await sqlite.createConnection(DATABASE, true, databaseMode, 1, false);
   await database.open();
   await database.execute(`
     CREATE TABLE IF NOT EXISTS mobile_records (
@@ -453,8 +454,18 @@ async function readBody(init?: RequestInit) {
   try { return JSON.parse(init.body) as JsonRecord; } catch { return {}; }
 }
 
-export async function installNativeApi() {
+export async function installNativeApi(passphrase: string) {
   if (!Capacitor.isNativePlatform()) return;
+  const sqlite = new SQLiteConnection(CapacitorSQLite);
+  const secret = await sqlite.isSecretStored();
+  if (secret.result) {
+    const valid = await sqlite.checkEncryptionSecret(passphrase);
+    if (!valid.result) throw new Error('This password cannot unlock the encrypted Android database.');
+  } else {
+    const exists = await sqlite.isDatabase(DATABASE);
+    databaseMode = exists.result ? 'encryption' : 'secret';
+    await sqlite.setEncryptionSecret(passphrase);
+  }
   await getDatabase();
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const requestUrl = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;

@@ -9,7 +9,7 @@ const config: CapacitorConfig = {
   },
   plugins: {
     CapacitorSQLite: {
-      androidIsEncryption: false
+      androidIsEncryption: true
     },
     FirebaseAuthentication: {
       providers: ['google.com']

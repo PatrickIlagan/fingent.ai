@@ -34,7 +34,7 @@ npm run android:apk
 
 The resulting installable file is `android\\app\\build\\outputs\\apk\\debug\\app-debug.apk`. On this development computer, the build command automatically uses FinGent's local JDK 21 build tool; on another computer, set `JAVA_HOME` to a JDK 21 installation first. The Android project targets Android 16 and supports Android 7.0 or later.
 
-The Android database is local-only but is not yet protected by an app passcode. Do not treat a debug APK as a production security release. Live market-price refresh keeps the last saved prices when the device is offline.
+FinGent uses the app password as the local database encryption key: existing Windows databases are migrated to an encrypted SQLite file at first unlock, and Android uses SQLCipher-backed encrypted SQLite. The key is never written to the repository, Drive, or application settings. If the app password is lost, local encrypted data cannot be recovered—keep a separate encrypted Drive backup password in a password manager. Live market-price refresh keeps the last saved prices when the device is offline.
 
 ### Cross-device Google Drive sync
 

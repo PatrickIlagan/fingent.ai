@@ -1,9 +1,17 @@
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import path from 'path';
 import fs from 'fs';
 
 let dbInstance: any = null;
 let sqliteInstance: Database.Database | null = null;
+let databasePassphrase: Buffer | null = null;
+
+export async function unlockDatabase(passphrase: string) {
+  if (!passphrase || passphrase.length < 12) throw new Error('A valid app password is required to unlock the local database.');
+  if (dbInstance) return;
+  databasePassphrase = Buffer.from(passphrase, 'utf8');
+  await getDb();
+}
 
 export function getDataDir() {
   return process.env.FINGENT_DATA_DIR
@@ -17,7 +25,29 @@ export async function getDb() {
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
-    const sqliteDb = new Database(path.join(dataDir, 'fingent.db'));
+    if (!databasePassphrase) throw new Error('FinGent is locked. Unlock the app before accessing local data.');
+    const databasePath = path.join(dataDir, 'fingent.db');
+    let sqliteDb = new Database(databasePath);
+    try {
+      sqliteDb.key(databasePassphrase);
+      sqliteDb.prepare('SELECT count(*) FROM sqlite_master').get();
+    } catch (encryptedError) {
+      sqliteDb.close();
+      // One-time migration for existing unencrypted FinGent databases. If this
+      // is an encrypted file with a wrong key, this plaintext probe also fails.
+      const plainDb = new Database(databasePath);
+      try {
+        plainDb.prepare('SELECT count(*) FROM sqlite_master').get();
+        plainDb.rekey(databasePassphrase);
+      } catch {
+        throw new Error('The local database could not be unlocked with this app password.');
+      } finally {
+        plainDb.close();
+      }
+      sqliteDb = new Database(databasePath);
+      sqliteDb.key(databasePassphrase);
+      sqliteDb.prepare('SELECT count(*) FROM sqlite_master').get();
+    }
     sqliteInstance = sqliteDb;
     
     dbInstance = {

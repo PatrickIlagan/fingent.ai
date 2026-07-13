@@ -2,7 +2,7 @@ import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { LockKeyhole, ShieldCheck } from 'lucide-react';
 import { createAppLock, hasAppLock, verifyAppLock } from '../lib/appLock';
 
-export function AppLock({ children }: { children: ReactNode }) {
+export function AppLock({ children, onUnlock }: { children: ReactNode; onUnlock: (password: string) => Promise<void> }) {
   const [mode, setMode] = useState<'checking' | 'setup' | 'unlock' | 'unlocked'>('checking');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -20,7 +20,8 @@ export function AppLock({ children }: { children: ReactNode }) {
         if (password !== confirm) throw new Error('Passwords do not match.');
         await createAppLock(password);
       } else if (!(await verifyAppLock(password))) throw new Error('Incorrect password.');
-      setMode('unlocked');
+      await onUnlock(password);
+      setPassword(''); setConfirm(''); setMode('unlocked');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not unlock FinGent.'); }
     finally { setWorking(false); }
   };

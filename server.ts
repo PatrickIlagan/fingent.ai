@@ -4,7 +4,7 @@ import fsModule from "fs";
 import crypto from "crypto";
 import path from "path";
 import Database from "better-sqlite3";
-import { closeDb, getDataDir, getDb } from "./server/db";
+import { closeDb, getDataDir, getDb, unlockDatabase } from "./server/db";
 // yahoo-finance2 exposes its constructor as CommonJS's `.default`. Using an
 // explicit require keeps the production CJS bundle compatible with Electron.
 const YahooFinance = require('yahoo-finance2').default;
@@ -131,6 +131,13 @@ async function startServer() {
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
     next();
+  });
+
+  app.post('/api/system/unlock', async (req, res) => {
+    try {
+      await unlockDatabase(String(req.body?.password || ''));
+      res.json({ success: true });
+    } catch (error: any) { res.status(401).json({ error: error.message || 'Could not unlock FinGent.' }); }
   });
 
   // API Routes
