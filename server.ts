@@ -123,7 +123,15 @@ async function startServer() {
   const HOST = process.env.FINGENT_HOST || '127.0.0.1';
   const appRoot = process.env.FINGENT_APP_ROOT || process.cwd();
 
-  app.use(express.json());
+  app.disable('x-powered-by');
+  app.use(express.json({ limit: '2mb' }));
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    next();
+  });
 
   // API Routes
   app.get("/api/system/desktop-wrapper", async (req, res) => {
@@ -199,6 +207,7 @@ To run FinGent as a desktop application:
   });
 
   app.post("/api/system/drive/upload", async (req, res) => {
+    return res.status(410).json({ error: 'Deprecated. Use the client-side encrypted cross-device sync endpoint.' });
     try {
       const { accessToken, password } = req.body;
       if (!accessToken || !password) return res.status(400).json({ error: "Missing token or password" });
@@ -247,6 +256,7 @@ To run FinGent as a desktop application:
   });
 
   app.post("/api/system/drive/download", async (req, res) => {
+    return res.status(410).json({ error: 'Deprecated. Use the client-side encrypted cross-device sync endpoint.' });
     try {
       const { accessToken, password } = req.body;
       if (!accessToken || !password) return res.status(400).json({ error: "Missing token or password" });

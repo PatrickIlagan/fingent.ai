@@ -61,6 +61,7 @@ export function Settings() {
       alert("Drive sync failed: " + err.message);
     } finally {
       setDriveSyncing(false);
+      setEncPassword('');
     }
   };
 
@@ -74,6 +75,7 @@ export function Settings() {
       alert("Drive restore failed: " + err.message);
     } finally {
       setDriveSyncing(false);
+      setEncPassword('');
     }
   };
 

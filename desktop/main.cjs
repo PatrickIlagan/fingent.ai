@@ -65,11 +65,15 @@ function createWindow(port) {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      devTools: false
     }
   });
 
   mainWindow.loadURL(`http://127.0.0.1:${port}`);
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F12' || (input.control && input.shift && ['I', 'J', 'C'].includes(input.key))) event.preventDefault();
+  });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
