@@ -1,7 +1,7 @@
 import type { CopilotReply } from './localCopilot';
 
-const SETTINGS_KEY = 'fingent-byok-settings';
 const MODEL = 'gemini-2.5-flash';
+let currentSettings: ByokSettings = { enabled: false, apiKey: '' };
 
 export type ByokSettings = { enabled: boolean; apiKey: string };
 export type ByokIntentClass =
@@ -13,18 +13,13 @@ export type ByokIntentClass =
   | 'GENERAL_WORKFLOW';
 
 export function getByokSettings(): ByokSettings {
-  try {
-    // A BYOK key is never written to the app database or a persistent browser store.
-    // Closing the browser session clears it.
-    const parsed = JSON.parse(sessionStorage.getItem(SETTINGS_KEY) || '{}');
-    return { enabled: Boolean(parsed.enabled), apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey : '' };
-  } catch {
-    return { enabled: false, apiKey: '' };
-  }
+  // Never persist an API key to browser storage, the app database, backups, or Drive.
+  // It exists only in this running app process and disappears when the app is closed.
+  return { ...currentSettings };
 }
 
 export function saveByokSettings(settings: ByokSettings) {
-  sessionStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  currentSettings = { enabled: Boolean(settings.enabled), apiKey: settings.apiKey };
 }
 
 /** This classification happens locally and intentionally exposes no chat data. */
