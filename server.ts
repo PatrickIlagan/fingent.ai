@@ -347,6 +347,72 @@ To run FinGent as a desktop application:
     }
   });
 
+  app.post("/api/copilot/transfers", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { amount, fromHint, toHint, date = new Date().toISOString().slice(0, 10) } = req.body;
+      const value = Number(amount);
+      if (!Number.isFinite(value) || value <= 0) return res.status(400).json({ error: 'A positive transfer amount is required.' });
+      const accounts = await db.all("SELECT id, name, balance FROM accounts");
+      const match = (hint: string) => {
+        const normalized = String(hint || '').trim().toLowerCase();
+        const exact = accounts.filter((account: any) => account.name.toLowerCase() === normalized);
+        const close = exact.length ? exact : accounts.filter((account: any) => account.name.toLowerCase().includes(normalized) || normalized.includes(account.name.toLowerCase()));
+        return close.length === 1 ? close[0] : null;
+      };
+      const from = match(fromHint);
+      const to = match(toHint);
+      if (!from || !to) return res.status(400).json({ error: 'Could not uniquely match both local accounts. Use the exact account names.' });
+      if (from.id === to.id) return res.status(400).json({ error: 'Choose two different accounts for a transfer.' });
+      await db.run("UPDATE accounts SET balance = balance - ? WHERE id = ?", [value, from.id]);
+      await db.run("UPDATE accounts SET balance = balance + ? WHERE id = ?", [value, to.id]);
+      await db.run("INSERT INTO transactions (account_id, type, amount, category, description, notes, date) VALUES (?, 'expense', ?, 'Transfer', ?, ?, ?)", [from.id, value, 'Transfer to ' + to.name, 'Added locally through FinGent Copilot after user confirmation.', date]);
+      await db.run("INSERT INTO transactions (account_id, type, amount, category, description, notes, date) VALUES (?, 'income', ?, 'Transfer', ?, ?, ?)", [to.id, value, 'Transfer from ' + from.name, 'Added locally through FinGent Copilot after user confirmation.', date]);
+      res.json({ success: true, from: from.name, to: to.name });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/copilot/investments/buy", async (req, res) => {
+    try {
+      const db = await getDb();
+      const input = req.body;
+      const type = input.type === 'Cryptos' ? 'Cryptos' : 'Stocks';
+      const ticker = formatTicker(String(input.ticker || ''), type);
+      const date = input.date || new Date().toISOString().slice(0, 10);
+      const invested = Number(input.invested);
+      if (!ticker || !Number.isFinite(invested) || invested <= 0) return res.status(400).json({ error: 'Ticker and invested amount are required.' });
+      let shares = input.shares === null || input.shares === undefined ? null : Number(input.shares);
+      let price = input.avg_price === null || input.avg_price === undefined ? null : Number(input.avg_price);
+      let currentPrice = price;
+      if (!price || !shares) {
+        const quote: any = await yahooFinance.quote(ticker);
+        currentPrice = Number(quote?.regularMarketPrice) || null;
+        if (!price) price = currentPrice;
+      }
+      if (!price || !Number.isFinite(price) || price <= 0) return res.status(422).json({ error: 'Current price was unavailable. Add an explicit share count and price, then try again.' });
+      if (!shares) shares = invested / price;
+      if (!Number.isFinite(shares) || shares <= 0) return res.status(400).json({ error: 'Could not calculate a valid share count.' });
+      const cost = shares * price;
+      const existing = await db.get("SELECT * FROM portfolios WHERE ticker = ? COLLATE NOCASE AND type = ?", [ticker, type]);
+      if (existing) {
+        const nextShares = Number(existing.shares || 0) + shares;
+        const nextInvested = Number(existing.invested || 0) + cost;
+        const nextAverage = nextInvested / nextShares;
+        const nextCurrentValue = (currentPrice || price) * nextShares;
+        await db.run("INSERT INTO portfolio_transactions (portfolio_id, type, shares, price, date) VALUES (?, 'Buy', ?, ?, ?)", [existing.id, shares, price, date]);
+        await db.run("UPDATE portfolios SET shares = ?, invested = ?, avg_price = ?, current_value = ?, current_price = ?, currency = ? WHERE id = ?", [nextShares, nextInvested, nextAverage, nextCurrentValue, currentPrice || price, input.currency || 'USD', existing.id]);
+        return res.json({ id: existing.id, created: false, shares, price, date });
+      }
+      const result = await db.run("INSERT INTO portfolios (type, name, invested, current_value, shares, avg_price, ticker, current_price, currency, platform) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [type, input.name || ticker, cost, (currentPrice || price) * shares, shares, price, ticker, currentPrice || price, input.currency || 'USD', input.platform || '']);
+      await db.run("INSERT INTO portfolio_transactions (portfolio_id, type, shares, price, date) VALUES (?, 'Buy', ?, ?, ?)", [result.lastInsertRowid, shares, price, date]);
+      res.json({ id: result.lastInsertRowid, created: true, shares, price, date });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/categories", async (req, res) => {
     try {
       const db = await getDb();

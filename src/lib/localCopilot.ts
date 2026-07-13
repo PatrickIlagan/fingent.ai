@@ -32,6 +32,14 @@ export type InvestmentDraft = {
   redactedCommand: string;
 };
 
+export type TransferDraft = {
+  amount: number;
+  fromHint: string;
+  toHint: string;
+  date: string;
+  redactedCommand: string;
+};
+
 export type CopilotReply = {
   text: string;
   actions?: CopilotAction[];
@@ -39,6 +47,7 @@ export type CopilotReply = {
   transaction?: TransactionDraft;
   operation?: OperationDraft;
   investment?: InvestmentDraft;
+  transfer?: TransferDraft;
 };
 
 const routes = [
@@ -178,6 +187,16 @@ function parseInvestmentCommand(message: string): InvestmentDraft | null {
   };
 }
 
+function parseTransferCommand(message: string): TransferDraft | null {
+  const match = message.match(/^(?:transfer|move|send)\s+(.+?)\s+from\s+(.+?)\s+to\s+(.+?)\.?$/i);
+  if (!match) return null;
+  const amount = amountFrom(match[1]);
+  const fromHint = cleanPhrase(match[2]);
+  const toHint = cleanPhrase(match[3]);
+  if (!amount || !fromHint || !toHint) return null;
+  return { amount, fromHint, toHint, date: today(), redactedCommand: 'Action: TRANSFER [AMOUNT] from [SOURCE ACCOUNT] to [DESTINATION ACCOUNT].' };
+}
+
 function operation(kind: OperationDraft['kind'], label: string, tab: string, payload: Record<string, unknown>): OperationDraft {
   return { kind, label, tab, payload, redactedCommand: 'Action: CREATE [' + kind.toUpperCase() + '] using [PRIVATE FIELDS].' };
 }
@@ -246,6 +265,14 @@ export function runLocalCopilot(message: string): CopilotReply {
     };
   }
 
+  const transfer = parseTransferCommand(trimmed);
+  if (transfer) {
+    return {
+      text: 'I prepared a private transfer draft from “' + transfer.fromHint + '” to “' + transfer.toHint + '”. Review it, then explicitly save it.',
+      transfer
+    };
+  }
+
   const operationDraft = parseOperationCommand(trimmed);
   if (operationDraft) {
     return {
@@ -271,7 +298,7 @@ export function runLocalCopilot(message: string): CopilotReply {
 
   if (/\b(what can you do|help|commands|how do you work)\b/.test(lower)) {
     return {
-      text: 'I can open every FinGent workspace and sidebar sub-tab: for example “open stocks”, “open career tasks”, “open business cash flow”, “open freelance invoices”, or “open personal notes”. I can prepare local drafts for money records: “I spent 500 on groceries, cash”, “I bought 3 shares of AAPL at 100 dollars”, “create cash account Wallet with 1500”, “add bill Internet for 1800”, and “create income flow Retainer for 25000 monthly”. I also handle tasks, events, notes, routines, categories, goals, and budgets. Every write needs an explicit Save locally click.',
+      text: 'I can open every FinGent workspace and sidebar sub-tab: for example “open stocks”, “open career tasks”, “open business cash flow”, “open freelance invoices”, or “open personal notes”. I can prepare local drafts for money records: “I spent 500 on groceries, cash”, “transfer 500 from Cash to BDO”, “I bought 3 shares of AAPL at 100 dollars”, “create cash account Wallet with 1500”, “add bill Internet for 1800”, and “create income flow Retainer for 25000 monthly”. I also handle tasks, events, notes, routines, categories, goals, and budgets. Every write needs an explicit Save locally click.',
       actions: [
         { label: 'Open Home', tab: 'home' },
         { label: 'Open Accounts', tab: 'accounts' },

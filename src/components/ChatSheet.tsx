@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, LockKeyhole, Send, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { runLocalCopilot, type CopilotAction, type InvestmentDraft, type OperationDraft, type TransactionDraft } from '../lib/localCopilot';
+import { runLocalCopilot, type CopilotAction, type InvestmentDraft, type OperationDraft, type TransactionDraft, type TransferDraft } from '../lib/localCopilot';
 
 export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; onClose: () => void; onNavigate: (tab: string) => void }) {
   const [input, setInput] = useState('');
@@ -27,7 +27,7 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
     window.setTimeout(async () => {
       const reply = runLocalCopilot(userMsg);
       const accountOptions = reply.transaction ? await getAccountOptions(reply.transaction.accountHint) : undefined;
-      setMessages(prev => [...prev, { role: 'agent', text: reply.text, actions: reply.actions, transaction: reply.transaction, operation: reply.operation, investment: reply.investment, accountOptions }]);
+      setMessages(prev => [...prev, { role: 'agent', text: reply.text, actions: reply.actions, transaction: reply.transaction, operation: reply.operation, investment: reply.investment, transfer: reply.transfer, accountOptions }]);
       if (reply.navigateNow) { onNavigate(reply.navigateNow); onClose(); }
       setIsTyping(false);
     }, 220);
@@ -81,14 +81,26 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
 
   const saveInvestment = async (investment: InvestmentDraft) => {
     try {
-      const response = await fetch('/api/portfolios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(investment) });
+      const response = await fetch('/api/copilot/investments/buy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(investment) });
       if (!response.ok) throw new Error('Unable to save this investment.');
       const saved = await response.json();
-      const shareText = saved.shares ? ' Auto-calculated ' + Number(saved.shares).toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' shares at the current price.' : ' Price lookup was unavailable, so add the share count when a quote is available.';
-      setMessages(prev => [...prev, { role: 'agent', text: 'Saved locally: ' + investment.ticker + ' in Investments on ' + investment.date + '.' + shareText }]);
+      const shareText = saved.shares ? ' Recorded ' + Number(saved.shares).toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' shares at ' + Number(saved.price).toLocaleString(undefined, { maximumFractionDigits: 4 }) + ' USD.' : '';
+      setMessages(prev => [...prev, { role: 'agent', text: 'Saved locally: ' + investment.ticker + (saved.created ? ' was added to Investments' : ' was added to the existing position') + ' on ' + investment.date + '.' + shareText }]);
       triggerRefresh();
     } catch (error) {
       setMessages(prev => [...prev, { role: 'agent', text: error instanceof Error ? error.message : 'Unable to save this investment.' }]);
+    }
+  };
+
+  const saveTransfer = async (transfer: TransferDraft) => {
+    try {
+      const response = await fetch('/api/copilot/transfers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(transfer) });
+      const saved = await response.json();
+      if (!response.ok) throw new Error(saved.error || 'Unable to save this transfer.');
+      setMessages(prev => [...prev, { role: 'agent', text: 'Saved locally: transfer from ' + saved.from + ' to ' + saved.to + ' on ' + transfer.date + '.' }]);
+      triggerRefresh();
+    } catch (error) {
+      setMessages(prev => [...prev, { role: 'agent', text: error instanceof Error ? error.message : 'Unable to save this transfer.' }]);
     }
   };
 
@@ -142,6 +154,7 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
                   {m.transaction && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50'}`}><p className="text-xs font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Private action draft</p><p className="mt-1 text-sm font-bold">{m.transaction.type === 'expense' ? 'Expense' : 'Income'} · PHP {m.transaction.amount.toLocaleString()} · {m.transaction.category}</p><p className="mt-1 text-xs text-slate-500">Date: {m.transaction.date} · External-AI-safe envelope: {m.transaction.redactedCommand}</p>{m.accountOptions?.length ? <div className="mt-3 flex flex-wrap gap-2">{m.accountOptions.map(account => <button key={account.id} onClick={() => saveTransaction(m.transaction!, account)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700">Save with {account.name}</button>)}</div> : <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">No matching local account was found. Add or select an account in Accounts first.</p>}</div>}
                   {m.operation && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-violet-500/30 bg-violet-500/10' : 'border-violet-200 bg-violet-50'}`}><p className="text-xs font-black uppercase tracking-wider text-violet-700 dark:text-violet-300">Private action draft</p><p className="mt-1 text-sm font-bold">{m.operation.label}</p><p className="mt-1 text-xs text-slate-500">External-AI-safe envelope: {m.operation.redactedCommand}</p><button onClick={() => saveOperation(m.operation!)} className="mt-3 rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-700">Save locally</button></div>}
                   {m.investment && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-sky-500/30 bg-sky-500/10' : 'border-sky-200 bg-sky-50'}`}><p className="text-xs font-black uppercase tracking-wider text-sky-700 dark:text-sky-300">Private investment draft</p><p className="mt-1 text-sm font-bold">{m.investment.ticker} · {m.investment.type} · USD {m.investment.invested.toLocaleString()}</p><p className="mt-1 text-xs text-slate-500">{m.investment.shares ? m.investment.shares + ' shares' : 'Share count will be auto-calculated from the current price when saved.'} Date: {m.investment.date}</p><p className="mt-1 text-xs text-slate-500">External-AI-safe envelope: {m.investment.redactedCommand}</p><button onClick={() => saveInvestment(m.investment!)} className="mt-3 rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white hover:bg-sky-700">Save investment locally</button></div>}
+                  {m.transfer && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-amber-500/30 bg-amber-500/10' : 'border-amber-200 bg-amber-50'}`}><p className="text-xs font-black uppercase tracking-wider text-amber-700 dark:text-amber-300">Private transfer draft</p><p className="mt-1 text-sm font-bold">PHP {m.transfer.amount.toLocaleString()} · {m.transfer.fromHint} to {m.transfer.toHint}</p><p className="mt-1 text-xs text-slate-500">Date: {m.transfer.date} · External-AI-safe envelope: {m.transfer.redactedCommand}</p><button onClick={() => saveTransfer(m.transfer!)} className="mt-3 rounded-lg bg-amber-600 px-3 py-2 text-xs font-bold text-white hover:bg-amber-700">Save transfer locally</button></div>}
                 </div>
               ))}
               {isTyping && (
@@ -186,7 +199,7 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
 }
 
 type AccountOption = { id: number; name: string };
-type ChatMessage = { role: 'user' | 'agent'; text: string; actions?: CopilotAction[]; transaction?: TransactionDraft; operation?: OperationDraft; investment?: InvestmentDraft; accountOptions?: AccountOption[] };
+type ChatMessage = { role: 'user' | 'agent'; text: string; actions?: CopilotAction[]; transaction?: TransactionDraft; operation?: OperationDraft; investment?: InvestmentDraft; transfer?: TransferDraft; accountOptions?: AccountOption[] };
 
 async function getAccountOptions(hint: string): Promise<AccountOption[]> {
   try {
