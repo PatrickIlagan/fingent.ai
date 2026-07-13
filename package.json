@@ -12,7 +12,8 @@
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "lint": "tsc --noEmit",
     "desktop:dev": "npm run build && electron .",
-    "desktop:dist": "npm run build && electron-builder --win nsis portable && npm rebuild better-sqlite3 better-sqlite3-multiple-ciphers sqlite3",
+    "desktop:dist": "npm run build && electron-builder --win nsis portable",
+    "desktop:restore-node-modules": "npm rebuild better-sqlite3 better-sqlite3-multiple-ciphers sqlite3",
     "android:sync": "npm run build && cap sync android",
     "android:apk": "node scripts/android-build.cjs"
   },
