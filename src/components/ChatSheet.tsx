@@ -45,7 +45,7 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
           category: draft.category,
           description: draft.description || 'Added through FinGent Copilot',
           notes: 'Added locally through FinGent Copilot after user confirmation.',
-          date: new Date().toISOString()
+          date: draft.date
         })
       });
       if (!response.ok) throw new Error('Unable to save the transaction.');
@@ -58,6 +58,9 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
 
   const saveOperation = async (operation: OperationDraft) => {
     const endpoint = {
+      account: '/api/accounts',
+      liability: '/api/liabilities',
+      'income-flow': '/api/income_flows',
       'calendar-event': '/api/calendar_events',
       'career-task': '/api/career/tasks',
       note: '/api/personal/notes',
@@ -80,7 +83,9 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
     try {
       const response = await fetch('/api/portfolios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(investment) });
       if (!response.ok) throw new Error('Unable to save this investment.');
-      setMessages(prev => [...prev, { role: 'agent', text: 'Saved locally: ' + investment.ticker + ' in Investments.' }]);
+      const saved = await response.json();
+      const shareText = saved.shares ? ' Auto-calculated ' + Number(saved.shares).toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' shares at the current price.' : ' Price lookup was unavailable, so add the share count when a quote is available.';
+      setMessages(prev => [...prev, { role: 'agent', text: 'Saved locally: ' + investment.ticker + ' in Investments on ' + investment.date + '.' + shareText }]);
       triggerRefresh();
     } catch (error) {
       setMessages(prev => [...prev, { role: 'agent', text: error instanceof Error ? error.message : 'Unable to save this investment.' }]);
@@ -134,9 +139,9 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
                     {m.text}
                   </div>
                   {m.actions?.length > 0 && <div className="mt-2 flex max-w-[95%] flex-wrap gap-2">{m.actions.map((action: CopilotAction) => <button key={action.tab} onClick={() => { onNavigate(action.tab); onClose(); }} className={`rounded-full border px-3 py-1.5 text-xs font-bold transition-colors ${isAdvanced ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-slate-50'}`}>{action.label}</button>)}</div>}
-                  {m.transaction && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50'}`}><p className="text-xs font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Private action draft</p><p className="mt-1 text-sm font-bold">{m.transaction.type === 'expense' ? 'Expense' : 'Income'} · PHP {m.transaction.amount.toLocaleString()} · {m.transaction.category}</p><p className="mt-1 text-xs text-slate-500">External-AI-safe envelope: {m.transaction.redactedCommand}</p>{m.accountOptions?.length ? <div className="mt-3 flex flex-wrap gap-2">{m.accountOptions.map(account => <button key={account.id} onClick={() => saveTransaction(m.transaction!, account)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700">Save with {account.name}</button>)}</div> : <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">No matching local account was found. Add or select an account in Accounts first.</p>}</div>}
+                  {m.transaction && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50'}`}><p className="text-xs font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Private action draft</p><p className="mt-1 text-sm font-bold">{m.transaction.type === 'expense' ? 'Expense' : 'Income'} · PHP {m.transaction.amount.toLocaleString()} · {m.transaction.category}</p><p className="mt-1 text-xs text-slate-500">Date: {m.transaction.date} · External-AI-safe envelope: {m.transaction.redactedCommand}</p>{m.accountOptions?.length ? <div className="mt-3 flex flex-wrap gap-2">{m.accountOptions.map(account => <button key={account.id} onClick={() => saveTransaction(m.transaction!, account)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700">Save with {account.name}</button>)}</div> : <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">No matching local account was found. Add or select an account in Accounts first.</p>}</div>}
                   {m.operation && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-violet-500/30 bg-violet-500/10' : 'border-violet-200 bg-violet-50'}`}><p className="text-xs font-black uppercase tracking-wider text-violet-700 dark:text-violet-300">Private action draft</p><p className="mt-1 text-sm font-bold">{m.operation.label}</p><p className="mt-1 text-xs text-slate-500">External-AI-safe envelope: {m.operation.redactedCommand}</p><button onClick={() => saveOperation(m.operation!)} className="mt-3 rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-700">Save locally</button></div>}
-                  {m.investment && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-sky-500/30 bg-sky-500/10' : 'border-sky-200 bg-sky-50'}`}><p className="text-xs font-black uppercase tracking-wider text-sky-700 dark:text-sky-300">Private investment draft</p><p className="mt-1 text-sm font-bold">{m.investment.ticker} · {m.investment.type} · USD {m.investment.invested.toLocaleString()}</p><p className="mt-1 text-xs text-slate-500">{m.investment.shares ? m.investment.shares + ' shares' : 'Total-investment amount; share count can be added later.'}</p><p className="mt-1 text-xs text-slate-500">External-AI-safe envelope: {m.investment.redactedCommand}</p><button onClick={() => saveInvestment(m.investment!)} className="mt-3 rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white hover:bg-sky-700">Save investment locally</button></div>}
+                  {m.investment && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-sky-500/30 bg-sky-500/10' : 'border-sky-200 bg-sky-50'}`}><p className="text-xs font-black uppercase tracking-wider text-sky-700 dark:text-sky-300">Private investment draft</p><p className="mt-1 text-sm font-bold">{m.investment.ticker} · {m.investment.type} · USD {m.investment.invested.toLocaleString()}</p><p className="mt-1 text-xs text-slate-500">{m.investment.shares ? m.investment.shares + ' shares' : 'Share count will be auto-calculated from the current price when saved.'} Date: {m.investment.date}</p><p className="mt-1 text-xs text-slate-500">External-AI-safe envelope: {m.investment.redactedCommand}</p><button onClick={() => saveInvestment(m.investment!)} className="mt-3 rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white hover:bg-sky-700">Save investment locally</button></div>}
                 </div>
               ))}
               {isTyping && (

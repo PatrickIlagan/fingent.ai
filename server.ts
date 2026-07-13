@@ -837,13 +837,15 @@ To run FinGent as a desktop application:
   app.post("/api/portfolios", async (req, res) => {
     try {
       const db = await getDb();
-      let { type, name, invested, current_value, shares = null, avg_price = null, ticker = null, currency = "USD", platform = null } = req.body;
+      let { type, name, invested, current_value, shares = null, avg_price = null, ticker = null, currency = "USD", platform = null, date = new Date().toISOString().split('T')[0] } = req.body;
+      let priceResolved = false;
       
       if (ticker) { ticker = formatTicker(ticker, type);
         try {
            const quote = await yahooFinance.quote(formatTicker(ticker, type)) as any;
            if (quote && quote.regularMarketPrice) {
               const currentPrice = quote.regularMarketPrice;
+              priceResolved = true;
               if (shares === null && current_value > 0) {
                  shares = current_value / currentPrice;
                  avg_price = shares > 0 ? invested / shares : null;
@@ -866,11 +868,11 @@ To run FinGent as a desktop application:
       if (shares && shares > 0 && avg_price && avg_price > 0) {
          await db.run(
            "INSERT INTO portfolio_transactions (portfolio_id, type, shares, price, date) VALUES (?, ?, ?, ?, ?)",
-           [newId, 'Buy', shares, avg_price, new Date().toISOString().split('T')[0]]
+           [newId, 'Buy', shares, avg_price, date]
          );
       }
-      
-      res.json({ id: newId });
+
+      res.json({ id: newId, shares, avg_price, date, price_resolved: priceResolved });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

@@ -6,11 +6,12 @@ export type TransactionDraft = {
   category: string;
   accountHint: string;
   description: string;
+  date: string;
   redactedCommand: string;
 };
 
 export type OperationDraft = {
-  kind: 'calendar-event' | 'career-task' | 'note' | 'routine' | 'category' | 'goal' | 'budget';
+  kind: 'account' | 'liability' | 'income-flow' | 'calendar-event' | 'career-task' | 'note' | 'routine' | 'category' | 'goal' | 'budget';
   label: string;
   tab: string;
   payload: Record<string, unknown>;
@@ -27,6 +28,7 @@ export type InvestmentDraft = {
   avg_price: number | null;
   currency: 'USD' | 'PHP';
   platform: string;
+  date: string;
   redactedCommand: string;
 };
 
@@ -105,6 +107,10 @@ function titleCase(value: string) {
   return value.split(/\s+/).filter(Boolean).map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
 }
 
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function cleanPhrase(value: string) {
   return value.replace(/\b(?:from|using|via|with)\b.*$/i, '').replace(/[,.!?]+$/g, '').trim();
 }
@@ -132,6 +138,7 @@ function parseTransactionCommand(message: string): TransactionDraft | null {
     category,
     accountHint,
     description,
+    date: today(),
     redactedCommand: 'Action: ' + intent.toUpperCase() + ' [AMOUNT] ' + (accountHint ? 'from [ACCOUNT] ' : '') + 'for [REASON].'
   };
 }
@@ -148,14 +155,14 @@ function parseInvestmentCommand(message: string): InvestmentDraft | null {
   if (!tickerMatch) return null;
   const ticker = tickerMatch[1].toUpperCase();
   if (['CASH', 'FOOD', 'GROCERIES', 'THIS', 'THAT', 'IT'].includes(ticker)) return null;
-  const isUsd = /\b(?:usd|dollars?)\b|\$/i.test(message);
-  const amount = amountFrom(message);
-  if (!isUsd || amount <= 0) return null;
-  const isCrypto = /\b(?:crypto|bitcoin|ethereum|btc|eth|sol)\b/i.test(message) || ['BTC', 'ETH', 'SOL'].includes(ticker);
   const shareMatch = message.match(/\b(\d+(?:\.\d+)?)\s+shares?\b/i);
   const priceMatch = message.match(/\b(?:at|@)\s*(?:\$|usd\s*)?(\d[\d,]*(?:\.\d{1,2})?)/i);
+  const isUsd = /\b(?:usd|dollars?)\b|\$/i.test(message) || Boolean(priceMatch);
   const shares = shareMatch ? Number(shareMatch[1]) : null;
-  const avgPrice = priceMatch ? Number(priceMatch[1].replace(/,/g, '')) : shares ? amount / shares : null;
+  const avgPrice = priceMatch ? Number(priceMatch[1].replace(/,/g, '')) : shares ? amountFrom(message) / shares : null;
+  const amount = shares && avgPrice ? shares * avgPrice : amountFrom(message);
+  if (!isUsd || amount <= 0) return null;
+  const isCrypto = /\b(?:crypto|bitcoin|ethereum|btc|eth|sol)\b/i.test(message) || ['BTC', 'ETH', 'SOL'].includes(ticker);
   return {
     type: isCrypto ? 'Cryptos' : 'Stocks',
     name: ticker,
@@ -166,6 +173,7 @@ function parseInvestmentCommand(message: string): InvestmentDraft | null {
     avg_price: avgPrice,
     currency: 'USD',
     platform: '',
+    date: today(),
     redactedCommand: 'Action: CREATE [INVESTMENT] ticker [TICKER], amount [AMOUNT], currency [CURRENCY].'
   };
 }
@@ -176,11 +184,30 @@ function operation(kind: OperationDraft['kind'], label: string, tab: string, pay
 
 function parseOperationCommand(message: string): OperationDraft | null {
   const trimmed = message.trim();
-  const task = trimmed.match(/^(?:add|create|remind me about)\s+(?:a\s+)?(?:career\s+)?task\s+(.+?)(?:\s+due\s+(\d{4}-\d{2}-\d{2}))?$/i);
-  if (task) return operation('career-task', 'Career task: ' + task[1], 'career-tasks', { title: task[1], due_date: task[2] || null, priority: 'Medium', notes: '' });
+  const account = trimmed.match(/^(?:add|create)\s+(?:an?\s+)?(cash|bank|digital(?: wallet)?|card|credit card)\s+account\s+(.+?)(?:\s+(?:with|balance)\s+(.+))?$/i);
+  if (account) {
+    const type = account[1].toLowerCase().includes('digital') ? 'Digital' : account[1].toLowerCase().includes('card') ? 'Card' : titleCase(account[1]);
+    return operation('account', 'Account: ' + account[2], 'accounts', { name: account[2], type, balance: amountFrom(account[3] || ''), interest_rate_pa: 0, image_logo_name: '', color: '', purpose: '', credit_limit: null, statement_date: null, due_date: null });
+  }
 
-  const event = trimmed.match(/^(?:add|create|schedule)\s+(?:an?\s+)?(?:event|meeting|interview)\s+(.+?)\s+(?:on|for)\s+(\d{4}-\d{2}-\d{2})$/i);
-  if (event) return operation('calendar-event', 'Calendar event: ' + event[1], 'calendar', { name: event[1], type: 'general', amount: null, date: event[2], color: 'blue', icon: 'Calendar', provider: 'Local Copilot', source: 'copilot' });
+  const liability = trimmed.match(/^(?:add|create)\s+(?:an?\s+)?(bill|debt|credit|installment|quick expense)\s+(.+?)\s+(?:for|amount|of)\s+(.+?)(?:\s+(?:due|on)\s+(\d{4}-\d{2}-\d{2}))?$/i);
+  if (liability) {
+    const typeMap: Record<string, string> = { bill: 'Bills', debt: 'Debts', credit: 'Credits', installment: 'Installments', 'quick expense': 'Quick Expenses' };
+    const amount = amountFrom(liability[3]);
+    if (amount > 0) return operation('liability', titleCase(liability[1]) + ': ' + liability[2], 'liabilities-' + typeMap[liability[1].toLowerCase()].toLowerCase(), { name: liability[2], type: typeMap[liability[1].toLowerCase()], amount, date: liability[4] || today(), provider: '', status: 'Unpaid', card_name: '', total_amount: amount, remaining_amount: amount, total_months: 0, current_month: 0, merchant: '', paid_using: '', is_recurring: false });
+  }
+
+  const incomeFlow = trimmed.match(/^(?:add|create|set)\s+(?:an?\s+)?income flow\s+(.+?)\s+(?:for|amount|of)\s+(.+)$/i);
+  if (incomeFlow) {
+    const amount = amountFrom(incomeFlow[2]);
+    if (amount > 0) return operation('income-flow', 'Income flow: ' + incomeFlow[1], 'plans', { name: incomeFlow[1], amount, date: today(), is_recurring: /recurring|monthly|weekly/i.test(trimmed), budget_preset_id: null, account_id: null, category: 'Income' });
+  }
+
+  const task = trimmed.match(/^(?:add|create|remind me about)\s+(?:a\s+)?(?:career\s+)?task\s+(.+?)(?:\s+due\s+(\d{4}-\d{2}-\d{2}))?$/i);
+  if (task) return operation('career-task', 'Career task: ' + task[1], 'career-tasks', { title: task[1], due_date: task[2] || today(), priority: 'Medium', notes: '' });
+
+  const event = trimmed.match(/^(?:add|create|schedule)\s+(?:an?\s+)?(?:event|meeting|interview)\s+(.+?)(?:\s+(?:on|for)\s+(\d{4}-\d{2}-\d{2}))?$/i);
+  if (event) return operation('calendar-event', 'Calendar event: ' + event[1], 'calendar', { name: event[1], type: 'general', amount: null, date: event[2] || today(), color: 'blue', icon: 'Calendar', provider: 'Local Copilot', source: 'copilot' });
 
   const note = trimmed.match(/^(?:add|create|save)\s+(?:a\s+)?note\s+([^:]+)(?::\s*(.+))?$/i);
   if (note) return operation('note', 'Note: ' + note[1].trim(), 'personal-notes', { title: note[1].trim(), body: note[2]?.trim() || '' });
@@ -219,20 +246,20 @@ export function runLocalCopilot(message: string): CopilotReply {
     };
   }
 
+  const operationDraft = parseOperationCommand(trimmed);
+  if (operationDraft) {
+    return {
+      text: 'I prepared a local ' + operationDraft.kind.replace('-', ' ') + ' draft. Review it, then explicitly save it. Private fields stay inside FinGent.',
+      operation: operationDraft
+    };
+  }
+
   const transaction = parseTransactionCommand(trimmed);
   if (transaction) {
     const accountText = transaction.accountHint ? ' from “' + transaction.accountHint + '”' : '';
     return {
       text: 'I prepared a local ' + transaction.type + ' draft for ' + transaction.category + accountText + '. Review it, then explicitly save it. Your details stay in FinGent and are never sent to an AI service.',
       transaction
-    };
-  }
-
-  const operationDraft = parseOperationCommand(trimmed);
-  if (operationDraft) {
-    return {
-      text: 'I prepared a local ' + operationDraft.kind.replace('-', ' ') + ' draft. Review it, then explicitly save it. Private fields stay inside FinGent.',
-      operation: operationDraft
     };
   }
 
@@ -244,7 +271,7 @@ export function runLocalCopilot(message: string): CopilotReply {
 
   if (/\b(what can you do|help|commands|how do you work)\b/.test(lower)) {
     return {
-      text: 'I can open every FinGent workspace and sidebar sub-tab: for example “open stocks”, “open career tasks”, “open business cash flow”, “open freelance invoices”, or “open personal notes”. I can also prepare local drafts: “I spent 500 on groceries, cash”, “add task update resume due 2026-07-20”, “schedule meeting Alex on 2026-07-20”, “create note ideas: outline launch”, “create routine stretch daily”, “create expense category Transport”, “create goal Emergency Fund target 50000”, or “create budget July amount 30000”. Every write needs an explicit Save locally click.',
+      text: 'I can open every FinGent workspace and sidebar sub-tab: for example “open stocks”, “open career tasks”, “open business cash flow”, “open freelance invoices”, or “open personal notes”. I can prepare local drafts for money records: “I spent 500 on groceries, cash”, “I bought 3 shares of AAPL at 100 dollars”, “create cash account Wallet with 1500”, “add bill Internet for 1800”, and “create income flow Retainer for 25000 monthly”. I also handle tasks, events, notes, routines, categories, goals, and budgets. Every write needs an explicit Save locally click.',
       actions: [
         { label: 'Open Home', tab: 'home' },
         { label: 'Open Accounts', tab: 'accounts' },
