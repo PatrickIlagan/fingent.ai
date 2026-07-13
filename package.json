@@ -12,9 +12,14 @@
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "lint": "tsc --noEmit",
     "desktop:dev": "npm run build && electron .",
-    "desktop:dist": "npm run build && electron-builder --win nsis portable && npm rebuild better-sqlite3 better-sqlite3-multiple-ciphers sqlite3"
+    "desktop:dist": "npm run build && electron-builder --win nsis portable && npm rebuild better-sqlite3 better-sqlite3-multiple-ciphers sqlite3",
+    "android:sync": "npm run build && cap sync android",
+    "android:apk": "node scripts/android-build.cjs"
   },
   "dependencies": {
+    "@capacitor-community/sqlite": "^8.1.0",
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
     "@tailwindcss/vite": "^4.1.14",
     "@types/archiver": "^8.0.0",
     "@vitejs/plugin-react": "^5.0.4",
@@ -45,17 +50,18 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.1",
     "@types/express": "^4.17.21",
     "@types/multer": "^2.2.0",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
+    "electron": "^37.2.6",
+    "electron-builder": "^26.0.12",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3",
-    "electron": "^37.2.6",
-    "electron-builder": "^26.0.12"
+    "vite": "^6.2.3"
   },
   "build": {
     "appId": "ai.fingent.desktop",
