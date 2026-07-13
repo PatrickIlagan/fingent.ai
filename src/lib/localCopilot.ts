@@ -121,13 +121,35 @@ function today() {
 }
 
 function cleanPhrase(value: string) {
-  return value.replace(/\b(?:from|using|via|with)\b.*$/i, '').replace(/[,.!?]+$/g, '').trim();
+  return value.replace(/\b(?:from|using|via|with|through)\b.*$/i, '').replace(/\bmy\s+/i, '').replace(/[,.!?]+$/g, '').trim();
+}
+
+function inferExpenseCategory(value: string) {
+  const normalized = value.toLowerCase();
+  const categories: Array<[RegExp, string]> = [
+    [/\b(food|meal|breakfast|lunch|dinner|snack|grocer\w*|restaurant|cafe|coffee|delivery)\b/, 'Food'],
+    [/\b(transport|commute|fare|fuel|gas|gasoline|parking|grab|taxi|bus|train)\b/, 'Transport'],
+    [/\b(rent|housing|mortgage)\b/, 'Housing'],
+    [/\b(electric|electricity|water|internet|wifi|mobile|phone|utility|utilities)\b/, 'Utilities'],
+    [/\b(doctor|medical|medicine|pharmacy|hospital|health)\b/, 'Health'],
+    [/\b(course|tuition|book|education|school|training)\b/, 'Education'],
+    [/\b(movie|game|concert|netflix|spotify|entertainment)\b/, 'Entertainment'],
+    [/\b(clothes|clothing|shopping|shop|store)\b/, 'Shopping']
+  ];
+  return categories.find(([pattern]) => pattern.test(normalized))?.[1] || titleCase(value);
+}
+
+function transactionAccountHint(message: string) {
+  const account = message.match(/\b(?:from|using|via|with|through)\s+(?:my\s+)?([^,.!?]+)/i)
+    || message.match(/\b(?:paid|paying)\s+(?:by|with)\s+(?:my\s+)?([^,.!?]+)/i)
+    || message.match(/,\s*(?:my\s+)?([^,.!?]+)\s*$/);
+  return account ? cleanPhrase(account[1]) : '';
 }
 
 function parseTransactionCommand(message: string): TransactionDraft | null {
   const normalized = message.trim();
-  const intent = /\b(spent|spend|paid|pay|bought|purchase|expense)\b/i.test(normalized) ? 'expense'
-    : /\b(earned|receive|received|income|salary|got paid)\b/i.test(normalized) ? 'income'
+  const intent = /\b(spent|spend|paid|pay|bought|buy|purchase|purchased|charged|charge|ordered|order|expense)\b/i.test(normalized) ? 'expense'
+    : /\b(earned|receive|received|income|salary|got paid|made|sold|sale|deposited|deposit)\b/i.test(normalized) ? 'income'
       : null;
   if (!intent) return null;
   const amountMatch = normalized.match(/(?:\u20B1|php|pesos?|\$)?\s*(\d[\d,]*(?:\.\d{1,2})?)/i);
@@ -135,15 +157,16 @@ function parseTransactionCommand(message: string): TransactionDraft | null {
   const amount = Number(amountMatch[1].replace(/,/g, ''));
   if (!Number.isFinite(amount) || amount <= 0) return null;
 
-  const accountMatch = normalized.match(/\b(?:from|using|via|with)\s+([^,.!?]+)/i) || normalized.match(/,\s*([^,.!?]+)\s*$/);
-  const accountHint = accountMatch ? cleanPhrase(accountMatch[1]) : '';
+  const accountHint = transactionAccountHint(normalized);
   const reasonMatch = normalized.match(/\b(?:on|for)\s+(.+?)(?:\s*(?:,|\bfrom\b|\busing\b|\bvia\b|\bwith\b)|$)/i);
   // Covers natural purchase wording such as "bought food for 400 pesos".
   // Prefer the item before the amount over the generic "for <...>" phrase.
   const purchaseReason = intent === 'expense'
-    ? normalized.match(/\b(?:bought|purchase(?:d)?)\s+(.+?)\s+(?:for|worth)\s+(?:(?:\u20B1|php|pesos?)?\s*\d)/i)?.[1]
+    ? normalized.match(/\b(?:bought|buy|purchase(?:d)?|ordered|order)\s+(.+?)\s+(?:for|worth)\s+(?:(?:\u20B1|php|pesos?)?\s*\d)/i)?.[1]
     : undefined;
-  const category = titleCase(cleanPhrase(purchaseReason || reasonMatch?.[1] || (intent === 'income' ? 'Income' : 'General')) || (intent === 'income' ? 'Income' : 'General'));
+  const leadingReason = normalized.match(/^(?:for|on)\s+(.+?)[,;:-]\s*(?:i\s+)?(?:spent|paid|bought|purchased|ordered)\b/i)?.[1];
+  const rawReason = cleanPhrase(purchaseReason || leadingReason || reasonMatch?.[1] || (intent === 'income' ? 'Income' : 'General')) || (intent === 'income' ? 'Income' : 'General');
+  const category = intent === 'expense' ? inferExpenseCategory(rawReason) : titleCase(rawReason);
   const description = category === 'General' || category === 'Income' ? '' : category;
 
   return {

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, LockKeyhole, Send, Trash2, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { runLocalCopilot, type CopilotAction, type InvestmentDraft, type OperationDraft, type TransactionDraft, type TransferDraft } from '../lib/localCopilot';
-import { getByokGuidance } from '../lib/byokAssistant';
+import { getByokGuidance, shouldUseByokGuidance } from '../lib/byokAssistant';
 
 export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; onClose: () => void; onNavigate: (tab: string) => void }) {
   const [input, setInput] = useState('');
@@ -28,7 +28,7 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
     window.setTimeout(async () => {
       const reply = runLocalCopilot(userMsg);
       const accountOptions = reply.transaction ? await getAccountOptions(reply.transaction.accountHint) : undefined;
-      const byokGuidance = await getByokGuidance(reply).catch(() => null);
+      const byokGuidance = shouldUseByokGuidance(reply) ? await getByokGuidance(reply).catch(() => null) : null;
       setMessages(prev => [...prev, { role: 'agent', text: reply.text, actions: reply.actions, transaction: reply.transaction, operation: reply.operation, investment: reply.investment, transfer: reply.transfer, accountOptions, byokGuidance }]);
       if (reply.navigateNow) { onNavigate(reply.navigateNow); onClose(); }
       setIsTyping(false);

@@ -54,6 +54,14 @@ export function createByokPrompt(reply: CopilotReply) {
   ].join('\n');
 }
 
+/**
+ * Deterministic commands are fully handled on-device. Optional BYOK is reserved
+ * for genuinely unrecognised general requests, and still receives no chat data.
+ */
+export function shouldUseByokGuidance(reply: CopilotReply) {
+  return !reply.transaction && !reply.investment && !reply.transfer && !reply.operation && !reply.navigateNow && !reply.actions?.length;
+}
+
 async function callGemini(apiKey: string, prompt: string) {
   const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + MODEL + ':generateContent?key=' + encodeURIComponent(apiKey), {
     method: 'POST',
