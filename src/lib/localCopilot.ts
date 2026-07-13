@@ -62,31 +62,31 @@ const routes = [
   { terms: ['credit', 'credits'], tab: 'liabilities-credits', label: 'Open Credits' },
   { terms: ['debt', 'debts', 'loan'], tab: 'liabilities-debts', label: 'Open Debts' },
   { terms: ['bill', 'bills'], tab: 'liabilities-bills', label: 'Open Bills' },
-  { terms: ['liability', 'credit card'], tab: 'liabilities', label: 'Open Liabilities' },
+  { terms: ['liability', 'credit card', 'utang'], tab: 'liabilities', label: 'Open Liabilities' },
   { terms: ['budget', 'budgets'], tab: 'plans-budget', label: 'Open Budgets' },
   { terms: ['goal', 'goals', 'saving goal'], tab: 'plans-goals', label: 'Open Goals' },
   { terms: ['plan', 'saving'], tab: 'plans', label: 'Open Plans' },
-  { terms: ['calendar', 'event', 'schedule'], tab: 'calendar', label: 'Open Calendar' },
+  { terms: ['calendar', 'event', 'schedule', 'kalendaryo'], tab: 'calendar', label: 'Open Calendar' },
   { terms: ['real estate'], tab: 'investments-real estate', label: 'Open Real Estate' },
   { terms: ['stock', 'stocks'], tab: 'investments-stocks', label: 'Open Stocks' },
   { terms: ['crypto', 'cryptos'], tab: 'investments-cryptos', label: 'Open Crypto' },
-  { terms: ['investment', 'portfolio'], tab: 'investments', label: 'Open Investments' },
+  { terms: ['investment', 'portfolio', 'pamumuhunan'], tab: 'investments', label: 'Open Investments' },
   { terms: ['career calendar', 'interview calendar'], tab: 'career-calendar', label: 'Open Career Calendar' },
   { terms: ['career task', 'career tasks', 'to-do', 'todo'], tab: 'career-tasks', label: 'Open Career Tasks' },
   { terms: ['upskilling', 'course', 'learning'], tab: 'career-upskilling', label: 'Open Upskilling' },
   { terms: ['career income', 'salary progression'], tab: 'career-income', label: 'Open Career Income' },
-  { terms: ['career', 'job', 'interview', 'skill', 'upskill', 'task'], tab: 'career', label: 'Open Career' },
+  { terms: ['career', 'job', 'interview', 'skill', 'upskill', 'task', 'karera', 'trabaho'], tab: 'career', label: 'Open Career' },
   { terms: ['business cash flow', 'business finance'], tab: 'business-finance', label: 'Open Business Cash Flow' },
   { terms: ['business operations', 'marketing', 'supply', 'product support'], tab: 'business-operations', label: 'Open Business Operations' },
   { terms: ['business sales', 'pipeline', 'proposal', 'acquisition'], tab: 'business-sales', label: 'Open Business Sales' },
   { terms: ['business records', 'catalogue', 'catalog', 'subscriptions', 'clients'], tab: 'business-records', label: 'Open Business Records' },
-  { terms: ['business', 'venture', 'store', 'saas', 'agency'], tab: 'business', label: 'Open Business Operations' },
+  { terms: ['business', 'venture', 'store', 'saas', 'agency', 'negosyo'], tab: 'business', label: 'Open Business Operations' },
   { terms: ['freelance time', 'time log', 'timer'], tab: 'freelance-time', label: 'Open Freelance Time Logs' },
   { terms: ['freelance invoice', 'invoice'], tab: 'freelance-invoices', label: 'Open Freelance Invoices' },
   { terms: ['freelance contract', 'contract'], tab: 'freelance-contracts', label: 'Open Freelance Contracts' },
   { terms: ['freelance dashboard', 'service dashboard'], tab: 'freelance-dashboard', label: 'Open Freelance Dashboard' },
   { terms: ['freelance', 'client'], tab: 'freelancing', label: 'Open Freelancing' },
-  { terms: ['tax', 'bir', 'sss', 'philhealth', 'pag-ibig'], tab: 'taxes', label: 'Open Taxes' },
+  { terms: ['tax', 'bir', 'sss', 'philhealth', 'pag-ibig', 'buwis'], tab: 'taxes', label: 'Open Taxes' },
   { terms: ['category', 'categories'], tab: 'categories', label: 'Open Categories' },
   { terms: ['personal notes', 'note', 'notes'], tab: 'personal-notes', label: 'Open Personal Notes' },
   { terms: ['personal routines', 'routine', 'routines'], tab: 'personal-routines', label: 'Open Personal Routines' },
@@ -94,7 +94,7 @@ const routes = [
   { terms: ['setting', 'backup', 'export', 'import', 'theme'], tab: 'settings', label: 'Open Settings' }
 ];
 
-const directNavigation = /\b(open|go to|take me to|show me|navigate to)\b/i;
+const directNavigation = /\b(open|go to|take me to|show me|navigate to|buksan|pumunta|puntahan|ipakita|dalhin ako)\b/i;
 
 const workflows = [
   { terms: ['monthly review', 'month end', 'month-end', 'financial review', 'reconcile'], text: 'For a local monthly review, check Accounts for recorded transactions, Plans for budgets and goals, Taxes for obligations, and use the statement export when you are ready. No external AI is needed for this workflow.', tab: 'home', label: 'Open Home' },
@@ -126,12 +126,12 @@ function today() {
 function dateFromMessage(message: string) {
   const iso = message.match(/\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b/);
   if (iso) return iso[1] + '-' + iso[2].padStart(2, '0') + '-' + iso[3].padStart(2, '0');
-  if (/\byesterday\b/i.test(message)) {
+  if (/\b(?:yesterday|kahapon)\b/i.test(message)) {
     const date = new Date();
     date.setDate(date.getDate() - 1);
     return date.toISOString().slice(0, 10);
   }
-  if (/\btomorrow\b/i.test(message)) {
+  if (/\b(?:tomorrow|bukas)\b/i.test(message)) {
     const date = new Date();
     date.setDate(date.getDate() + 1);
     return date.toISOString().slice(0, 10);
@@ -140,30 +140,30 @@ function dateFromMessage(message: string) {
 }
 
 function cleanPhrase(value: string) {
-  return value.replace(/\b(?:from|using|via|with|through)\b.*$/i, '').replace(/\bmy\s+/i, '').replace(/\b(?:today|yesterday|tomorrow)\b/ig, '').replace(/[,.!?]+$/g, '').trim();
+  return value.replace(/\b(?:from|using|via|with|through|gamit(?:\s+ang)?|mula(?:\s+sa)?)\b.*$/i, '').replace(/\b(?:my|ang)\s+/i, '').replace(/\b(?:today|yesterday|tomorrow|ngayon|kahapon|bukas)\b/ig, '').replace(/[,.!?]+$/g, '').trim();
 }
 
 function inferExpenseCategory(value: string) {
   const normalized = value.toLowerCase();
   const categories: Array<[RegExp, string]> = [
-    [/\b(food|meal|breakfast|lunch|dinner|snack|grocer\w*|restaurant|cafe|coffee|delivery)\b/, 'Food'],
-    [/\b(transport|commute|fare|fuel|gas|gasoline|parking|grab|taxi|bus|train)\b/, 'Transport'],
-    [/\b(rent|housing|mortgage)\b/, 'Housing'],
-    [/\b(electric|electricity|water|internet|wifi|mobile|phone|utility|utilities)\b/, 'Utilities'],
-    [/\b(doctor|medical|medicine|pharmacy|hospital|health)\b/, 'Health'],
-    [/\b(course|tuition|book|education|school|training)\b/, 'Education'],
-    [/\b(movie|game|concert|netflix|spotify|entertainment)\b/, 'Entertainment'],
-    [/\b(clothes|clothing|shopping|shop|store)\b/, 'Shopping']
+    [/\b(food|meal|breakfast|lunch|dinner|snack|grocer\w*|restaurant|cafe|coffee|delivery|pagkain|ulam|tanghalian|hapunan|almusal|meryenda|kape)\b/, 'Food'],
+    [/\b(transport|commute|fare|fuel|gas|gasoline|parking|grab|taxi|bus|train|pamasahe|biyahe|gasolina)\b/, 'Transport'],
+    [/\b(rent|housing|mortgage|upa|bahay)\b/, 'Housing'],
+    [/\b(electric|electricity|water|internet|wifi|mobile|phone|utility|utilities|kuryente|tubig|load)\b/, 'Utilities'],
+    [/\b(doctor|medical|medicine|pharmacy|hospital|health|gamot|ospital|doktor)\b/, 'Health'],
+    [/\b(course|tuition|book|education|school|training|paaralan|eskwela|kurso)\b/, 'Education'],
+    [/\b(movie|game|concert|netflix|spotify|entertainment|sine|laro)\b/, 'Entertainment'],
+    [/\b(clothes|clothing|shopping|shop|store|damit|pamimili)\b/, 'Shopping']
   ];
   return categories.find(([pattern]) => pattern.test(normalized))?.[1] || titleCase(value);
 }
 
 function transactionAccountHint(message: string, intent: TransactionDraft['type']) {
   const destination = intent === 'income'
-    ? message.match(/\b(?:to|into)\s+(?:my\s+)?([^,.!?]+)/i)
+    ? message.match(/\b(?:to|into|sa|papunta\s+sa|pumasok\s+sa)\s+(?:my\s+)?([^,.!?]+)/i)
     : null;
   const account = destination
-    || message.match(/\b(?:from|using|via|with|through)\s+(?:my\s+)?([^,.!?]+)/i)
+    || message.match(/\b(?:from|using|via|with|through|gamit(?:\s+ang)?)\s+(?:my\s+)?([^,.!?]+)/i)
     || message.match(/\b(?:paid|paying)\s+(?:by|with)\s+(?:my\s+)?([^,.!?]+)/i)
     || message.match(/\bused\s+(?:my\s+)?(.+?)\s+to\s+(?:buy|pay|purchase|order)\b/i)
     || message.match(/,\s*(?:my\s+)?([^,.!?]+)\s*$/);
@@ -172,10 +172,10 @@ function transactionAccountHint(message: string, intent: TransactionDraft['type'
 
 function parseTransactionCommand(message: string): TransactionDraft | null {
   const normalized = message.trim();
-  const isExpense = /\b(spent|spend|paid|pay|bought|buy|purchase|purchased|charged|charge|ordered|order|expense|cash out)\b/i.test(normalized)
+  const isExpense = /\b(spent|spend|paid|pay|bought|buy|purchase|purchased|charged|charge|ordered|order|expense|cash out|gumastos|nagastos|bumili|binili|nagbayad|bayad|umorder)\b/i.test(normalized)
     || (/\bused\b/i.test(normalized) && /\b(?:for|to\s+(?:buy|pay)|at)\b/i.test(normalized));
   const intent = isExpense ? 'expense'
-    : /\b(earned|receive|received|income|salary|got paid|made|sold|sale|deposited|deposit|credited|credit)\b/i.test(normalized) ? 'income'
+    : /\b(earned|receive|received|income|salary|got paid|made|sold|sale|deposited|deposit|credited|credit|kumita|nakatanggap|natanggap|sweldo|sahod|binayaran ako)\b/i.test(normalized) ? 'income'
       : null;
   if (!intent) return null;
   const amountMatch = normalized.match(/(?:\u20B1|php|pesos?|\$)?\s*(\d[\d,]*(?:\.\d{1,2})?)/i);
@@ -184,17 +184,19 @@ function parseTransactionCommand(message: string): TransactionDraft | null {
   if (!Number.isFinite(amount) || amount <= 0) return null;
 
   const accountHint = transactionAccountHint(normalized, intent);
-  const reasonMatch = normalized.match(/\b(?:on|for)\s+(.+?)(?:\s*(?:,|\bfrom\b|\busing\b|\bvia\b|\bwith\b)|$)/i);
+  const reasonMatch = normalized.match(/\b(?:on|for|sa|para\s+sa)\s+(.+?)(?:\s*(?:,|\bfrom\b|\busing\b|\bvia\b|\bwith\b|\bgamit\b|\bmula\b)|$)/i);
   // Covers natural purchase wording such as "bought food for 400 pesos".
   // Prefer the item before the amount over the generic "for <...>" phrase.
   const purchaseReason = intent === 'expense'
     ? normalized.match(/\b(?:bought|buy|purchase(?:d)?|ordered|order)\s+(.+?)\s+(?:for|worth)\s+(?:(?:\u20B1|php|pesos?)?\s*\d)/i)?.[1]
+      || normalized.match(/\b(?:bumili|binili|umorder)\s+(?:ako\s+)?ng\s+(.+?)\s+(?:na|ng|sa\s+halagang)\s+(?:(?:\u20B1|php|pesos?)?\s*\d)/i)?.[1]
     : undefined;
-  const leadingReason = normalized.match(/^(?:for|on)\s+(.+?)[,;:-]\s*(?:i\s+)?(?:spent|paid|bought|purchased|ordered)\b/i)?.[1];
+  const leadingReason = normalized.match(/^(?:for|on|para\s+sa)\s+(.+?)[,;:-]\s*(?:i\s+)?(?:spent|paid|bought|purchased|ordered|gumastos|nagbayad|bumili)\b/i)?.[1];
   const paidToReason = intent === 'expense'
     ? normalized.match(/\b(?:paid|pay)\s+(?:(?:\u20B1|php|pesos?)?\s*\d[\d,]*(?:\.\d{1,2})?)\s+to\s+(.+?)(?:\s+(?:from|using|via|with|through)|$)/i)?.[1]
     : undefined;
-  const rawReason = cleanPhrase(purchaseReason || leadingReason || paidToReason || reasonMatch?.[1] || (intent === 'income' ? 'Income' : 'General')).replace(/\b(?:today|yesterday|tomorrow)\b/ig, '').trim() || (intent === 'income' ? 'Income' : 'General');
+  const reasonIsIncomeDestination = intent === 'income' && Boolean(reasonMatch?.[1] && accountHint && cleanPhrase(reasonMatch[1]).toLowerCase() === accountHint.toLowerCase());
+  const rawReason = cleanPhrase(purchaseReason || leadingReason || paidToReason || (reasonIsIncomeDestination ? undefined : reasonMatch?.[1]) || (intent === 'income' ? 'Income' : 'General')).replace(/\b(?:today|yesterday|tomorrow|ngayon|kahapon|bukas)\b/ig, '').trim() || (intent === 'income' ? 'Income' : 'General');
   const category = intent === 'expense' ? inferExpenseCategory(rawReason) : titleCase(rawReason);
   const description = category === 'General' || category === 'Income' ? '' : category;
 
@@ -216,8 +218,8 @@ function amountFrom(value: string) {
 }
 
 function parseInvestmentCommand(message: string): InvestmentDraft | null {
-  if (!/\b(bought|buy|purchased|purchase|invested|invest|added|add|put)\b/i.test(message)) return null;
-  const tickerMatch = message.match(/\b(?:on|of|in|into)\s+(?:shares?\s+of\s+)?([a-z][a-z0-9.-]{0,9})\b/i);
+  if (!/\b(bought|buy|purchased|purchase|invested|invest|added|add|put|bumili|binili|nag-invest)\b/i.test(message)) return null;
+  const tickerMatch = message.match(/\b(?:on|of|in|into|ng|sa)\s+(?:shares?\s+of\s+)?([a-z][a-z0-9.-]{0,9})\b/i);
   if (!tickerMatch) return null;
   const ticker = tickerMatch[1].toUpperCase();
   if (['CASH', 'FOOD', 'GROCERIES', 'THIS', 'THAT', 'IT'].includes(ticker)) return null;
@@ -245,11 +247,12 @@ function parseInvestmentCommand(message: string): InvestmentDraft | null {
 }
 
 function parseTransferCommand(message: string): TransferDraft | null {
-  if (!/\b(?:transfer|move|send|cash\s?-?in|top\s?-?up)\b/i.test(message)) return null;
-  const topUp = message.match(/\b(?:top\s?-?up|cash\s?-?in)\s+(?:my\s+)?(.+?)\s+(?:with|for)\s+(.+?)(?:\s+from\s+(.+))?$/i);
+  if (!/\b(?:transfer|move|send|cash\s?-?in|top\s?-?up|ilipat|maglipat|lipat|lagyan)\b/i.test(message)) return null;
+  const topUp = message.match(/\b(?:top\s?-?up|cash\s?-?in)\s+(?:my\s+)?(.+?)\s+(?:with|for)\s+(.+?)(?:\s+from\s+(.+))?$/i)
+    || message.match(/\b(?:lagyan|lagyan\s+ko)\s+(?:ang\s+)?(.+?)\s+ng\s+(.+?)(?:\s+mula(?:\s+sa)?\s+(.+))?$/i);
   const amount = topUp ? amountFrom(topUp[2]) : amountFrom(message);
-  const fromMatch = message.match(/\bfrom\s+(.+?)(?:\s+to\s+|\s+into\s+|$)/i);
-  const toMatch = message.match(/\b(?:to|into)\s+(.+?)(?:\s+from\s+|$)/i);
+  const fromMatch = message.match(/\b(?:from|mula(?:\s+sa)?)\s+(.+?)(?:\s+to\s+|\s+into\s+|\s+papunta|$)/i);
+  const toMatch = message.match(/\b(?:to|into|papunta(?:ng|\s+sa)?|sa)\s+(.+?)(?:\s+(?:from|mula)\s+|$)/i);
   const fromHint = cleanPhrase(topUp?.[3] || fromMatch?.[1] || '');
   const toHint = cleanPhrase(topUp?.[1] || toMatch?.[1] || '');
   if (!amount || !fromHint || !toHint) return null;
