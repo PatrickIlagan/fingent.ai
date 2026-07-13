@@ -1,7 +1,7 @@
 {
   "name": "fingent",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Personal finance, business, freelancing, and career management dashboard.",
   "type": "module",
   "main": "desktop/main.cjs",
@@ -92,7 +92,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
     },
     "portable": {
       "artifactName": "FinGent-Portable-${version}-${arch}.${ext}"

@@ -20,7 +20,7 @@ Build a standalone Windows installer with:
 npm run desktop:dist
 ```
 
-The release artifacts are written to `release/`. Install the `FinGent-<version>-x64.exe` setup file (or use the portable `.exe`). The desktop app uses a loopback-only local server and stores its database under `%APPDATA%\FinGent\fingent.db`; uninstalling or updating the app does not remove that data. Use the in-app database backup export before moving computers.
+The release artifacts are written to `release/`. Install the `FinGent-<version>-x64.exe` setup file (or use the portable `.exe`). The installer upgrades the existing FinGent installation in place. The desktop app stores its encrypted database under `%APPDATA%\FinGent\fingent.db`, outside the install directory; updating or uninstalling the app does not remove that data. Close FinGent before installing an update so Windows can replace its executable safely. Use the in-app encrypted Drive backup before moving computers.
 
 ## Android (native, offline)
 
