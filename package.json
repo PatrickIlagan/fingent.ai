@@ -1,7 +1,7 @@
 {
   "name": "fingent",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Personal finance, business, freelancing, and career management dashboard.",
   "type": "module",
   "main": "desktop/main.cjs",
@@ -12,7 +12,7 @@
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "lint": "tsc --noEmit",
     "desktop:dev": "npm run build && electron .",
-    "desktop:dist": "npm run build && electron-builder --win nsis portable",
+    "desktop:dist": "npm run build && electron-builder --win nsis",
     "desktop:restore-node-modules": "npm rebuild better-sqlite3 better-sqlite3-multiple-ciphers sqlite3",
     "android:sync": "npm run build && cap sync android",
     "android:apk": "node scripts/android-build.cjs"
@@ -83,8 +83,7 @@
     },
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ]
     },
     "nsis": {
@@ -94,9 +93,6 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": false
-    },
-    "portable": {
-      "artifactName": "FinGent-Portable-${version}-${arch}.${ext}"
     }
   }
 }
