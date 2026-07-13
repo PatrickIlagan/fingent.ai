@@ -34,7 +34,20 @@ npm run android:apk
 
 The resulting installable file is `android\\app\\build\\outputs\\apk\\debug\\app-debug.apk`. On this development computer, the build command automatically uses FinGent's local JDK 21 build tool; on another computer, set `JAVA_HOME` to a JDK 21 installation first. The Android project targets Android 16 and supports Android 7.0 or later.
 
-The Android database is local-only but is not yet protected by an app passcode. Do not treat a debug APK as a production security release. Cloud Drive backup/restore and live market-price refresh are intentionally not enabled in the offline Android adapter yet; the app retains locally saved values instead.
+The Android database is local-only but is not yet protected by an app passcode. Do not treat a debug APK as a production security release. Live market-price refresh keeps the last saved prices when the device is offline.
+
+### Cross-device Google Drive sync
+
+Google Drive sync now works through one portable `FINGENT_SYNC_V1` snapshot, so a backup made on Android can be restored on Windows and vice versa. Before upload, the snapshot is encrypted in the app with AES-256-GCM and a password; Google Drive receives only the encrypted file in its private app-data folder.
+
+Set up the same Google/Firebase project for both clients:
+
+1. Enable **Google** in Firebase Authentication and enable the **Google Drive API** in the linked Google Cloud project.
+2. Add the Firebase web configuration to `.env.local` using the `VITE_FIREBASE_*` values in `.env.example` (used by the browser/Windows app).
+3. In Firebase, add Android app ID `ai.fingent.mobile`, register the debug/release SHA-1 fingerprints that you sign with, then save its downloaded `google-services.json` as `android/app/google-services.json`. It is intentionally ignored by Git.
+4. Rebuild with `npm run android:apk` after adding the Android file.
+
+The optional Gemini BYOK assistant calls Gemini directly from each app using the user-provided session-only key. It uses the same fixed, privacy-safe prompt on desktop and Android: no chat text, history, names, financial values, balances, categories, or records leave FinGent.
 
 ## Checks
 

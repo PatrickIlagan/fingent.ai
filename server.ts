@@ -72,6 +72,7 @@ async function upsertPersonalCategory(db: any, name: string, type: 'income' | 'e
 }
 
 const DRIVE_BACKUP_NAME = 'fingent-backup.enc';
+const SYNC_TABLES = ['accounts', 'transactions', 'categories', 'goals', 'portfolios', 'portfolio_transactions', 'liabilities', 'career', 'career_tasks', 'personal_notes', 'personal_routines', 'personal_routine_logs', 'calendar_events', 'income_flows', 'budget_presets', 'budgets', 'businesses', 'business_deals', 'business_items', 'business_transactions', 'freelance_businesses', 'freelancing_services', 'freelancing_invoices', 'freelancing_time_logs'];
 
 function encryptBackup(source: Buffer, password: string) {
   const salt = crypto.randomBytes(16);
@@ -313,6 +314,43 @@ To run FinGent as a desktop application:
     } finally {
       if (req.file && fsModule.existsSync(req.file.path)) fsModule.unlinkSync(req.file.path);
     }
+  });
+
+  // Platform-neutral snapshot used by the desktop and Android Google Drive sync.
+  // The encrypted payload is created in the client before it is sent to Drive.
+  app.get('/api/system/sync/export', async (_req, res) => {
+    try {
+      const db = await getDb();
+      const tables: Record<string, unknown[]> = {};
+      for (const table of SYNC_TABLES) tables[table] = await db.all(`SELECT * FROM ${table}`);
+      res.json({ format: 'FINGENT_SYNC_V1', exportedAt: new Date().toISOString(), tables });
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
+  });
+
+  app.post('/api/system/sync/import', async (req, res) => {
+    try {
+      const snapshot = req.body;
+      if (snapshot?.format !== 'FINGENT_SYNC_V1' || !snapshot.tables || typeof snapshot.tables !== 'object') return res.status(400).json({ error: 'This is not a FinGent sync backup.' });
+      const db = await getDb();
+      await db.exec('PRAGMA foreign_keys = OFF; BEGIN;');
+      try {
+        for (const table of [...SYNC_TABLES].reverse()) await db.run(`DELETE FROM ${table}`);
+        for (const table of SYNC_TABLES) {
+          const columns = (await db.all(`PRAGMA table_info(${table})`)).map((column: any) => column.name);
+          const rows = Array.isArray(snapshot.tables[table]) ? snapshot.tables[table] : [];
+          for (const row of rows) {
+            const keys = columns.filter((column: string) => Object.prototype.hasOwnProperty.call(row, column));
+            if (!keys.length) continue;
+            await db.run(`INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`, keys.map((key: string) => row[key]));
+          }
+        }
+        await db.exec('COMMIT; PRAGMA foreign_keys = ON;');
+      } catch (error) {
+        await db.exec('ROLLBACK; PRAGMA foreign_keys = ON;');
+        throw error;
+      }
+      res.json({ success: true });
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
   });
 
   app.get("/api/health", (req, res) => {

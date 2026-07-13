@@ -1,11 +1,11 @@
 import React, { useState, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { Settings as SettingsIcon, Bot, CheckCircle2, Download, Upload, Shield, KeyRound, LockKeyhole, Moon, Sun, RefreshCw, CloudUpload, CloudDownload, AlertTriangle, Monitor, Save, FileSpreadsheet, FileText } from 'lucide-react';
-import { auth, googleProvider, isFirebaseConfigured } from '../lib/firebase';
-import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
+import { isFirebaseConfigured } from '../lib/firebase';
 import { getByokSettings, saveByokSettings, testByokKey } from '../lib/byokAssistant';
 import { exportEverythingWorkbook } from '../lib/workbookExport';
 import { exportEverythingPdfStatement } from '../lib/export';
+import { restoreFromDrive, syncToDrive } from '../lib/driveSync';
 
 export function Settings() {
   const { themeMode, setThemeMode, triggerRefresh } = useStore();
@@ -53,26 +53,10 @@ export function Settings() {
   };
 
   const handleDriveUpload = async () => {
-    if (!encPassword) return alert("Please enter an encryption password first in the field above.");
-    if (!auth || !isFirebaseConfigured) return alert('Google Drive is not configured. Add the VITE_FIREBASE_* values to .env.local, enable Google sign-in, and enable Google Drive API.');
     try {
       setDriveSyncing(true);
-      const result = await signInWithPopup(auth, googleProvider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      const token = credential?.accessToken;
-      if (!token) throw new Error("No access token");
-
-      const res = await fetch('/api/system/drive/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessToken: token, password: encPassword })
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert("Successfully encrypted and synced to Google Drive!");
-      } else {
-        alert("Failed to sync: " + data.error);
-      }
+      await syncToDrive(encPassword);
+      alert('Encrypted cross-device backup synced to Google Drive.');
     } catch(err: any) {
       alert("Drive sync failed: " + err.message);
     } finally {
@@ -81,28 +65,11 @@ export function Settings() {
   };
 
   const handleDriveDownload = async () => {
-    if (!encPassword) return alert("Please enter the exact encryption password used during backup in the field above.");
-    if (!auth || !isFirebaseConfigured) return alert('Google Drive is not configured. Add the VITE_FIREBASE_* values to .env.local, enable Google sign-in, and enable Google Drive API.');
     try {
       setDriveSyncing(true);
-      const result = await signInWithPopup(auth, googleProvider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      const token = credential?.accessToken;
-      if (!token) throw new Error("No access token");
-
-      const res = await fetch('/api/system/drive/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessToken: token, password: encPassword })
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert("Successfully restored from Google Drive!");
-        triggerRefresh();
-        window.location.reload();
-      } else {
-        alert("Failed to restore: " + data.error);
-      }
+      await restoreFromDrive(encPassword);
+      alert('Cross-device backup restored from Google Drive.');
+      triggerRefresh(); window.location.reload();
     } catch(err: any) {
       alert("Drive restore failed: " + err.message);
     } finally {

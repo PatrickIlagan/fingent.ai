@@ -29,6 +29,10 @@ const collections: Record<string, string> = {
   '/api/freelancing/time_logs': 'freelancing_time_logs',
 };
 
+const syncTableCollections: Record<string, string> = {
+  accounts: 'accounts', transactions: 'transactions', categories: 'categories', goals: 'goals', portfolios: 'portfolios', portfolio_transactions: 'portfolio_transactions', liabilities: 'liabilities', career: 'career_profile', career_tasks: 'career_tasks', personal_notes: 'personal_notes', personal_routines: 'personal_routines', calendar_events: 'calendar_events', income_flows: 'income_flows', budget_presets: 'budget_presets', budgets: 'budgets', businesses: 'businesses', business_deals: 'business_deals', business_items: 'business_items', business_transactions: 'business_transactions', freelance_businesses: 'freelance_businesses', freelancing_services: 'freelancing_services', freelancing_invoices: 'freelancing_invoices', freelancing_time_logs: 'freelancing_time_logs',
+};
+
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
   status,
   headers: { 'Content-Type': 'application/json' },
@@ -53,6 +57,15 @@ async function getDatabase() {
       updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS mobile_records_collection ON mobile_records (collection, id);
+    CREATE TABLE IF NOT EXISTS mobile_records_v2 (
+      collection TEXT NOT NULL,
+      id INTEGER NOT NULL,
+      payload TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (collection, id)
+    );
+    INSERT OR IGNORE INTO mobile_records_v2 (collection, id, payload, updated_at)
+      SELECT collection, id, payload, updated_at FROM mobile_records;
     CREATE TABLE IF NOT EXISTS mobile_routine_logs (
       routine_id INTEGER NOT NULL,
       date TEXT NOT NULL,
@@ -64,13 +77,13 @@ async function getDatabase() {
 
 async function list(collection: string): Promise<JsonRecord[]> {
   const db = await getDatabase();
-  const result = await db.query('SELECT id, payload, updated_at FROM mobile_records WHERE collection = ? ORDER BY id DESC', [collection]);
+  const result = await db.query('SELECT id, payload, updated_at FROM mobile_records_v2 WHERE collection = ? ORDER BY id DESC', [collection]);
   return (result.values ?? []).map((row: any) => ({ ...JSON.parse(row.payload), id: row.id, updated_at: row.updated_at }));
 }
 
 async function find(collection: string, id: string | number) {
   const db = await getDatabase();
-  const result = await db.query('SELECT id, payload, updated_at FROM mobile_records WHERE collection = ? AND id = ?', [collection, Number(id)]);
+  const result = await db.query('SELECT id, payload, updated_at FROM mobile_records_v2 WHERE collection = ? AND id = ?', [collection, Number(id)]);
   const row: any = result.values?.[0];
   return row ? { ...JSON.parse(row.payload), id: row.id, updated_at: row.updated_at } as JsonRecord : null;
 }
@@ -78,18 +91,50 @@ async function find(collection: string, id: string | number) {
 async function insert(collection: string, payload: JsonRecord) {
   const db = await getDatabase();
   const timestamp = new Date().toISOString();
-  const result = await db.run('INSERT INTO mobile_records (collection, payload, updated_at) VALUES (?, ?, ?)', [collection, JSON.stringify(payload), timestamp]);
-  return Number(result.changes?.lastId);
+  const next = await db.query('SELECT COALESCE(MAX(id), 0) + 1 AS id FROM mobile_records_v2 WHERE collection = ?', [collection]);
+  const id = Number(next.values?.[0]?.id ?? 1);
+  await db.run('INSERT INTO mobile_records_v2 (collection, id, payload, updated_at) VALUES (?, ?, ?, ?)', [collection, id, JSON.stringify(payload), timestamp]);
+  return id;
 }
 
 async function replace(collection: string, id: string | number, payload: JsonRecord) {
   const db = await getDatabase();
-  await db.run('UPDATE mobile_records SET payload = ?, updated_at = ? WHERE collection = ? AND id = ?', [JSON.stringify(payload), new Date().toISOString(), collection, Number(id)]);
+  await db.run('UPDATE mobile_records_v2 SET payload = ?, updated_at = ? WHERE collection = ? AND id = ?', [JSON.stringify(payload), new Date().toISOString(), collection, Number(id)]);
 }
 
 async function remove(collection: string, id: string | number) {
   const db = await getDatabase();
-  await db.run('DELETE FROM mobile_records WHERE collection = ? AND id = ?', [collection, Number(id)]);
+  await db.run('DELETE FROM mobile_records_v2 WHERE collection = ? AND id = ?', [collection, Number(id)]);
+}
+
+async function exportSyncSnapshot() {
+  const tables: Record<string, JsonRecord[]> = {};
+  for (const [table, collection] of Object.entries(syncTableCollections)) {
+    tables[table] = (await list(collection)).map(({ updated_at, ...row }) => row);
+  }
+  const db = await getDatabase();
+  const routineLogs = await db.query('SELECT routine_id, date FROM mobile_routine_logs');
+  tables.personal_routine_logs = (routineLogs.values ?? []) as JsonRecord[];
+  return { format: 'FINGENT_SYNC_V1', exportedAt: new Date().toISOString(), tables };
+}
+
+async function importSyncSnapshot(snapshot: any) {
+  if (!snapshot || snapshot.format !== 'FINGENT_SYNC_V1' || typeof snapshot.tables !== 'object') throw new Error('This is not a FinGent sync backup.');
+  const db = await getDatabase();
+  await db.execute('DELETE FROM mobile_records_v2; DELETE FROM mobile_routine_logs;');
+  for (const [table, collection] of Object.entries(syncTableCollections)) {
+    const records = Array.isArray(snapshot.tables[table]) ? snapshot.tables[table] : [];
+    for (const raw of records) {
+      const row = raw as JsonRecord;
+      const id = Number(row.id);
+      if (!Number.isInteger(id) || id <= 0) continue;
+      const { id: _id, ...payload } = row;
+      await db.run('INSERT OR REPLACE INTO mobile_records_v2 (collection, id, payload, updated_at) VALUES (?, ?, ?, ?)', [collection, id, JSON.stringify(payload), new Date().toISOString()]);
+    }
+  }
+  for (const row of Array.isArray(snapshot.tables.personal_routine_logs) ? snapshot.tables.personal_routine_logs : []) {
+    await db.run('INSERT OR REPLACE INTO mobile_routine_logs (routine_id, date) VALUES (?, ?)', [Number(row.routine_id), String(row.date)]);
+  }
 }
 
 function byBusiness(records: JsonRecord[], businessId: string | null) {
@@ -204,6 +249,11 @@ async function portfolioTransaction(portfolioId: string, body: JsonRecord) {
 
 async function route(pathname: string, search: URLSearchParams, method: string, body: JsonRecord) {
   if (pathname === '/api/health') return json({ status: 'ok', platform: 'android-native' });
+  if (pathname === '/api/system/sync/export' && method === 'GET') return json(await exportSyncSnapshot());
+  if (pathname === '/api/system/sync/import' && method === 'POST') {
+    await importSyncSnapshot(body);
+    return json({ success: true });
+  }
   if (pathname === '/api/wealth') {
     const accounts = await list('accounts');
     return json({ totalCash: accounts.reduce((sum, account) => sum + number(account.balance), 0), portfolios: await list('portfolios') });
