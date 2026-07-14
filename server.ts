@@ -112,6 +112,43 @@ function validateDatabase(databasePath: string) {
   }
 }
 
+type AppLockRecord = { version: 1; salt: string; verifier: string };
+const APP_LOCK_ITERATIONS = 600_000;
+
+function appLockPath() {
+  return path.join(getDataDir(), 'app-lock.json');
+}
+
+function readAppLock(): AppLockRecord | null {
+  try {
+    const record = JSON.parse(fsModule.readFileSync(appLockPath(), 'utf8'));
+    if (record?.version !== 1 || typeof record.salt !== 'string' || typeof record.verifier !== 'string') return null;
+    return record as AppLockRecord;
+  } catch {
+    return null;
+  }
+}
+
+function matchesAppLock(password: string, record: AppLockRecord) {
+  try {
+    const expected = Buffer.from(record.verifier, 'base64');
+    const actual = crypto.pbkdf2Sync(password, Buffer.from(record.salt, 'base64'), APP_LOCK_ITERATIONS, 32, 'sha256');
+    return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
+}
+
+function saveAppLock(password: string) {
+  const salt = crypto.randomBytes(16);
+  const verifier = crypto.pbkdf2Sync(password, salt, APP_LOCK_ITERATIONS, 32, 'sha256');
+  const target = appLockPath();
+  const temporary = `${target}.tmp`;
+  fsModule.mkdirSync(path.dirname(target), { recursive: true });
+  fsModule.writeFileSync(temporary, JSON.stringify({ version: 1, salt: salt.toString('base64'), verifier: verifier.toString('base64') }), { encoding: 'utf8', mode: 0o600 });
+  fsModule.renameSync(temporary, target);
+}
+
 
 async function startServer() {
   const app = express();
@@ -131,6 +168,38 @@ async function startServer() {
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
     next();
+  });
+
+  // The Electron wrapper uses a fresh loopback port on every launch. Store the
+  // password verifier beside the encrypted database instead of browser storage,
+  // whose origin is tied to that changing port. The password itself is never written.
+  app.get('/api/system/lock/status', (_req, res) => {
+    res.json({ configured: Boolean(readAppLock()) });
+  });
+
+  app.post('/api/system/lock/setup', async (req, res) => {
+    try {
+      const password = String(req.body?.password || '');
+      if (password.length < 12) return res.status(400).json({ error: 'Use at least 12 characters for the app password.' });
+      if (readAppLock()) return res.status(409).json({ error: 'An app password is already configured.' });
+      // Do not persist a verifier until the supplied password has unlocked (or
+      // initialized) the encrypted database. This avoids locking the user out
+      // if they mistype the existing password during the one-time migration.
+      await unlockDatabase(password);
+      saveAppLock(password);
+      res.json({ success: true });
+    } catch (error: any) { res.status(401).json({ error: error.message || 'Could not protect FinGent.' }); }
+  });
+
+  app.post('/api/system/lock/unlock', async (req, res) => {
+    try {
+      const password = String(req.body?.password || '');
+      const record = readAppLock();
+      if (!record) return res.status(409).json({ error: 'No app password is configured yet.' });
+      if (!matchesAppLock(password, record)) return res.status(401).json({ error: 'Incorrect password.' });
+      await unlockDatabase(password);
+      res.json({ success: true });
+    } catch (error: any) { res.status(401).json({ error: error.message || 'Could not unlock FinGent.' }); }
   });
 
   app.post('/api/system/unlock', async (req, res) => {

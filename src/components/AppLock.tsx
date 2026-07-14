@@ -9,7 +9,13 @@ export function AppLock({ children, onUnlock }: { children: ReactNode; onUnlock:
   const [error, setError] = useState('');
   const [working, setWorking] = useState(false);
 
-  useEffect(() => { setMode(hasAppLock() ? 'unlock' : 'setup'); }, []);
+  useEffect(() => {
+    let active = true;
+    void hasAppLock()
+      .then(configured => { if (active) setMode(configured ? 'unlock' : 'setup'); })
+      .catch(reason => { if (active) { setError(reason instanceof Error ? reason.message : 'Could not verify app protection.'); setMode('setup'); } });
+    return () => { active = false; };
+  }, []);
   if (mode === 'checking') return null;
   if (mode === 'unlocked') return <>{children}</>;
 
