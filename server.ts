@@ -3,7 +3,7 @@ import multer from "multer";
 import fsModule from "fs";
 import crypto from "crypto";
 import path from "path";
-import Database from "better-sqlite3";
+import Database from "better-sqlite3-multiple-ciphers";
 import { closeDb, getDataDir, getDb, unlockDatabase } from "./server/db";
 // yahoo-finance2 exposes its constructor as CommonJS's `.default`. Using an
 // explicit require keeps the production CJS bundle compatible with Electron.
@@ -634,10 +634,11 @@ To run FinGent as a desktop application:
   app.post("/api/categories", async (req, res) => {
     try {
       const db = await getDb();
-      const { name, type = 'expense' } = req.body;
+      const { name, type = 'expense', keywords = '' } = req.body;
       const normalized = String(name || '').trim();
       if (!normalized) return res.status(400).json({ error: 'A category name is required.' });
       await upsertPersonalCategory(db, normalized, type === 'income' ? 'income' : 'expense');
+      await db.run("UPDATE categories SET keywords = ? WHERE name = ? COLLATE NOCASE", [String(keywords || '').trim(), normalized]);
       const category = await db.get("SELECT * FROM categories WHERE name = ? COLLATE NOCASE", [normalized]);
       res.json(category);
     } catch (error: any) {
@@ -648,12 +649,12 @@ To run FinGent as a desktop application:
   app.put("/api/categories/:id", async (req, res) => {
     try {
       const db = await getDb();
-      const { name, type } = req.body;
+      const { name, type, keywords = '' } = req.body;
       const category = await db.get("SELECT * FROM categories WHERE id = ?", [req.params.id]);
       const normalized = String(name || '').trim();
       if (!category || !normalized) return res.status(400).json({ error: 'Category not found or name is empty.' });
       await db.run("UPDATE transactions SET category = ? WHERE category = ? COLLATE NOCASE", [normalized, category.name]);
-      await db.run("UPDATE categories SET name = ?, type = ?, active = 1 WHERE id = ?", [normalized, type || category.type, category.id]);
+      await db.run("UPDATE categories SET name = ?, type = ?, keywords = ?, active = 1 WHERE id = ?", [normalized, type || category.type, String(keywords || '').trim(), category.id]);
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1305,43 +1306,47 @@ To run FinGent as a desktop application:
     try {
       const db = await getDb();
       const { name, amount, date, is_recurring, budget_preset_id, account_id, category = 'Income' } = req.body;
-      const result = await db.run("INSERT INTO income_flows (name, amount, date, is_recurring, budget_preset_id, account_id, category) VALUES (?, ?, ?, ?, ?, ?, ?)", [name, amount, date, is_recurring ? 1 : 0, budget_preset_id, account_id, category]);
-      await upsertPersonalCategory(db, category, 'income');
-      
-      // Also add to calendar_events
-      await db.run("INSERT INTO calendar_events (name, type, amount, date, color, icon, provider, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [name, 'income', amount, date, 'emerald', 'ArrowDown', 'Manual', 'income_flow']);
-      
-      if (budget_preset_id) {
-         const preset = await db.get("SELECT * FROM budget_presets WHERE id = ?", [budget_preset_id]);
-         if (preset) {
+      const numericAmount = Number(amount);
+      if (!name || !Number.isFinite(numericAmount) || numericAmount <= 0 || !date) return res.status(400).json({ error: 'Name, positive amount, and date are required.' });
+      const linkedAccount = account_id ? await db.get("SELECT id, name FROM accounts WHERE id = ?", [account_id]) : null;
+      if (account_id && !linkedAccount) return res.status(400).json({ error: 'The selected deposit account no longer exists.' });
+      await db.exec('BEGIN');
+      try {
+        const result = await db.run("INSERT INTO income_flows (name, amount, date, is_recurring, budget_preset_id, account_id, category) VALUES (?, ?, ?, ?, ?, ?, ?)", [name, numericAmount, date, is_recurring ? 1 : 0, budget_preset_id, linkedAccount?.id || null, category]);
+        await upsertPersonalCategory(db, category, 'income');
+        await db.run("INSERT INTO calendar_events (name, type, amount, date, color, icon, provider, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [name, 'income', numericAmount, date, 'emerald', 'ArrowDown', 'Manual', 'income_flow']);
+        if (linkedAccount) {
+          await db.run("UPDATE accounts SET balance = balance + ? WHERE id = ?", [numericAmount, linkedAccount.id]);
+          await db.run("INSERT INTO transactions (account_id, type, amount, category, description, notes, date) VALUES (?, 'income', ?, ?, ?, ?, ?)", [linkedAccount.id, numericAmount, category, name, `Auto-deposited from income flow #${result.lastInsertRowid}.`, date]);
+        }
+
+        if (budget_preset_id) {
+          const preset = await db.get("SELECT * FROM budget_presets WHERE id = ?", [budget_preset_id]);
+          if (preset) {
             const allocs = JSON.parse(preset.allocations || '[]');
-            const categories = allocs.map((a: any, i: number) => ({
-               id: Date.now() + i,
-               name: a.name,
-               limit: amount * (a.percentage / 100),
-               spent: 0,
-               color: a.color || 'emerald',
-               categories: a.categories || [],
-               transactions: []
-            }));
-            
-            const budgetData = {
-               id: Date.now(),
-               name: `Auto Budget: ${name} (${preset.name})`,
-               type: is_recurring ? 'recurring' : 'specific',
-               isGrouped: true,
-               startDate: date,
-               endDate: date,
-               totalLimit: amount,
-               groups: categories
-            };
-            
-            await db.run("INSERT INTO budgets (name, total_amount, categories, month) VALUES (?, ?, ?, ?)", [budgetData.name, amount, JSON.stringify(budgetData), date]);
-         }
+            const groups = (Array.isArray(allocs) ? allocs : []).map((allocation: any, index: number) => {
+              const groupLimit = numericAmount * (Number(allocation.percentage) / 100);
+              const children = Array.isArray(allocation.categories) ? allocation.categories : [];
+              return {
+                id: Date.now() + index,
+                name: allocation.name,
+                limit: groupLimit,
+                spent: 0,
+                color: allocation.color || 'emerald',
+                categories: children.map((child: any, childIndex: number) => ({ id: Date.now() + index * 100 + childIndex, name: child.name, limit: groupLimit * (Number(child.percentage) / 100), spent: 0, color: child.color || allocation.color || 'emerald', transactions: [] })),
+                transactions: []
+              };
+            });
+            const budgetData = { id: Date.now(), name: `Auto Budget: ${name} (${preset.name})`, type: is_recurring ? 'recurring' : 'specific', isGrouped: true, startDate: date, endDate: date, totalLimit: numericAmount, groups };
+            await db.run("INSERT INTO budgets (name, total_amount, categories, month) VALUES (?, ?, ?, ?)", [budgetData.name, numericAmount, JSON.stringify(budgetData), date]);
+          }
+        }
+        await db.exec('COMMIT');
+        res.json({ id: result.lastInsertRowid, account: linkedAccount?.name || null, budget_created: Boolean(budget_preset_id) });
+      } catch (error) {
+        await db.exec('ROLLBACK');
+        throw error;
       }
-      
-      
-      res.json({ id: result.lastInsertRowid });
     } catch(err: any) { res.status(500).json({error: err.message}); }
   });
   app.delete("/api/income_flows/:id", async (req, res) => {
@@ -1363,7 +1368,10 @@ To run FinGent as a desktop application:
     try {
       const db = await getDb();
       const { name, allocations } = req.body;
-      const result = await db.run("INSERT INTO budget_presets (name, allocations) VALUES (?, ?)", [name, JSON.stringify(allocations)]);
+      const normalizedName = String(name || '').trim();
+      const normalizedAllocations = Array.isArray(allocations) ? allocations.filter((allocation: any) => String(allocation?.name || '').trim() && Number(allocation?.percentage) > 0) : [];
+      if (!normalizedName || normalizedAllocations.length === 0) return res.status(400).json({ error: 'A model name and at least one positive allocation are required.' });
+      const result = await db.run("INSERT INTO budget_presets (name, allocations) VALUES (?, ?)", [normalizedName, JSON.stringify(normalizedAllocations)]);
       res.json({ id: result.lastInsertRowid });
     } catch(err: any) { res.status(500).json({error: err.message}); }
   });
@@ -1379,7 +1387,31 @@ To run FinGent as a desktop application:
     try {
       const db = await getDb();
       const rows = await db.all("SELECT * FROM budgets");
-      res.json(rows);
+      const expenses = await db.all("SELECT id, amount, category, description, date FROM transactions WHERE type = 'expense'");
+      res.json(rows.map((row: any) => {
+        try {
+          const plan = JSON.parse(row.categories || '{}');
+          const currentMonth = new Date().toISOString().slice(0, 7);
+          const periodExpenses = expenses.filter((transaction: any) => plan.type === 'specific'
+            ? (!plan.startDate || transaction.date >= plan.startDate) && (!plan.endDate || transaction.date <= plan.endDate)
+            : String(transaction.date || '').startsWith(currentMonth));
+          plan.groups = (Array.isArray(plan.groups) ? plan.groups : []).map((group: any) => {
+            const children = Array.isArray(group.categories) ? group.categories : [];
+            if (!children.length) {
+              const transactions = periodExpenses.filter((transaction: any) => String(transaction.category).toLowerCase() === String(group.name).toLowerCase());
+              return { ...group, transactions, spent: transactions.reduce((sum: number, transaction: any) => sum + Number(transaction.amount || 0), 0) };
+            }
+            const categories = children.map((budgetCategory: any) => {
+              const transactions = periodExpenses.filter((transaction: any) => String(transaction.category).toLowerCase() === String(budgetCategory.name).toLowerCase());
+              return { ...budgetCategory, transactions, spent: transactions.reduce((sum: number, transaction: any) => sum + Number(transaction.amount || 0), 0) };
+            });
+            return { ...group, categories, spent: categories.reduce((sum: number, budgetCategory: any) => sum + Number(budgetCategory.spent || 0), 0) };
+          });
+          return { ...row, categories: JSON.stringify(plan) };
+        } catch {
+          return row;
+        }
+      }));
     } catch(err: any) { res.status(500).json({error: err.message}); }
   });
   app.post("/api/budgets", async (req, res) => {
@@ -1498,6 +1530,16 @@ To run FinGent as a desktop application:
      } catch(e: any) {
         res.status(500).json({ error: e.message });
      }
+  });
+
+  app.put("/api/budget_presets/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { name, allocations } = req.body;
+      if (!String(name || '').trim() || !Array.isArray(allocations) || allocations.length === 0) return res.status(400).json({ error: 'A model name and allocations are required.' });
+      await db.run("UPDATE budget_presets SET name = ?, allocations = ? WHERE id = ?", [String(name).trim(), JSON.stringify(allocations), req.params.id]);
+      res.json({ success: true });
+    } catch(err: any) { res.status(500).json({error: err.message}); }
   });
 
   app.put("/api/transactions/:id", async (req, res) => {

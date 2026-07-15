@@ -3,7 +3,7 @@ import { useStore } from '../store/useStore';
 import { Briefcase, CheckCircle2, ChevronRight, TrendingUp, Edit2, Check, X, CalendarDays, Plus, Target } from 'lucide-react';
 
 export function Career({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
-  const { themeMode } = useStore();
+  const { themeMode, triggerRefresh } = useStore();
   const isAdvanced = themeMode === 'advanced';
 
   const [career, setCareer] = useState<any>(null);
@@ -178,7 +178,7 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
       
       <form onSubmit={async (e) => {
          e.preventDefault();
-         await fetch('/api/income_flows', {
+         const response = await fetch('/api/income_flows', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                name: incomeForm.name,
@@ -190,7 +190,19 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
                ,category: incomeForm.category || 'Income'
             })
          });
-         window.location.reload();
+         if (!response.ok) return;
+         const saved = await response.json();
+         setDbIncomeFlows(current => [...current, {
+            id: saved.id,
+            ...incomeForm,
+            amount: parseFloat(incomeForm.amount) || 0,
+            budget_preset_id: parseInt(incomeForm.budget_preset_id) || null,
+            account_id: parseInt(incomeForm.account_id) || null
+         }]);
+         if (incomeForm.account_id) setAccounts(current => current.map(account => String(account.id) === incomeForm.account_id ? { ...account, balance: Number(account.balance || 0) + (parseFloat(incomeForm.amount) || 0) } : account));
+         setIncomeForm({ name: '', amount: '', date: '', category: 'Income', is_recurring: false, budget_preset_id: '', account_id: '' });
+         setIncomeViewMode('list');
+         triggerRefresh();
       }} className={`rounded-3xl p-8 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} space-y-8`}>
          
          <div className="space-y-6">

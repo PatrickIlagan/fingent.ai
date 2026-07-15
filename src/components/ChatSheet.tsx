@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, LockKeyhole, Send, Trash2, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { runLocalCopilot, type CopilotAction, type InvestmentDraft, type OperationDraft, type TransactionDraft, type TransferDraft } from '../lib/localCopilot';
+import { runLocalCopilot, type CopilotAction, type CopilotCategoryHint, type InvestmentDraft, type OperationDraft, type TransactionDraft, type TransferDraft } from '../lib/localCopilot';
 import { getByokGuidance, shouldUseByokGuidance } from '../lib/byokAssistant';
 
 export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; onClose: () => void; onNavigate: (tab: string) => void }) {
@@ -26,7 +26,8 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
     setIsTyping(true);
 
     window.setTimeout(async () => {
-      const reply = runLocalCopilot(userMsg);
+      const categoryHints = await getCategoryHints();
+      const reply = runLocalCopilot(userMsg, categoryHints);
       const accountOptions = reply.transaction ? await getAccountOptions(reply.transaction.accountHint) : undefined;
       const operationAccountOptions = reply.operation?.kind === 'liability'
         ? await getAccountOptions(String(reply.operation.payload.account_hint || ''), reply.operation.payload.type === 'Credits' ? ['card', 'credit'] : undefined)
@@ -210,6 +211,21 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
 
 type AccountOption = { id: number; name: string; type: string };
 type ChatMessage = { role: 'user' | 'agent'; text: string; actions?: CopilotAction[]; transaction?: TransactionDraft; operation?: OperationDraft; investment?: InvestmentDraft; transfer?: TransferDraft; accountOptions?: AccountOption[]; operationAccountOptions?: AccountOption[]; byokGuidance?: string | null };
+
+async function getCategoryHints(): Promise<CopilotCategoryHint[]> {
+  try {
+    const response = await fetch('/api/categories');
+    if (!response.ok) return [];
+    const categories = await response.json();
+    return Array.isArray(categories) ? categories.map(category => ({
+      name: String(category.name || ''),
+      type: String(category.type || 'expense'),
+      keywords: String(category.keywords || '')
+    })).filter(category => category.name) : [];
+  } catch {
+    return [];
+  }
+}
 
 async function getAccountOptions(hint: string, allowedTypes?: string[]): Promise<AccountOption[]> {
   try {

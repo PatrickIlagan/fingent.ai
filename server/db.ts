@@ -96,6 +96,7 @@ async function initDb(db: any) {
   await db.exec(`ALTER TABLE accounts ADD COLUMN due_date INTEGER;`).catch(() => {});
   await db.exec(`ALTER TABLE transactions ADD COLUMN notes TEXT;`).catch(() => {});
   await db.exec(`ALTER TABLE liabilities ADD COLUMN account_id INTEGER;`).catch(() => {});
+  await db.exec(`ALTER TABLE categories ADD COLUMN keywords TEXT DEFAULT '';`).catch(() => {});
 
   
   await db.exec(`
@@ -131,6 +132,7 @@ async function initDb(db: any) {
       name TEXT NOT NULL COLLATE NOCASE UNIQUE,
       type TEXT NOT NULL DEFAULT 'expense',
       active INTEGER NOT NULL DEFAULT 1,
+      keywords TEXT DEFAULT '',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -242,7 +244,11 @@ async function initDb(db: any) {
       business_id INTEGER,
       name TEXT NOT NULL,
       amount REAL NOT NULL,
-      date TEXT NOT NULL
+      date TEXT NOT NULL,
+      is_recurring BOOLEAN DEFAULT 0,
+      budget_preset_id INTEGER,
+      account_id INTEGER,
+      category TEXT DEFAULT 'Income'
     );
 
     CREATE TABLE IF NOT EXISTS budget_presets (

@@ -88,6 +88,9 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
   const [budgetPlanName, setBudgetPlanName] = useState('');
   const [budgetDateRange, setBudgetDateRange] = useState('');
   const [budgetEndDate, setBudgetEndDate] = useState('');
+  const [selectedBudgetPresetId, setSelectedBudgetPresetId] = useState('');
+  const [saveBudgetAsModel, setSaveBudgetAsModel] = useState(false);
+  const [budgetModelName, setBudgetModelName] = useState('');
 
   const [allocations, setAllocations] = useState([
     { id: 1, name: 'Needs', amount: '', percentage: 50, color: 'emerald', categories: [] as any[] },
@@ -98,6 +101,67 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
   const [selectedGoal, setSelectedGoal] = useState<any | null>(null);
   const [selectedBudget, setSelectedBudget] = useState<any | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<any | null>(null);
+
+  const parsedPresetAllocations = (preset: any) => {
+    try {
+      const parsed = JSON.parse(preset?.allocations || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const allocationsFromPreset = (preset: any, totalValue = totalBudgetLimit) => {
+    const total = parseFloat(totalValue) || 0;
+    return parsedPresetAllocations(preset).map((allocation: any, index: number) => {
+      const percentage = Number(allocation.percentage) || 0;
+      const amount = total * (percentage / 100);
+      const rawCategories = Array.isArray(allocation.categories) ? allocation.categories : [];
+      const categoryWeightTotal = rawCategories.reduce((sum: number, item: any) => sum + (Number(item.percentage) || Number(item.limit) || 0), 0);
+      return {
+        id: Date.now() + index,
+        name: allocation.name || `Allocation ${index + 1}`,
+        percentage,
+        amount: amount.toString(),
+        color: allocation.color || 'emerald',
+        categories: rawCategories.map((item: any, categoryIndex: number) => {
+          const weight = Number(item.percentage) || Number(item.limit) || 0;
+          return { ...item, id: Date.now() + index * 100 + categoryIndex, percentage: categoryWeightTotal ? (weight / categoryWeightTotal) * 100 : 0, limit: categoryWeightTotal ? amount * (weight / categoryWeightTotal) : 0, spent: 0, transactions: [] };
+        })
+      };
+    });
+  };
+
+  const normalizedModelAllocations = (source: any[]) => {
+    const amountTotal = source.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+    const suppliedPercentTotal = source.reduce((sum, item) => sum + (Number(item.percentage) || 0), 0);
+    return source.filter(item => String(item.name || '').trim()).map(item => {
+      const groupAmount = parseFloat(item.amount) || 0;
+      const percentage = amountTotal > 0 ? (groupAmount / amountTotal) * 100 : suppliedPercentTotal > 0 ? (Number(item.percentage) / suppliedPercentTotal) * 100 : 0;
+      const categories = Array.isArray(item.categories) ? item.categories : [];
+      const categoryTotal = categories.reduce((sum: number, category: any) => sum + (Number(category.limit) || Number(category.percentage) || 0), 0);
+      return {
+        name: String(item.name).trim(),
+        percentage,
+        color: item.color || 'emerald',
+        categories: categories.filter((category: any) => String(category.name || '').trim()).map((category: any) => ({
+          name: String(category.name).trim(),
+          percentage: categoryTotal ? ((Number(category.limit) || Number(category.percentage) || 0) / categoryTotal) * 100 : 0,
+          color: category.color || item.color || 'emerald'
+        }))
+      };
+    }).filter(item => item.percentage > 0);
+  };
+
+  const saveBudgetModel = async (name: string, source: any[]) => {
+    const allocationsToSave = normalizedModelAllocations(source);
+    if (!name.trim() || allocationsToSave.length === 0) return false;
+    const response = await fetch('/api/budget_presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), allocations: allocationsToSave }) });
+    const saved = await response.json().catch(() => ({}));
+    if (!response.ok) return false;
+    setDbPresets(current => [...current, { id: saved.id, name: name.trim(), allocations: JSON.stringify(allocationsToSave) }]);
+    return true;
+  };
 
   const getIcon = (iconName: string) => {
     switch (iconName) {
@@ -257,6 +321,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
     });
     if (!response.ok) return;
     const saved = await response.json();
+    if (saveBudgetAsModel && budgetModelName.trim()) await saveBudgetModel(budgetModelName, allocations);
     setBudgetPlans((plans) => [...plans, { ...newBudgetPlan, id: saved.id }]);
     setIsBudgetBuilderOpen(false);
     setBudgetStep(1);
@@ -266,15 +331,19 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
     setBudgetEndDate('');
     setBudgetType('recurring');
     setIsGroupedBudget(true);
+    setSelectedBudgetPresetId('');
+    setSaveBudgetAsModel(false);
+    setBudgetModelName('');
     triggerRefresh();
   };
 
   const handleNextStep = () => {
     const limit = parseFloat(totalBudgetLimit) || 0;
-    setAllocations([
-      { id: 1, name: 'Needs', amount: (limit * 0.5).toString(), percentage: 50, color: 'emerald' },
-      { id: 2, name: 'Wants', amount: (limit * 0.3).toString(), percentage: 30, color: 'blue' },
-      { id: 3, name: 'Savings', amount: (limit * 0.2).toString(), percentage: 20, color: 'violet' }
+    const preset = dbPresets.find(item => String(item.id) === selectedBudgetPresetId);
+    setAllocations(preset ? allocationsFromPreset(preset) : [
+      { id: 1, name: 'Needs', amount: (limit * 0.5).toString(), percentage: 50, color: 'emerald', categories: [] },
+      { id: 2, name: 'Wants', amount: (limit * 0.3).toString(), percentage: 30, color: 'blue', categories: [] },
+      { id: 3, name: 'Savings', amount: (limit * 0.2).toString(), percentage: 20, color: 'violet', categories: [] }
     ]);
     setBudgetStep(2);
   };
@@ -745,9 +814,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                                  const flow = dbIncomeFlows.find(f => f.id.toString() === e.target.value);
                                  if (flow) {
                                     setTotalBudgetLimit(flow.amount.toString());
-                                    if (flow.budget_preset_id) {
-                                       // they could also apply the preset automatically but that's handled in step 2 usually
-                                    }
+                                    setSelectedBudgetPresetId(flow.budget_preset_id ? String(flow.budget_preset_id) : '');
                                  }
                               }
                            }} className={`px-4 py-2 rounded-xl text-sm font-bold border transition-all ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
@@ -755,6 +822,10 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                               {dbIncomeFlows.map(flow => (
                                  <option key={flow.id} value={flow.id}>{flow.name} (₱{parseFloat(flow.amount).toLocaleString()})</option>
                               ))}
+                           </select>
+                           <select value={selectedBudgetPresetId} onChange={(e) => setSelectedBudgetPresetId(e.target.value)} className={`px-4 py-2 rounded-xl text-sm font-bold border transition-all ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                              <option value="">Start with 50/30/20</option>
+                              {dbPresets.map(preset => <option key={preset.id} value={preset.id}>Use model: {preset.name}</option>)}
                            </select>
                         </div>
                         
@@ -796,19 +867,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                        {dbPresets.map(preset => (
                           <button 
                              key={preset.id}
-                             onClick={() => {
-                                let allocs = []; try { allocs = JSON.parse(preset.allocations || '[]'); } catch(e) {} if (!Array.isArray(allocs)) allocs = [];
-                                const total = parseFloat(totalBudgetLimit) || 0;
-                                const newAllocations = allocs.map((a: any, i: number) => ({
-                                   id: Date.now() + i,
-                                   name: a.name,
-                                   percentage: a.percentage,
-                                   amount: (total * (a.percentage / 100)).toString(),
-                                   color: a.color || 'emerald',
-                                   categories: a.categories || []
-                                }));
-                                setAllocations(newAllocations);
-                             }}
+                             onClick={() => { setSelectedBudgetPresetId(String(preset.id)); setAllocations(allocationsFromPreset(preset)); }}
                              className={`px-4 py-2 whitespace-nowrap rounded-xl text-xs font-bold border transition-all ${isAdvanced ? 'bg-slate-900 border-slate-700 hover:border-violet-500' : 'bg-white border-slate-200 hover:border-emerald-500'}`}
                           >
                              Apply {preset.name}
@@ -821,11 +880,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                              const toSave = allocations.map(a => ({
                                 name: a.name, percentage: a.percentage, color: a.color, categories: a.categories
                              }));
-                             await fetch('/api/budget_presets', {
-                                method: 'POST', headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({name, allocations: toSave})
-                             });
-                             window.location.reload();
+                             await saveBudgetModel(name, toSave);
                           }}
                           className={`px-4 py-2 whitespace-nowrap rounded-xl text-xs font-bold border border-dashed transition-all ${isAdvanced ? 'bg-slate-900 border-slate-700 hover:border-violet-500' : 'bg-slate-50 border-slate-300 hover:border-emerald-500'}`}
                        >
@@ -956,9 +1011,17 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                       <Plus className="inline w-4 h-4 mr-2" /> Add {isGroupedBudget ? 'Group' : 'Category'}
                     </button>
 
+                    <div className={`mb-4 rounded-2xl border p-4 ${isAdvanced ? 'border-slate-700 bg-slate-900/60' : 'border-slate-200 bg-slate-50'}`}>
+                      <label className="flex cursor-pointer items-center gap-3 text-sm font-bold">
+                        <input type="checkbox" checked={saveBudgetAsModel} onChange={event => setSaveBudgetAsModel(event.target.checked)} className="h-4 w-4 accent-emerald-600" />
+                        Also save these allocations as a reusable Budget Model
+                      </label>
+                      {saveBudgetAsModel && <input value={budgetModelName} onChange={event => setBudgetModelName(event.target.value)} placeholder="Model name, e.g. Monthly 50/30/20" className={`mt-3 w-full rounded-xl border px-4 py-3 text-sm font-bold outline-none ${isAdvanced ? 'border-slate-700 bg-slate-800 focus:border-violet-500' : 'border-slate-200 bg-white focus:border-emerald-500'}`} />}
+                    </div>
+
                     <button 
                       onClick={handleAddBudget}
-                      disabled={allocations.length === 0 || unallocated < 0}
+                      disabled={allocations.length === 0 || unallocated < 0 || (saveBudgetAsModel && !budgetModelName.trim())}
                       className={`w-full py-5 rounded-2xl font-black text-lg transition-all shadow-lg hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:hover:scale-100 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-500 text-white shadow-violet-900/40' : 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-emerald-500/20'}`}
                     >
                       Save Budget Plan
@@ -1149,7 +1212,8 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                                <button onClick={async () => {
                                   if (confirm('Delete this budget model?')) {
                                      await fetch(`/api/budget_presets/${preset.id}`, { method: 'DELETE' });
-                                     window.location.reload();
+                                     setDbPresets(current => current.filter(item => item.id !== preset.id));
+                                     triggerRefresh();
                                   }
                                }} className="text-slate-400 hover:text-rose-500"><X className="w-4 h-4"/></button>
                             </div>
@@ -1164,6 +1228,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                                   </div>
                                ))}
                             </div>
+                            <button onClick={() => { setSelectedBudgetPresetId(String(preset.id)); setBudgetStep(1); setIsBudgetBuilderOpen(true); }} className={`mt-4 w-full rounded-xl py-2 text-xs font-bold ${isAdvanced ? 'bg-violet-600 text-white hover:bg-violet-500' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}>Use this model</button>
                          </div>
                       );
                    })}
@@ -1443,6 +1508,33 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {isModelBuilderOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={() => setIsModelBuilderOpen(false)}>
+          <div onClick={event => event.stopPropagation()} className={`max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-3xl border p-6 shadow-2xl ${isAdvanced ? 'border-slate-700 bg-slate-800 text-white' : 'border-slate-100 bg-white'}`}>
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div><h3 className="text-xl font-black">Create Budget Model</h3><p className="mt-1 text-sm text-slate-500">Set reusable percentages. FinGent scales them to any income flow or budget amount.</p></div>
+              <button onClick={() => setIsModelBuilderOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-white"><X size={18} /></button>
+            </div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Model name</label>
+            <input value={modelName} onChange={event => setModelName(event.target.value)} placeholder="e.g. Essentials, Growth & Savings" className={`mt-2 w-full rounded-xl border px-4 py-3 font-bold outline-none ${isAdvanced ? 'border-slate-700 bg-slate-900 focus:border-violet-500' : 'border-slate-200 bg-slate-50 focus:border-emerald-500'}`} />
+            <div className="mt-5 space-y-3">
+              {modelAllocations.map((allocation, index) => (
+                <div key={allocation.id} className={`flex items-center gap-2 rounded-2xl border p-3 ${isAdvanced ? 'border-slate-700 bg-slate-900/60' : 'border-slate-200 bg-slate-50'}`}>
+                  <input value={allocation.name} onChange={event => setModelAllocations(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))} placeholder="Allocation name" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm font-bold outline-none" />
+                  <div className="relative w-28"><input type="number" min="0" max="100" value={allocation.percentage} onChange={event => setModelAllocations(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, percentage: Number(event.target.value) } : item))} className={`w-full rounded-xl border py-2 pl-3 pr-8 text-right text-sm font-black outline-none ${isAdvanced ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'}`} /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">%</span></div>
+                  <button onClick={() => setModelAllocations(current => current.filter((_, itemIndex) => itemIndex !== index))} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10"><X size={16} /></button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <button onClick={() => setModelAllocations(current => [...current, { id: Date.now(), name: 'New allocation', percentage: 0, color: ['blue', 'violet', 'amber', 'rose'][current.length % 4], categories: [] }])} className="rounded-xl border border-dashed border-slate-300 px-4 py-2 text-xs font-bold text-slate-500 hover:border-emerald-500 hover:text-emerald-600 dark:border-slate-600">+ Add allocation</button>
+              <span className="text-xs font-bold text-slate-500">Entered total: {modelAllocations.reduce((sum, item) => sum + (Number(item.percentage) || 0), 0).toFixed(0)}% · normalized on save</span>
+            </div>
+            <button disabled={!modelName.trim() || modelAllocations.every(item => !item.name.trim() || Number(item.percentage) <= 0)} onClick={async () => { if (await saveBudgetModel(modelName, modelAllocations)) { setIsModelBuilderOpen(false); setModelName(''); setModelAllocations([]); triggerRefresh(); } }} className={`mt-6 w-full rounded-xl py-4 font-black text-white disabled:opacity-50 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-500' : 'bg-emerald-500 hover:bg-emerald-600'}`}>Save Budget Model</button>
           </div>
         </div>
       )}

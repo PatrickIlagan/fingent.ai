@@ -1,5 +1,11 @@
 export type CopilotAction = { label: string; tab: string };
 
+export type CopilotCategoryHint = {
+  name: string;
+  type: 'income' | 'expense' | 'both' | string;
+  keywords?: string;
+};
+
 export type TransactionDraft = {
   type: 'income' | 'expense';
   amount: number;
@@ -143,8 +149,20 @@ function cleanPhrase(value: string) {
   return value.replace(/\b(?:from|using|via|with|through|gamit(?:\s+ang)?|mula(?:\s+sa)?)\b.*$/i, '').replace(/\b(?:my|ang)\s+/i, '').replace(/\b(?:today|yesterday|tomorrow|ngayon|kahapon|bukas)\b/ig, '').replace(/[,.!?]+$/g, '').trim();
 }
 
-function inferExpenseCategory(value: string) {
+function inferExpenseCategory(value: string, categoryHints: CopilotCategoryHint[] = []) {
   const normalized = value.toLowerCase();
+  const customMatch = categoryHints
+    .filter(category => category.type === 'expense' || category.type === 'both')
+    .map(category => ({
+      category,
+      aliases: [category.name, ...(category.keywords || '').split(',')]
+        .map(alias => alias.trim().toLowerCase())
+        .filter(Boolean)
+    }))
+    .flatMap(({ category, aliases }) => aliases.map(alias => ({ category, alias })))
+    .filter(({ alias }) => normalized.includes(alias))
+    .sort((left, right) => right.alias.length - left.alias.length)[0];
+  if (customMatch) return customMatch.category.name;
   const categories: Array<[RegExp, string]> = [
     [/\b(food|meal|breakfast|lunch|dinner|snack|grocer\w*|restaurant|cafe|coffee|delivery|pagkain|ulam|tanghalian|hapunan|almusal|meryenda|kape)\b/, 'Food'],
     [/\b(transport|commute|fare|fuel|gas|gasoline|parking|grab|taxi|bus|train|pamasahe|biyahe|gasolina)\b/, 'Transport'],
@@ -170,7 +188,7 @@ function transactionAccountHint(message: string, intent: TransactionDraft['type'
   return account ? cleanPhrase(account[1]) : '';
 }
 
-function parseTransactionCommand(message: string): TransactionDraft | null {
+function parseTransactionCommand(message: string, categoryHints: CopilotCategoryHint[] = []): TransactionDraft | null {
   const normalized = message.trim();
   const quickDeposit = normalized.match(/^(?:please\s+)?(?:add|put|deposit|credit)\s+(?:₱|php\s*)?(\d[\d,]*(?:\.\d{1,2})?)\s+(?:pesos?\s+)?(?:on|to|into|for)\s+(?:my\s+)?(.+?)(?:\s+(?:today|yesterday|tomorrow|ngayon|kahapon|bukas))?[.!?]?$/i);
   if (quickDeposit) {
@@ -211,7 +229,7 @@ function parseTransactionCommand(message: string): TransactionDraft | null {
     : undefined;
   const reasonIsIncomeDestination = intent === 'income' && Boolean(reasonMatch?.[1] && accountHint && cleanPhrase(reasonMatch[1]).toLowerCase() === accountHint.toLowerCase());
   const rawReason = cleanPhrase(purchaseReason || leadingReason || paidToReason || (reasonIsIncomeDestination ? undefined : reasonMatch?.[1]) || (intent === 'income' ? 'Income' : 'General')).replace(/\b(?:today|yesterday|tomorrow|ngayon|kahapon|bukas)\b/ig, '').trim() || (intent === 'income' ? 'Income' : 'General');
-  const category = intent === 'expense' ? inferExpenseCategory(rawReason) : titleCase(rawReason);
+  const category = intent === 'expense' ? inferExpenseCategory(rawReason, categoryHints) : titleCase(rawReason);
   const description = category === 'General' || category === 'Income' ? '' : category;
 
   return {
@@ -328,7 +346,7 @@ function parseOperationCommand(message: string): OperationDraft | null {
   return null;
 }
 
-export function runLocalCopilot(message: string): CopilotReply {
+export function runLocalCopilot(message: string, categoryHints: CopilotCategoryHint[] = []): CopilotReply {
   const trimmed = message.trim();
   const lower = trimmed.toLowerCase();
   const route = matchedRoute(trimmed);
@@ -357,7 +375,7 @@ export function runLocalCopilot(message: string): CopilotReply {
     };
   }
 
-  const transaction = parseTransactionCommand(trimmed);
+  const transaction = parseTransactionCommand(trimmed, categoryHints);
   if (transaction) {
     if ((transaction.type === 'expense' && transaction.category === 'General') || (transaction.type === 'income' && transaction.category === 'Income')) {
       return { text: transaction.type === 'expense' ? 'What was the expense for? Include a short reason or category, for example “I spent 500 on groceries using GCash.”' : 'What was the income source? Include a short description, for example “I received 5,000 salary into BDO.”' };

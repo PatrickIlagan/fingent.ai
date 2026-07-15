@@ -402,12 +402,81 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
       const history = await list('portfolio_transactions');
       records = records.map((portfolio) => ({ ...portfolio, history: history.filter((item) => item.portfolio_id === portfolio.id).map((item) => ({ id: item.id, date: item.date, type: item.type, amount: item.shares, price: item.price })) }));
     }
+    if (collection === 'budgets') {
+      const expenses = (await list('transactions')).filter(transaction => transaction.type === 'expense');
+      records = records.map(record => {
+        try {
+          const plan = typeof record.categories === 'string' ? JSON.parse(record.categories) : record.categories;
+          const currentMonth = new Date().toISOString().slice(0, 7);
+          const periodExpenses = expenses.filter(transaction => plan.type === 'specific' ? (!plan.startDate || String(transaction.date) >= plan.startDate) && (!plan.endDate || String(transaction.date) <= plan.endDate) : String(transaction.date || '').startsWith(currentMonth));
+          plan.groups = (Array.isArray(plan.groups) ? plan.groups : []).map((group: JsonRecord) => {
+            const children = Array.isArray(group.categories) ? group.categories as JsonRecord[] : [];
+            if (!children.length) {
+              const matches = periodExpenses.filter(transaction => String(transaction.category).toLowerCase() === String(group.name).toLowerCase());
+              return { ...group, transactions: matches, spent: matches.reduce((sum, transaction) => sum + number(transaction.amount), 0) };
+            }
+            const categories = children.map(category => {
+              const matches = periodExpenses.filter(transaction => String(transaction.category).toLowerCase() === String(category.name).toLowerCase());
+              return { ...category, transactions: matches, spent: matches.reduce((sum, transaction) => sum + number(transaction.amount), 0) };
+            });
+            return { ...group, categories, spent: categories.reduce((sum, category) => sum + number(category.spent), 0) };
+          });
+          return { ...record, categories: JSON.stringify(plan) };
+        } catch { return record; }
+      });
+    }
     return json(records);
   }
   if (method === 'POST') {
     if (collection === 'categories') {
       await ensureCategory(body.name, body.type === 'income' ? 'income' : 'expense');
-      return json((await list('categories')).find((item) => String(item.name).toLowerCase() === String(body.name).trim().toLowerCase()));
+      const savedCategory = (await list('categories')).find((item) => String(item.name).toLowerCase() === String(body.name).trim().toLowerCase());
+      if (savedCategory) {
+        await replace('categories', savedCategory.id as number, { ...savedCategory, keywords: String(body.keywords || '').trim(), active: 1 });
+        return json({ ...savedCategory, keywords: String(body.keywords || '').trim(), active: 1 });
+      }
+      return json({ error: 'Unable to save the category.' }, 500);
+    }
+    if (collection === 'budget_presets') {
+      const allocations = Array.isArray(body.allocations) ? body.allocations : [];
+      if (!String(body.name || '').trim() || !allocations.length) return json({ error: 'A model name and allocations are required.' }, 400);
+      return json({ id: await insert(collection, { ...body, name: String(body.name).trim(), allocations: JSON.stringify(allocations) }) });
+    }
+    if (collection === 'budgets') return json({ id: await insert(collection, { ...body, categories: typeof body.categories === 'string' ? body.categories : JSON.stringify(body.categories) }) });
+    if (collection === 'income_flows') {
+      const amount = number(body.amount);
+      const linkedAccount = body.account_id ? await find('accounts', Number(body.account_id)) : null;
+      if (!body.name || amount <= 0 || !body.date) return json({ error: 'Name, positive amount, and date are required.' }, 400);
+      if (body.account_id && !linkedAccount) return json({ error: 'The selected deposit account no longer exists.' }, 400);
+      const id = await insert(collection, { ...body, amount, account_id: linkedAccount?.id || null });
+      await ensureCategory(body.category ?? 'Income', 'income');
+      await insert('calendar_events', { name: body.name, type: 'income', amount, date: body.date, color: 'emerald', icon: 'ArrowDown', provider: 'Manual', source: 'income_flow' });
+      if (linkedAccount) {
+        await adjustBalance(linkedAccount.id, amount, 'income');
+        await insert('transactions', { account_id: linkedAccount.id, type: 'income', amount, category: body.category || 'Income', description: body.name, notes: `Auto-deposited from income flow #${id}.`, date: body.date });
+      }
+      if (body.budget_preset_id) {
+        const preset = await find('budget_presets', Number(body.budget_preset_id));
+        if (preset) {
+          const allocations = typeof preset.allocations === 'string' ? JSON.parse(preset.allocations) : preset.allocations;
+          const groups = (Array.isArray(allocations) ? allocations : []).map((allocation: JsonRecord, index: number) => {
+            const limit = amount * number(allocation.percentage) / 100;
+            const children = Array.isArray(allocation.categories) ? allocation.categories as JsonRecord[] : [];
+            return {
+              id: Date.now() + index,
+              name: allocation.name,
+              limit,
+              spent: 0,
+              color: allocation.color || 'emerald',
+              categories: children.map((category, childIndex) => ({ id: Date.now() + index * 100 + childIndex, name: category.name, limit: limit * number(category.percentage) / 100, spent: 0, color: category.color || allocation.color || 'emerald', transactions: [] })),
+              transactions: []
+            };
+          });
+          const plan = { id: Date.now(), name: `Auto Budget: ${body.name} (${preset.name})`, type: body.is_recurring ? 'recurring' : 'specific', isGrouped: true, startDate: body.date, endDate: body.date, totalLimit: amount, groups };
+          await insert('budgets', { name: plan.name, total_amount: amount, categories: JSON.stringify(plan), month: body.date });
+        }
+      }
+      return json({ id, account: linkedAccount?.name || null, budget_created: Boolean(body.budget_preset_id) });
     }
     if (collection === 'portfolios') {
       const shares = body.shares == null ? 0 : number(body.shares);
@@ -432,8 +501,6 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
       return json({ id, account: linkedAccount?.name || null, deducted: Boolean(linkedAccount && body.type !== 'Credits') });
     }
     const insertedId = await insert(collection, { ...body, active: collection === 'categories' ? 1 : body.active });
-    if (collection === 'income_flows') await ensureCategory(body.category ?? 'Income', 'income');
-    if (collection === 'income_flows' && body.name && body.date) await insert('calendar_events', { name: body.name, type: 'income', amount: body.amount, date: body.date, color: 'emerald', icon: 'ArrowDown', provider: 'Manual', source: 'income_flow' });
     return json({ id: insertedId });
   }
   if (!id) return json({ error: 'Record id is required.' }, 400);

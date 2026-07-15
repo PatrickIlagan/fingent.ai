@@ -14,7 +14,7 @@
     "desktop:dev": "npm run build && electron .",
     "desktop:prepare-native": "cd node_modules\\better-sqlite3-multiple-ciphers && ..\\.bin\\prebuild-install.cmd --runtime electron --target 37.10.3 --arch x64",
     "desktop:dist": "npm run desktop:prepare-native && npm run build && electron-builder --win nsis",
-    "desktop:restore-node-modules": "npm rebuild better-sqlite3 better-sqlite3-multiple-ciphers sqlite3",
+    "desktop:restore-node-modules": "npm rebuild better-sqlite3-multiple-ciphers sqlite3",
     "android:sync": "npm run build && cap sync android",
     "android:apk": "node scripts/android-build.cjs"
   },
@@ -27,7 +27,6 @@
     "@types/archiver": "^8.0.0",
     "@vitejs/plugin-react": "^5.0.4",
     "archiver": "^8.0.0",
-    "better-sqlite3": "^12.11.1",
     "better-sqlite3-multiple-ciphers": "^12.11.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
@@ -77,7 +76,6 @@
       "package.json"
     ],
     "asarUnpack": [
-      "node_modules/better-sqlite3/**",
       "node_modules/better-sqlite3-multiple-ciphers/**"
     ],
     "directories": {
