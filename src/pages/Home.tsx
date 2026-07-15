@@ -1,16 +1,70 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { PieChart, Pie, Cell, ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip } from 'recharts';
-import { Sparkles, ArrowDown, ArrowUp, Calendar, Receipt, ChevronRight, ChevronDown, TrendingUp, Bitcoin, FileText, Activity, Wallet } from 'lucide-react';
+import { Sparkles, ArrowDown, ArrowUp, Calendar, Receipt, ChevronRight, ChevronDown, TrendingUp, Bitcoin, FileText, Activity, Wallet, Gauge, CircleAlert } from 'lucide-react';
 import { format } from 'date-fns';
 
+type ChartRange = '1w' | '1m' | '6m' | '1y';
+
+function localDate(value: unknown) {
+  const text = String(value || '');
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(text) ? new Date(`${text}T12:00:00`) : new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function cashflowSeries(range: ChartRange, transactions: any[], liabilities: any[]) {
+  const now = new Date();
+  now.setHours(23, 59, 59, 999);
+  const buckets: Array<{ key: string; start: Date; end: Date; name: string; Income: number; Expenses: number; Credits: number; Dues: number }> = [];
+  if (range === '1w' || range === '1m') {
+    const days = range === '1w' ? 7 : 30;
+    const bucketDays = range === '1w' ? 1 : 6;
+    const start = new Date(now); start.setDate(start.getDate() - (days - 1)); start.setHours(0, 0, 0, 0);
+    for (let offset = 0; offset < days; offset += bucketDays) {
+      const bucketStart = new Date(start); bucketStart.setDate(start.getDate() + offset);
+      const bucketEnd = new Date(bucketStart); bucketEnd.setDate(bucketStart.getDate() + bucketDays - 1); bucketEnd.setHours(23, 59, 59, 999);
+      if (bucketEnd > now) bucketEnd.setTime(now.getTime());
+      buckets.push({ key: bucketStart.toISOString(), start: bucketStart, end: bucketEnd, name: range === '1w' ? format(bucketStart, 'EEE') : format(bucketStart, 'MMM d'), Income: 0, Expenses: 0, Credits: 0, Dues: 0 });
+    }
+  } else {
+    const months = range === '6m' ? 6 : 12;
+    for (let offset = months - 1; offset >= 0; offset -= 1) {
+      const start = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+      const end = new Date(now.getFullYear(), now.getMonth() - offset + 1, 0, 23, 59, 59, 999);
+      buckets.push({ key: `${start.getFullYear()}-${start.getMonth()}`, start, end, name: format(start, range === '6m' ? 'MMM' : 'MMM yy'), Income: 0, Expenses: 0, Credits: 0, Dues: 0 });
+    }
+  }
+  const bucketFor = (date: Date) => buckets.find(bucket => date >= bucket.start && date <= bucket.end);
+  transactions.forEach(transaction => {
+    const date = localDate(transaction.date); const bucket = date ? bucketFor(date) : null;
+    if (!bucket) return;
+    if (transaction.type === 'income') bucket.Income += Number(transaction.amount || 0);
+    if (transaction.type === 'expense') bucket.Expenses += Number(transaction.amount || 0);
+  });
+  liabilities.filter(liability => liability.status !== 'Paid').forEach(liability => {
+    const date = localDate(liability.date); const bucket = date ? bucketFor(date) : null;
+    if (!bucket) return;
+    const amount = Number(liability.remaining_amount || liability.amount || 0);
+    if (String(liability.type).toLowerCase().includes('credit')) bucket.Credits += amount;
+    else bucket.Dues += amount;
+  });
+  return buckets.map(({ key: _key, start: _start, end: _end, ...bucket }) => bucket);
+}
+
 export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) => void, toggleChat?: () => void }) {
-  const { shouldRefresh, themeMode } = useStore();
+  const { shouldRefresh, themeMode, accentColor } = useStore();
   const isAdvanced = themeMode === 'advanced';
   const [data, setData] = useState<{ accounts: any[], transactions: any[], wealth: any, liabilities: any[], goals: any[], portfolios: any[], budgets: any[] } | null>(null);
   const [chartTab, setChartTab] = useState<'Cash Flow' | 'Expenses' | 'Income' | 'Credits' | 'Dues'>('Cash Flow');
+  const [chartRange, setChartRange] = useState<ChartRange>('1m');
   const [balanceType, setBalanceType] = useState<'Total Balance' | 'Digital Wallets' | 'Cash on Hand' | 'Bank Accounts'>('Total Balance');
   const [isBalanceDropdownOpen, setIsBalanceDropdownOpen] = useState(false);
+  const accent = {
+    emerald: { hero: 'from-emerald-500 to-teal-400 border-emerald-400', line: '#10B981', lightText: 'text-emerald-50', soft: 'from-emerald-50 to-teal-50/50 border-emerald-100', label: 'text-emerald-600' },
+    ocean: { hero: 'from-blue-600 to-cyan-500 border-blue-500', line: '#2563EB', lightText: 'text-blue-50', soft: 'from-blue-50 to-cyan-50/50 border-blue-100', label: 'text-blue-600' },
+    violet: { hero: 'from-violet-600 to-fuchsia-500 border-violet-500', line: '#8B5CF6', lightText: 'text-violet-50', soft: 'from-violet-50 to-fuchsia-50/50 border-violet-100', label: 'text-violet-600' },
+    sunset: { hero: 'from-rose-600 to-orange-400 border-rose-500', line: '#E11D48', lightText: 'text-rose-50', soft: 'from-rose-50 to-orange-50/50 border-rose-100', label: 'text-rose-600' }
+  }[accentColor];
 
   const accountColor = (account: any) => account.color || (String(account.type).toLowerCase() === 'card'
     ? 'from-slate-700 to-slate-900'
@@ -99,21 +153,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
     { name: 'Remaining', value: Math.max(0, totalBudgetLimit - totalBudgetSpent), color: isAdvanced ? '#334155' : '#e2e8f0' }
   ];
 
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const cashFlowByDay: Record<string, any> = {};
-  days.forEach(d => cashFlowByDay[d] = { name: d, Income: 0, Expenses: 0, Credits: 0, Dues: 0 });
-  
-  data.transactions.forEach(tx => {
-    if (tx.date) {
-      const d = new Date(tx.date);
-      if (!isNaN(d.getTime())) {
-         const dayName = days[d.getDay()];
-         if (tx.type === 'income') cashFlowByDay[dayName].Income += tx.amount;
-         if (tx.type === 'expense') cashFlowByDay[dayName].Expenses += tx.amount;
-      }
-    }
-  });
-  const cashFlowData = days.map(d => cashFlowByDay[d]);
+  const cashFlowData = cashflowSeries(chartRange, data.transactions, data.liabilities);
 
   const upcomingBills = data.liabilities.filter(l => l.status !== 'Paid').map(l => ({
     id: l.id,
@@ -167,8 +207,22 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
     color: g.color || 'emerald'
   }));
 
-  const monthlyIncome = data.transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-  const monthlyExpenses = data.transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+  const today = new Date();
+  const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const previousMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const previousMonthEnd = new Date(currentMonthStart.getTime() - 1);
+  const previousComparableEnd = new Date(Math.min(previousMonthEnd.getTime(), previousMonthStart.getTime() + (today.getTime() - currentMonthStart.getTime())));
+  const inPeriod = (transaction: any, start: Date, end: Date) => { const date = localDate(transaction.date); return Boolean(date && date >= start && date <= end); };
+  const currentTransactions = data.transactions.filter(transaction => inPeriod(transaction, currentMonthStart, today));
+  const previousTransactions = data.transactions.filter(transaction => inPeriod(transaction, previousMonthStart, previousComparableEnd));
+  const monthlyIncome = currentTransactions.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
+  const monthlyExpenses = currentTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0);
+  const previousIncome = previousTransactions.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
+  const previousExpenses = previousTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0);
+  const percentChange = (current: number, previous: number) => previous > 0 ? ((current - previous) / previous) * 100 : current > 0 ? 100 : 0;
+  const incomeChange = percentChange(monthlyIncome, previousIncome);
+  const expenseChange = percentChange(monthlyExpenses, previousExpenses);
+  const savingsRate = monthlyIncome > 0 ? ((monthlyIncome - monthlyExpenses) / monthlyIncome) * 100 : 0;
 
   const totalInvestments = data.portfolios.reduce((sum, p) => sum + (p.current_value || 0), 0);
   const totalNetWorth = totalCash + totalInvestments;
@@ -180,13 +234,30 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
   const estimatedTaxLiability = estimatedIncomeTax + estimatedCapitalGains;
   const effectiveRate = ((estimatedTaxLiability) / ((monthlyIncome * 12) || 1)) * 100;
   
+  const creditCards = data.accounts.filter(account => ['card', 'credit'].includes(String(account.type).toLowerCase()));
+  const totalCreditLimit = creditCards.reduce((sum, account) => sum + Number(account.credit_limit || 0), 0);
+  const totalCardOwed = creditCards.reduce((sum, account) => sum + Math.max(0, -Number(account.balance || 0)), 0);
+  const creditUtilization = totalCreditLimit > 0 ? (totalCardOwed / totalCreditLimit) * 100 : 0;
+  const todayKey = format(today, 'yyyy-MM-dd');
+  const overdueLiabilities = data.liabilities.filter(liability => liability.status !== 'Paid' && liability.date && String(liability.date).slice(0, 10) < todayKey);
   let healthScore = 50;
-  if (totalCash > 5000) healthScore += 10;
-  if (totalInvestments > 10000) healthScore += 15;
   if (monthlyIncome > monthlyExpenses && monthlyIncome > 0) healthScore += 15;
-  if (data.liabilities.filter(l => l.status !== 'Paid').length === 0) healthScore += 10;
+  if (savingsRate >= 20) healthScore += 10;
+  if (totalCreditLimit > 0 && creditUtilization <= 30) healthScore += 10;
+  if (creditUtilization > 75) healthScore -= 15;
+  if (overdueLiabilities.length === 0) healthScore += 10; else healthScore -= Math.min(15, overdueLiabilities.length * 5);
+  if (totalBudgetLimit > 0 && budgetPercent <= 100) healthScore += 5;
+  if (budgetPercent > 100) healthScore -= 10;
+  healthScore = Math.max(0, Math.min(100, healthScore));
   const healthLetter = healthScore >= 90 ? 'A+' : healthScore >= 80 ? 'A' : healthScore >= 70 ? 'B' : healthScore >= 60 ? 'C' : 'D';
-  const healthLabel = healthScore >= 80 ? 'Excellent' : healthScore >= 70 ? 'Good' : 'Fair';
+  const healthLabel = healthScore >= 80 ? 'Strong' : healthScore >= 70 ? 'Stable' : healthScore >= 60 ? 'Watch' : 'Needs review';
+  const insightItems = [
+    { title: 'Net cash flow', text: monthlyIncome || monthlyExpenses ? `PHP ${(monthlyIncome - monthlyExpenses).toLocaleString()} this month (${savingsRate.toFixed(0)}% savings rate).` : 'Record this month\'s income and expenses to calculate cash flow.', tone: monthlyIncome >= monthlyExpenses ? 'good' : 'warn' },
+    { title: 'Income trend', text: previousIncome || monthlyIncome ? `${Math.abs(incomeChange).toFixed(0)}% ${incomeChange >= 0 ? 'higher' : 'lower'} than the same portion of last month.` : 'Not enough income history for a comparison.', tone: incomeChange >= 0 ? 'good' : 'neutral' },
+    { title: 'Expense trend', text: previousExpenses || monthlyExpenses ? `${Math.abs(expenseChange).toFixed(0)}% ${expenseChange <= 0 ? 'lower' : 'higher'} than the same portion of last month.` : 'Not enough expense history for a comparison.', tone: expenseChange <= 0 ? 'good' : 'warn' },
+    { title: 'Credit indicator', text: totalCreditLimit > 0 ? `${creditUtilization.toFixed(0)}% local card utilization${overdueLiabilities.length ? ` with ${overdueLiabilities.length} overdue due${overdueLiabilities.length === 1 ? '' : 's'}` : ', with no overdue dues recorded'}.` : 'Add a card limit to calculate a local utilization indicator.', tone: creditUtilization <= 30 && !overdueLiabilities.length ? 'good' : 'warn' },
+    { title: 'Budget status', text: totalBudgetLimit > 0 ? `${budgetPercent}% of active budget limits used.` : 'Create a budget to compare spending against limits.', tone: budgetPercent <= 85 ? 'good' : 'warn' }
+  ];
 
 
   return (
@@ -196,12 +267,12 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
       <div className="lg:col-span-2 xl:col-span-3 space-y-6">
         
         {/* Hero Balance */}
-        <div className={`rounded-3xl p-6 md:p-8 shadow-lg border flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-gradient-to-r from-emerald-500 to-teal-400 border-emerald-400 text-white'}`}>
+        <div className={`rounded-3xl p-6 md:p-8 shadow-lg border flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden ${isAdvanced ? 'bg-slate-800 border-slate-700' : `bg-gradient-to-r ${accent.hero} text-white`}`}>
           <div className="relative z-10 flex-1">
             <div className="relative inline-block mb-1">
               <button 
                 onClick={() => setIsBalanceDropdownOpen(!isBalanceDropdownOpen)}
-                className={`flex items-center gap-1 text-sm font-medium transition-colors ${isAdvanced ? 'text-slate-400 hover:text-slate-200' : 'text-emerald-50 hover:text-white'}`}
+                className={`flex items-center gap-1 text-sm font-medium transition-colors ${isAdvanced ? 'text-slate-400 hover:text-slate-200' : `${accent.lightText} hover:text-white`}`}
               >
                 {balanceType} <ChevronDown className="w-4 h-4" />
               </button>
@@ -225,11 +296,11 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
           <div className="relative z-10 flex flex-col gap-3 w-full md:w-auto">
              <div className="flex gap-3">
                <div className={`flex-1 md:flex-none px-4 py-3 rounded-2xl ${isAdvanced ? 'bg-slate-700/50' : 'bg-white/20 backdrop-blur-md'}`}>
-                 <p className={`text-[10px] uppercase tracking-wider mb-1 ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Monthly Income</p>
+                 <p className={`text-[10px] uppercase tracking-wider mb-1 ${isAdvanced ? 'text-slate-400' : accent.lightText}`}>Monthly Income</p>
                  <p className="font-bold text-base">₱{monthlyIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                </div>
                <div className={`flex-1 md:flex-none px-4 py-3 rounded-2xl ${isAdvanced ? 'bg-slate-700/50' : 'bg-white/20 backdrop-blur-md'}`}>
-                 <p className={`text-[10px] uppercase tracking-wider mb-1 ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Monthly Expenses</p>
+                 <p className={`text-[10px] uppercase tracking-wider mb-1 ${isAdvanced ? 'text-slate-400' : accent.lightText}`}>Monthly Expenses</p>
                  <p className="font-bold text-base">₱{monthlyExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                </div>
              </div>
@@ -286,8 +357,8 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
 
         {/* Cash Flow Line Chart */}
         <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
-            <h3 className="font-bold text-lg mb-3 sm:mb-0 cursor-pointer hover:underline" onClick={() => onNavigate?.('accounts')}>Cash Flow</h3>
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between mb-6">
+            <div className="flex flex-wrap items-center gap-3"><h3 className="font-bold text-lg cursor-pointer hover:underline" onClick={() => onNavigate?.('accounts')}>Cash Flow</h3><div className={`flex rounded-xl p-1 ${isAdvanced ? 'bg-slate-700' : 'bg-slate-100'}`}>{(['1w', '1m', '6m', '1y'] as ChartRange[]).map(range => <button key={range} onClick={() => setChartRange(range)} className={`rounded-lg px-2.5 py-1 text-[11px] font-bold uppercase transition-colors ${chartRange === range ? (isAdvanced ? 'bg-slate-600 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>{range}</button>)}</div></div>
             <div className={`flex flex-wrap gap-1 p-1 rounded-full ${isAdvanced ? 'bg-slate-700' : 'bg-slate-100'}`}>
               {['Cash Flow', 'Expenses', 'Income', 'Credits', 'Dues'].map(tab => (
                 <button
@@ -315,7 +386,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
                   }} 
                 />
                 {(chartTab === 'Cash Flow' || chartTab === 'Income') && (
-                  <Line type="monotone" dataKey="Income" stroke={isAdvanced ? '#8B5CF6' : '#10B981'} strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                  <Line type="monotone" dataKey="Income" stroke={isAdvanced ? '#8B5CF6' : accent.line} strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />
                 )}
                 {(chartTab === 'Cash Flow' || chartTab === 'Expenses') && (
                   <Line type="monotone" dataKey="Expenses" stroke={isAdvanced ? '#f43f5e' : '#f43f5e'} strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />
@@ -436,20 +507,19 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
       {/* RIGHT COLUMN (Side Panel) */}
       <div className="lg:col-span-1 xl:col-span-1 space-y-6">
         
-        {/* Morning Briefing */}
-        <div onClick={() => toggleChat?.()} className={`bg-gradient-to-br ${isAdvanced ? 'from-slate-800 to-slate-800/80 border-slate-700' : 'from-emerald-50 to-teal-50/50 border-emerald-100'} rounded-3xl p-6 shadow-sm border cursor-pointer hover:shadow-md transition-shadow`}>
-          <h3 className={`text-sm font-bold mb-3 flex items-center ${isAdvanced ? 'text-violet-400' : 'text-emerald-600'}`}>
+        {/* Local data insights */}
+        <div className={`bg-gradient-to-br ${isAdvanced ? 'from-slate-800 to-slate-800/80 border-slate-700' : accent.soft} rounded-3xl p-6 shadow-sm border`}>
+          <h3 className={`text-sm font-bold mb-3 flex items-center ${isAdvanced ? 'text-violet-400' : accent.label}`}>
             <Sparkles className="w-4 h-4 mr-2" />
             FinGent Insights
           </h3>
-          <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed mb-4">
-            {upcomingBills.length > 0
-              ? `You have ${upcomingBills.length} unpaid bill${upcomingBills.length === 1 ? '' : 's'} to review. Keep recording income and expenses to make the dashboard more useful.`
-              : 'Add accounts, transactions, and plans to build a complete financial picture.'}
-          </p>
+          <p className="mb-4 text-xs text-slate-500">Calculated on-device from your recorded data. This is a planning indicator, not a bureau credit score or financial advice.</p>
+          <div className="mb-4 space-y-2">
+            {insightItems.map(insight => <div key={insight.title} className={`rounded-xl border p-3 ${isAdvanced ? 'border-slate-700 bg-slate-900/45' : 'border-white/80 bg-white/65'}`}><div className="flex items-start gap-2"><span className={`mt-0.5 rounded-lg p-1 ${insight.tone === 'good' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300' : insight.tone === 'warn' ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' : 'bg-slate-100 text-slate-500 dark:bg-slate-700'}`}>{insight.tone === 'warn' ? <CircleAlert size={13} /> : <Gauge size={13} />}</span><div><p className="text-xs font-black">{insight.title}</p><p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">{insight.text}</p></div></div></div>)}
+          </div>
           <div className={`p-4 rounded-2xl flex items-center justify-between ${isAdvanced ? 'bg-slate-900/50' : 'bg-white/60'}`}>
              <div>
-                <p className="text-xs font-bold text-slate-500 mb-1">Financial Health Score</p>
+                <p className="text-xs font-bold text-slate-500 mb-1">Local health indicator</p>
                 <div className="flex items-center gap-2">
                    <p className="text-2xl font-black text-emerald-500">{healthScore}<span className="text-sm text-slate-400">/100</span></p>
                    <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider">{healthLabel}</span>

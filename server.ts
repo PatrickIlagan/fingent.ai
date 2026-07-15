@@ -3,8 +3,7 @@ import multer from "multer";
 import fsModule from "fs";
 import crypto from "crypto";
 import path from "path";
-import Database from "better-sqlite3-multiple-ciphers";
-import { closeDb, getDataDir, getDb, unlockDatabase } from "./server/db";
+import { closeDb, getDataDir, getDb, unlockDatabase, validateDatabaseFile } from "./server/db";
 // yahoo-finance2 exposes its constructor as CommonJS's `.default`. Using an
 // explicit require keeps the production CJS bundle compatible with Electron.
 const YahooFinance = require('yahoo-finance2').default;
@@ -100,16 +99,6 @@ function decryptBackup(payload: Buffer, password: string) {
   const data = payload.subarray(16);
   const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
   return Buffer.concat([decipher.update(data), decipher.final()]);
-}
-
-function validateDatabase(databasePath: string) {
-  const candidate = new Database(databasePath, { readonly: true });
-  try {
-    const result = candidate.pragma('quick_check', { simple: true });
-    if (result !== 'ok') throw new Error('The selected file is not a healthy SQLite database.');
-  } finally {
-    candidate.close();
-  }
 }
 
 type AppLockRecord = { version: 1; salt: string; verifier: string };
@@ -361,7 +350,7 @@ To run FinGent as a desktop application:
       const stagedPath = dbPath + '.restore-' + crypto.randomUUID();
       fsModule.writeFileSync(stagedPath, decryptBackup(encrypted, password));
       try {
-        validateDatabase(stagedPath);
+        validateDatabaseFile(stagedPath);
         await closeDb();
         fsModule.copyFileSync(stagedPath, dbPath);
       } finally {
@@ -390,7 +379,7 @@ To run FinGent as a desktop application:
         return res.status(400).json({ error: "No file uploaded" });
       }
       const dbPath = path.join(dataDir, 'fingent.db');
-      validateDatabase(req.file.path);
+      validateDatabaseFile(req.file.path);
       await closeDb();
       fsModule.copyFileSync(req.file.path, dbPath);
       

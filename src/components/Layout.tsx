@@ -5,12 +5,20 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { exportEverythingWorkbook } from '../lib/workbookExport';
 import { exportEverythingPdfStatement } from '../lib/export';
 
+const accentStyles = {
+  emerald: { gradient: 'from-emerald-400 to-teal-500', solid: 'bg-emerald-500 hover:bg-emerald-600', soft: 'bg-emerald-100 text-emerald-800', darkSoft: 'bg-emerald-500/20 text-emerald-300', text: 'text-emerald-600', darkText: 'text-emerald-400', shadow: 'shadow-emerald-500/40', page: 'from-emerald-50 via-white to-teal-50', border: 'border-emerald-100' },
+  ocean: { gradient: 'from-blue-500 to-cyan-500', solid: 'bg-blue-600 hover:bg-blue-700', soft: 'bg-blue-100 text-blue-800', darkSoft: 'bg-blue-500/20 text-blue-300', text: 'text-blue-600', darkText: 'text-blue-400', shadow: 'shadow-blue-500/40', page: 'from-blue-50 via-white to-cyan-50', border: 'border-blue-100' },
+  violet: { gradient: 'from-violet-500 to-fuchsia-500', solid: 'bg-violet-600 hover:bg-violet-700', soft: 'bg-violet-100 text-violet-800', darkSoft: 'bg-violet-500/20 text-violet-300', text: 'text-violet-600', darkText: 'text-violet-400', shadow: 'shadow-violet-500/40', page: 'from-violet-50 via-white to-fuchsia-50', border: 'border-violet-100' },
+  sunset: { gradient: 'from-rose-500 to-orange-400', solid: 'bg-rose-600 hover:bg-rose-700', soft: 'bg-rose-100 text-rose-800', darkSoft: 'bg-rose-500/20 text-rose-300', text: 'text-rose-600', darkText: 'text-rose-400', shadow: 'shadow-rose-500/40', page: 'from-rose-50 via-white to-orange-50', border: 'border-rose-100' }
+};
+
 export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any) {
-  const { themeMode, setThemeMode, selectedBusiness, setSelectedBusiness, selectedFreelance, setSelectedFreelance } = useStore();
+  const { themeMode, selectedBusiness, setSelectedBusiness, selectedFreelance, setSelectedFreelance, accentColor, hiddenTabs } = useStore();
   const [expandedTabs, setExpandedTabs] = useState<Record<string, boolean>>({});
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const isAdvanced = themeMode === 'advanced';
+  const accent = accentStyles[accentColor];
 
   
   let tabs = [
@@ -92,6 +100,8 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
       { id: 'freelance-invoices', icon: DollarSign, label: 'Invoices' },
       { id: 'freelance-time', icon: Clock, label: 'Time Logs' },
     ];
+  } else {
+    tabs = tabs.filter(tab => !hiddenTabs.includes(tab.id));
   }
 
 
@@ -101,12 +111,12 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
   };
 
   return (
-    <div className={`min-h-screen w-full flex flex-col md:flex-row transition-colors duration-500 ${isAdvanced ? 'bg-slate-900 text-slate-100 dark' : 'bg-gradient-to-br from-emerald-50 via-white to-teal-50 text-slate-900'}`}>
+    <div data-accent={accentColor} className={`min-h-screen w-full flex flex-col md:flex-row transition-colors duration-500 ${isAdvanced ? 'bg-slate-900 text-slate-100 dark' : `bg-gradient-to-br ${accent.page} text-slate-900`}`}>
       
       {/* Top Header (Mobile & Desktop) */}
       <header className={`fixed top-0 left-0 right-0 h-16 z-30 flex items-center justify-between px-4 md:px-8 border-b shadow-sm backdrop-blur-md ${isAdvanced ? 'bg-slate-900/80 border-slate-700' : 'bg-gradient-to-r from-emerald-50/80 to-teal-50/80 border-emerald-100'}`}>
         <div className="flex items-center gap-2">
-          <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-white font-bold bg-gradient-to-br ${isAdvanced ? 'from-violet-500 to-fuchsia-500' : 'from-emerald-400 to-teal-500 shadow-emerald-200 shadow-sm'}`}>
+          <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-white font-bold bg-gradient-to-br ${accent.gradient} shadow-sm`}>
             F
           </div>
           <h1 className="font-extrabold text-lg tracking-tight">FinGent</h1>
@@ -117,7 +127,7 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
           </button>
           <button 
             onClick={() => setCurrentTab('settings')}
-            className={`p-2 rounded-full transition-colors ${currentTab === 'settings' ? (isAdvanced ? 'bg-slate-700 text-violet-400' : 'bg-emerald-100 text-emerald-700') : (isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-400' : 'bg-white shadow-sm border border-emerald-100 hover:bg-emerald-50 text-emerald-600')}`}
+            className={`p-2 rounded-full transition-colors ${currentTab === 'settings' ? (isAdvanced ? `bg-slate-700 ${accent.darkText}` : accent.soft) : (isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-400' : `bg-white shadow-sm border ${accent.border} ${accent.text}`)}`}
           >
             <Settings size={20} />
           </button>
@@ -169,7 +179,7 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
                   }}
                   className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all ${
                     isActive 
-                      ? (isAdvanced ? 'bg-violet-600/20 text-violet-400 font-bold' : 'bg-gradient-to-r from-emerald-400 to-teal-500 text-white font-bold shadow-md shadow-emerald-500/20') 
+                      ? (isAdvanced ? `${accent.darkSoft} font-bold` : `bg-gradient-to-r ${accent.gradient} text-white font-bold shadow-md`)
                       : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100'
                   }`}
                 >
@@ -206,7 +216,7 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
                             onClick={() => setCurrentTab(subId)}
                             className={`w-full text-left px-4 py-2 rounded-xl text-sm transition-colors ${
                               isSubActive
-                                ? (isAdvanced ? 'bg-violet-600/30 text-violet-300 font-medium' : 'bg-emerald-100 text-emerald-700 font-medium')
+                                ? (isAdvanced ? `${accent.darkSoft} font-medium` : `${accent.soft} font-medium`)
                                 : (isAdvanced 
                                     ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' 
                                     : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50')
@@ -223,18 +233,18 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
             )
           })}
         </div>
-        <div className={`mt-4 border-t pt-4 pb-3 ${isAdvanced ? 'border-slate-700' : 'border-emerald-100'}`}>
+        {(!hiddenTabs.includes('categories') || !hiddenTabs.includes('personal')) && <div className={`mt-4 border-t pt-4 pb-3 ${isAdvanced ? 'border-slate-700' : accent.border}`}>
           <p className="px-3 pb-2 text-[10px] font-bold tracking-[0.15em] text-slate-400">PERSONAL SPACE</p>
-          <div className={`rounded-2xl p-1.5 ${isAdvanced ? 'bg-slate-800/70' : 'bg-emerald-50/60'}`}>
-            <button onClick={() => setCurrentTab('categories')} className={`mb-1 w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${currentTab === 'categories' ? (isAdvanced ? 'bg-violet-600/20 text-violet-300 font-bold' : 'bg-white text-emerald-700 font-bold shadow-sm') : 'text-slate-500 hover:bg-white/70 dark:hover:bg-slate-700'}`}><Tags size={18} /> Categories</button>
-            <div>
-              <button onClick={(event) => { setCurrentTab('personal'); if (!expandedTabs.personal) toggleExpand('personal', event); }} className={`w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-sm transition-colors ${currentTab.startsWith('personal') ? (isAdvanced ? 'bg-violet-600/20 text-violet-300 font-bold' : 'bg-emerald-100 text-emerald-700 font-bold') : 'text-slate-500 hover:bg-white/70 dark:hover:bg-slate-700'}`}><span className="flex items-center gap-3"><UserRound size={18} /> Personal</span><span onClick={(event) => { setCurrentTab('personal'); toggleExpand('personal', event); }} className="rounded-full p-1 hover:bg-slate-200 dark:hover:bg-slate-700">{expandedTabs.personal ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</span></button>
+          <div className={`rounded-2xl p-1.5 ${isAdvanced ? 'bg-slate-800/70' : 'bg-slate-50/70'}`}>
+            {!hiddenTabs.includes('categories') && <button onClick={() => setCurrentTab('categories')} className={`mb-1 w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${currentTab === 'categories' ? (isAdvanced ? `${accent.darkSoft} font-bold` : `bg-white ${accent.text} font-bold shadow-sm`) : 'text-slate-500 hover:bg-white/70 dark:hover:bg-slate-700'}`}><Tags size={18} /> Categories</button>}
+            {!hiddenTabs.includes('personal') && <div>
+              <button onClick={(event) => { setCurrentTab('personal'); if (!expandedTabs.personal) toggleExpand('personal', event); }} className={`w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-sm transition-colors ${currentTab.startsWith('personal') ? (isAdvanced ? `${accent.darkSoft} font-bold` : `${accent.soft} font-bold`) : 'text-slate-500 hover:bg-white/70 dark:hover:bg-slate-700'}`}><span className="flex items-center gap-3"><UserRound size={18} /> Personal</span><span onClick={(event) => { setCurrentTab('personal'); toggleExpand('personal', event); }} className="rounded-full p-1 hover:bg-slate-200 dark:hover:bg-slate-700">{expandedTabs.personal ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</span></button>
               <AnimatePresence>{expandedTabs.personal && <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mt-1 space-y-1 overflow-hidden px-2 pb-1"><button onClick={() => setCurrentTab('personal-notes')} className={`w-full rounded-lg px-3 py-2 text-left text-xs ${currentTab === 'personal-notes' ? 'bg-white font-bold text-emerald-700 shadow-sm dark:bg-slate-700 dark:text-violet-300' : 'text-slate-500 hover:bg-white/70 dark:hover:bg-slate-700'}`}>Notes</button><button onClick={() => setCurrentTab('personal-routines')} className={`w-full rounded-lg px-3 py-2 text-left text-xs ${currentTab === 'personal-routines' ? 'bg-white font-bold text-emerald-700 shadow-sm dark:bg-slate-700 dark:text-violet-300' : 'text-slate-500 hover:bg-white/70 dark:hover:bg-slate-700'}`}>Routines</button></motion.div>}</AnimatePresence>
-            </div>
+            </div>}
           </div>
-        </div>
+        </div>}
         <div className="space-y-2 pb-8">
-          <button onClick={() => exportEverythingWorkbook().catch(console.error)} className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl font-bold text-sm transition-all shadow-sm ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20'}`}>
+          <button onClick={() => exportEverythingWorkbook().catch(console.error)} className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl font-bold text-sm text-white transition-all shadow-sm ${accent.solid}`}>
             <FileSpreadsheet size={18} /> Export Excel Workbook
           </button>
           <button onClick={() => exportEverythingPdfStatement().catch(console.error)} className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-xs transition-all ${isAdvanced ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200' : 'text-emerald-700 hover:bg-emerald-50'}`}>
@@ -249,16 +259,16 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
           <>
             <motion.button aria-label="Close navigation" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsMobileMenuOpen(false)} className="fixed inset-0 z-50 bg-slate-950/45 backdrop-blur-sm md:hidden" />
             <motion.aside initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }} transition={{ type: 'spring', damping: 28, stiffness: 280 }} className={`fixed inset-y-0 left-0 z-[60] flex w-[min(20rem,88vw)] flex-col border-r shadow-2xl md:hidden ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-white border-emerald-100'}`}>
-              <div className={`flex h-16 shrink-0 items-center justify-between border-b px-4 ${isAdvanced ? 'border-slate-700' : 'border-emerald-100'}`}><div className="flex items-center gap-2 font-black"><div className={`flex h-8 w-8 items-center justify-center rounded-xl text-sm text-white ${isAdvanced ? 'bg-violet-600' : 'bg-emerald-500'}`}>F</div>FinGent</div><button onClick={() => setIsMobileMenuOpen(false)} aria-label="Close navigation" className="rounded-xl p-2 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={20} /></button></div>
+              <div className={`flex h-16 shrink-0 items-center justify-between border-b px-4 ${isAdvanced ? 'border-slate-700' : accent.border}`}><div className="flex items-center gap-2 font-black"><div className={`flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br text-sm text-white ${accent.gradient}`}>F</div>FinGent</div><button onClick={() => setIsMobileMenuOpen(false)} aria-label="Close navigation" className="rounded-xl p-2 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={20} /></button></div>
               <nav className="flex-1 overflow-y-auto p-3 pb-6">
                 {selectedBusiness && <button onClick={() => { setSelectedBusiness(null); setCurrentTab('business'); setIsMobileMenuOpen(false); }} className={`mb-3 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold ${isAdvanced ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-emerald-50'}`}><ArrowLeft size={16} /> Back to Portfolio</button>}
                 {selectedFreelance && <button onClick={() => { setSelectedFreelance(null); setCurrentTab('freelancing'); setIsMobileMenuOpen(false); }} className={`mb-3 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold ${isAdvanced ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-emerald-50'}`}><ArrowLeft size={16} /> Back to Services</button>}
                 <div className="space-y-1">
-                  {tabs.map(tab => { const Icon = tab.icon; const active = currentTab === tab.id || currentTab.startsWith(tab.id + '-'); return <div key={tab.id}><button onClick={() => { setCurrentTab(tab.id); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-bold ${active ? (isAdvanced ? 'bg-violet-600/20 text-violet-300' : 'bg-emerald-100 text-emerald-800') : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}><Icon size={18} />{tab.label}</button>{tab.subItems && <div className="ml-8 border-l border-slate-200 py-1 pl-2 dark:border-slate-700">{tab.subItems.map(sub => { const id = `${tab.id}-${sub.toLowerCase()}`; return <button key={id} onClick={() => { setCurrentTab(id); setIsMobileMenuOpen(false); }} className={`block w-full rounded-lg px-3 py-2 text-left text-xs ${currentTab === id ? 'font-bold text-emerald-700 dark:text-violet-300' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>{sub}</button>; })}</div>}</div>; })}
+                  {tabs.map(tab => { const Icon = tab.icon; const active = currentTab === tab.id || currentTab.startsWith(tab.id + '-'); return <div key={tab.id}><button onClick={() => { setCurrentTab(tab.id); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-bold ${active ? (isAdvanced ? accent.darkSoft : accent.soft) : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}><Icon size={18} />{tab.label}</button>{tab.subItems && <div className="ml-8 border-l border-slate-200 py-1 pl-2 dark:border-slate-700">{tab.subItems.map(sub => { const id = `${tab.id}-${sub.toLowerCase()}`; return <button key={id} onClick={() => { setCurrentTab(id); setIsMobileMenuOpen(false); }} className={`block w-full rounded-lg px-3 py-2 text-left text-xs ${currentTab === id ? `font-bold ${isAdvanced ? accent.darkText : accent.text}` : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>{sub}</button>; })}</div>}</div>; })}
                 </div>
-                <div className={`mt-4 border-t pt-4 ${isAdvanced ? 'border-slate-700' : 'border-emerald-100'}`}><p className="px-3 pb-2 text-[10px] font-bold tracking-[0.15em] text-slate-400">PERSONAL SPACE</p><button onClick={() => { setCurrentTab('categories'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm ${currentTab === 'categories' ? 'font-bold text-emerald-700 dark:text-violet-300' : 'text-slate-600 dark:text-slate-300'}`}><Tags size={18} /> Categories</button><button onClick={() => { setCurrentTab('personal'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm ${currentTab.startsWith('personal') ? 'font-bold text-emerald-700 dark:text-violet-300' : 'text-slate-600 dark:text-slate-300'}`}><UserRound size={18} /> Personal</button><div className="ml-8 space-y-1 py-1"><button onClick={() => { setCurrentTab('personal-notes'); setIsMobileMenuOpen(false); }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">Notes</button><button onClick={() => { setCurrentTab('personal-routines'); setIsMobileMenuOpen(false); }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">Routines</button></div></div>
+                {(!hiddenTabs.includes('categories') || !hiddenTabs.includes('personal')) && <div className={`mt-4 border-t pt-4 ${isAdvanced ? 'border-slate-700' : accent.border}`}><p className="px-3 pb-2 text-[10px] font-bold tracking-[0.15em] text-slate-400">PERSONAL SPACE</p>{!hiddenTabs.includes('categories') && <button onClick={() => { setCurrentTab('categories'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm ${currentTab === 'categories' ? `font-bold ${isAdvanced ? accent.darkSoft : accent.soft}` : 'text-slate-600 dark:text-slate-300'}`}><Tags size={18} /> Categories</button>}{!hiddenTabs.includes('personal') && <><button onClick={() => { setCurrentTab('personal'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm ${currentTab.startsWith('personal') ? `font-bold ${isAdvanced ? accent.darkSoft : accent.soft}` : 'text-slate-600 dark:text-slate-300'}`}><UserRound size={18} /> Personal</button><div className="ml-8 space-y-1 py-1"><button onClick={() => { setCurrentTab('personal-notes'); setIsMobileMenuOpen(false); }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">Notes</button><button onClick={() => { setCurrentTab('personal-routines'); setIsMobileMenuOpen(false); }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">Routines</button></div></>}</div>}
               </nav>
-              <div className={`shrink-0 space-y-2 border-t p-3 ${isAdvanced ? 'border-slate-700' : 'border-emerald-100'}`}><button onClick={() => exportEverythingWorkbook().catch(console.error)} className={`flex w-full items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-bold text-white ${isAdvanced ? 'bg-violet-600' : 'bg-emerald-500'}`}><FileSpreadsheet size={17} /> Export Excel</button><button onClick={() => exportEverythingPdfStatement().catch(console.error)} className={`flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold ${isAdvanced ? 'text-slate-300 hover:bg-slate-800' : 'text-emerald-700 hover:bg-emerald-50'}`}><Download size={15} /> Export PDF statement</button></div>
+              <div className={`shrink-0 space-y-2 border-t p-3 ${isAdvanced ? 'border-slate-700' : accent.border}`}><button onClick={() => exportEverythingWorkbook().catch(console.error)} className={`flex w-full items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-bold text-white ${accent.solid}`}><FileSpreadsheet size={17} /> Export Excel</button><button onClick={() => exportEverythingPdfStatement().catch(console.error)} className={`flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold ${isAdvanced ? 'text-slate-300 hover:bg-slate-800' : accent.text}`}><Download size={15} /> Export PDF statement</button></div>
             </motion.aside>
           </>
         )}
@@ -272,9 +282,7 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
       <button
         onClick={toggleChat}
         className={`hidden md:flex fixed bottom-8 right-8 items-center justify-center gap-2 px-6 py-4 rounded-full shadow-2xl transition-transform hover:scale-105 active:scale-95 text-white font-bold bg-gradient-to-r z-50 ${
-          isAdvanced 
-            ? 'from-violet-600 to-fuchsia-600 shadow-violet-500/30' 
-            : 'from-emerald-400 to-teal-500 shadow-emerald-500/40 border border-emerald-300'
+          `${accent.gradient} ${accent.shadow}`
         }`}
       >
         <Bot size={24} />
@@ -284,10 +292,10 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
       {/* Mobile Bottom Navigation */}
       <div className={`fixed bottom-0 left-0 right-0 z-40 h-[calc(5.25rem+env(safe-area-inset-bottom))] rounded-t-3xl border-t pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(0,0,0,0.05)] md:hidden ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className="mx-auto flex h-[5.25rem] max-w-md items-center justify-around px-2">
-          {tabs.slice(0, 2).map(tab => { const Icon = tab.icon; const active = currentTab === tab.id || currentTab.startsWith(tab.id + '-'); return <button key={tab.id} onClick={() => setCurrentTab(tab.id)} className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 ${active ? (isAdvanced ? 'text-violet-400' : 'text-emerald-600') : 'text-slate-400'}`}><Icon size={22} strokeWidth={active ? 2.5 : 2} /><span className="max-w-full truncate text-[10px] font-semibold">{tab.label}</span></button>; })}
-          <div className="relative flex min-w-0 flex-1 justify-center"><button onClick={toggleChat} aria-label="Open FinGent Copilot" className={`absolute -top-9 flex h-16 w-16 items-center justify-center rounded-full text-white shadow-lg transition-transform active:scale-95 ${isAdvanced ? 'bg-gradient-to-tr from-violet-600 to-fuchsia-500 shadow-violet-500/50' : 'bg-gradient-to-tr from-emerald-400 to-teal-500 shadow-emerald-500/50'}`}><Bot size={27} /></button></div>
-          {tabs[2] && (() => { const tab = tabs[2]; const Icon = tab.icon; const active = currentTab === tab.id || currentTab.startsWith(tab.id + '-'); return <button onClick={() => setCurrentTab(tab.id)} className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 ${active ? (isAdvanced ? 'text-violet-400' : 'text-emerald-600') : 'text-slate-400'}`}><Icon size={22} strokeWidth={active ? 2.5 : 2} /><span className="max-w-full truncate text-[10px] font-semibold">{tab.label}</span></button>; })()}
-          <button onClick={() => setIsMobileMenuOpen(true)} className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 ${isMobileMenuOpen || !tabs.slice(0, 3).some(tab => currentTab === tab.id || currentTab.startsWith(tab.id + '-')) ? (isAdvanced ? 'text-violet-400' : 'text-emerald-600') : 'text-slate-400'}`}><MoreHorizontal size={23} /><span className="text-[10px] font-semibold">More</span></button>
+          {tabs.slice(0, 2).map(tab => { const Icon = tab.icon; const active = currentTab === tab.id || currentTab.startsWith(tab.id + '-'); return <button key={tab.id} onClick={() => setCurrentTab(tab.id)} className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 ${active ? (isAdvanced ? accent.darkText : accent.text) : 'text-slate-400'}`}><Icon size={22} strokeWidth={active ? 2.5 : 2} /><span className="max-w-full truncate text-[10px] font-semibold">{tab.label}</span></button>; })}
+          <div className="relative flex min-w-0 flex-1 justify-center"><button onClick={toggleChat} aria-label="Open FinGent Copilot" className={`absolute -top-9 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-tr text-white shadow-lg transition-transform active:scale-95 ${accent.gradient} ${accent.shadow}`}><Bot size={27} /></button></div>
+          {tabs[2] && (() => { const tab = tabs[2]; const Icon = tab.icon; const active = currentTab === tab.id || currentTab.startsWith(tab.id + '-'); return <button onClick={() => setCurrentTab(tab.id)} className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 ${active ? (isAdvanced ? accent.darkText : accent.text) : 'text-slate-400'}`}><Icon size={22} strokeWidth={active ? 2.5 : 2} /><span className="max-w-full truncate text-[10px] font-semibold">{tab.label}</span></button>; })()}
+          <button onClick={() => setIsMobileMenuOpen(true)} className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 ${isMobileMenuOpen || !tabs.slice(0, 3).some(tab => currentTab === tab.id || currentTab.startsWith(tab.id + '-')) ? (isAdvanced ? accent.darkText : accent.text) : 'text-slate-400'}`}><MoreHorizontal size={23} /><span className="text-[10px] font-semibold">More</span></button>
         </div>
       </div>
     </div>

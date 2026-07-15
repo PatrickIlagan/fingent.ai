@@ -68,6 +68,20 @@ export async function closeDb() {
   dbInstance = null;
 }
 
+export function validateDatabaseFile(databasePath: string) {
+  if (!databasePassphrase) throw new Error('Unlock FinGent before importing a database backup.');
+  const candidate = new Database(databasePath, { readonly: true });
+  try {
+    candidate.key(databasePassphrase);
+    const result = candidate.pragma('quick_check', { simple: true });
+    if (result !== 'ok') throw new Error('The selected file is not a healthy FinGent database.');
+  } catch {
+    throw new Error('This backup is invalid or was protected with a different FinGent app password.');
+  } finally {
+    candidate.close();
+  }
+}
+
 async function initDb(db: any) {
 
   await db.exec(`ALTER TABLE income_flows ADD COLUMN is_recurring BOOLEAN DEFAULT 0;`).catch(() => {});
