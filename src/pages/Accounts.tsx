@@ -44,6 +44,20 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
     { value: 'from-slate-700 to-slate-800', name: 'Slate' }
   ];
 
+  const defaultAccountType = category?.toLowerCase() === 'card'
+    ? 'Card'
+    : category?.toLowerCase() === 'digital'
+      ? 'Digital'
+      : category?.toLowerCase() === 'cash'
+        ? 'Cash'
+        : 'Bank';
+
+  const openAddAccountModal = () => {
+    setEditingAccount(null);
+    setNewAccount({ name: '', type: defaultAccountType, balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '', statement_date: '', due_date: '' });
+    setIsAddAccountModalOpen(true);
+  };
+
   
   const handleAccrueInterest = async () => {
     try {
@@ -56,7 +70,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
 
   
   const handleAddAccount = async () => {
-    if (!newAccount.name || !newAccount.balance) return;
+    if (!newAccount.name || newAccount.balance === '') return;
     try {
       if (editingAccount) {
         await fetch('/api/accounts/' + editingAccount.id, {
@@ -266,9 +280,10 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
     ...(account.transactions || []).map((transaction: any) => ({ Record: 'Transaction', Account: account.name, Date: transaction.date, Type: transaction.type, Category: transaction.category, Description: transaction.title, Notes: transaction.notes || '', Amount: transaction.amount }))
   ]);
 
-  if (selectedAccount) {
-    return (
-      <div className="space-y-6">
+  return (
+    <div className="space-y-6">
+      {selectedAccount ? (
+        <>
         <div className="flex justify-between items-center">
           <button 
             onClick={() => setSelectedAccount(null)}
@@ -276,7 +291,8 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
           >
             <ArrowUpRight className="w-4 h-4 rotate-[-135deg]" /> Back
           </button>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
+            <button onClick={(event) => handleOpenTransactionModal(selectedAccount, 'expense', event)} className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-bold text-white ${isAdvanced ? 'bg-violet-600 hover:bg-violet-500' : 'bg-emerald-500 hover:bg-emerald-600'}`}><Plus size={16} /> Add transaction</button>
             <button onClick={() => exportExcel(`${selectedAccount.name}-transactions`, [{ name: 'Transactions', rows: (selectedAccount.transactions || []).map((transaction: any) => ({ Date: transaction.date, Type: transaction.type, Category: transaction.category, Description: transaction.title, Notes: transaction.notes || '', Amount: transaction.amount })) }])} className={`px-3 py-2 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 shadow-sm'}`}>Excel</button>
             <button onClick={() => exportPdf(`${selectedAccount.name} Transaction History`, (selectedAccount.transactions || []).map((transaction: any) => ({ Date: transaction.date, Type: transaction.type, Category: transaction.category, Description: transaction.title, Notes: transaction.notes || '', Amount: transaction.amount })), `Account balance: PHP ${Number(selectedAccount.balance || 0).toLocaleString()}`)} className={`px-3 py-2 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 shadow-sm'}`}>PDF</button>
             <button onClick={() => {
@@ -293,7 +309,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                 due_date: selectedAccount.due_date ? selectedAccount.due_date.toString() : ''
               });
               setIsAddAccountModalOpen(true);
-            }} className={`p-2.5 rounded-xl transition-colors ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-400' : 'bg-white hover:bg-slate-50 text-slate-500 border border-slate-200 shadow-sm'}`}><Edit2 size={18} /></button>
+            }} className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-bold transition-colors ${isAdvanced ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 shadow-sm'}`}><Edit2 size={16} /> Edit account</button>
             <button onClick={handleDeleteAccount} className={`p-2.5 rounded-xl transition-colors ${isAdvanced ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400' : 'bg-rose-50 hover:bg-rose-100 text-rose-500 border border-rose-100 shadow-sm'}`}><Trash2 size={18} /></button>
           </div>
         </div>
@@ -321,21 +337,21 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                <div className="flex items-center gap-2 mb-2 text-slate-500 dark:text-slate-400">
                  <FileText size={18} /> <span className="text-sm font-medium uppercase tracking-wider">Statement Bal.</span>
                </div>
-               <p className="font-bold text-2xl">₱{selectedAccount.statementBalance?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0'}</p>
+               <p className="font-bold text-2xl">₱{Math.max(0, -Number(selectedAccount.balance || 0)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
              </div>
              <div>
                <div className="flex items-center gap-2 mb-2 text-slate-500 dark:text-slate-400">
                  <Calendar size={18} /> <span className="text-sm font-medium uppercase tracking-wider">Due Date</span>
                </div>
-               <p className="font-bold text-2xl">{selectedAccount.dueDate}</p>
+               <p className="font-bold text-2xl">{selectedAccount.due_date || 'Not set'}</p>
              </div>
              <div>
                <div className="flex items-center gap-2 mb-2 text-slate-500 dark:text-slate-400">
                  <CreditCard size={18} /> <span className="text-sm font-medium uppercase tracking-wider">Credit Limit</span>
                </div>
-               <p className="font-bold text-2xl">₱{selectedAccount.limit?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+               <p className="font-bold text-2xl">₱{Number(selectedAccount.credit_limit || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-700 rounded-full mt-3 overflow-hidden">
-                 <div className="h-full bg-rose-500 rounded-full" style={{ width: `${(Math.abs(selectedAccount.balance) / (selectedAccount.limit || 1)) * 100}%` }} />
+                 <div className="h-full bg-rose-500 rounded-full" style={{ width: `${Math.min(100, (Math.abs(selectedAccount.balance) / (selectedAccount.credit_limit || 1)) * 100)}%` }} />
                </div>
              </div>
           </div>
@@ -416,12 +432,9 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
         
 
       
-    </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
+        </>
+      ) : (
+        <>
       <div className="flex justify-between items-end">
         <div>
           <h2 className="text-2xl font-bold capitalize">{category ? `${category} Accounts` : 'All Accounts'}</h2>
@@ -433,7 +446,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
         <button onClick={handleAccrueInterest} className={`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 border transition-colors ${isAdvanced ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'}`}>
              Simulate Next Day (Accrue Interest)
         </button>
-        <button onClick={() => { setEditingAccount(null); setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '', statement_date: '', due_date: '' }); setIsAddAccountModalOpen(true); }} className={`px-4 py-2.5 rounded-xl font-bold text-sm ${isAdvanced ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}>
+        <button onClick={openAddAccountModal} className={`px-4 py-2.5 rounded-xl font-bold text-sm ${isAdvanced ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}>
           + Add Account
         </button>
         </div>
@@ -469,34 +482,34 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
             <div 
               key={acc.id} 
               onClick={() => setSelectedAccount(acc)}
-              className={`cursor-pointer rounded-3xl p-5 shadow-sm border transition-transform hover:-translate-y-1 ${isAdvanced ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-100 hover:border-emerald-200'}`}
+              className={`relative cursor-pointer overflow-hidden rounded-3xl bg-gradient-to-br ${acc.color} p-5 text-white shadow-sm ring-1 ring-black/5 transition-transform hover:-translate-y-1 hover:shadow-lg`}
             >
               <div className="flex justify-between items-start mb-4">
-                <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${acc.color} flex items-center justify-center text-white shadow-md`}>
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/20 bg-white/15 text-white shadow-md backdrop-blur-sm">
                   <Icon className="w-6 h-6" />
                 </div>
-                <span className="text-xs font-bold px-2 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 rounded-lg uppercase tracking-wider">
+                <span className="rounded-lg border border-white/15 bg-white/15 px-2 py-1 text-xs font-bold uppercase tracking-wider text-white/90 backdrop-blur-sm">
                   {acc.type}
                 </span>
               </div>
               <div className="flex flex-col">
-                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{acc.name}</p>
-                {acc.purpose && <p className="text-xs text-slate-400 dark:text-slate-500">{acc.purpose}</p>}
+                <p className="text-sm font-semibold text-white/85">{acc.name}</p>
+                {acc.purpose && <p className="text-xs text-white/65">{acc.purpose}</p>}
               </div>
               
               <div className="flex items-end justify-between mt-1">
                 <div className="flex flex-col">
                   <p className="text-2xl font-bold tracking-tight">₱{Math.abs(acc.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                   {acc.interest_rate_pa > 0 && (
-                    <p className="text-xs font-bold text-emerald-500 mt-1">
+                    <p className="mt-1 text-xs font-bold text-white/75">
                       {(acc.interest_rate_pa * 100).toFixed(2)}% p.a.
                     </p>
                   )}
                 </div>
                 
                   <div className="flex gap-1.5">
-                    <button onClick={(e) => handleOpenTransactionModal(acc, 'expense', e)} className={`p-1.5 rounded-lg transition-colors ${isAdvanced ? 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20' : 'bg-rose-50 text-rose-600 hover:bg-rose-100'}`}><Minus size={14} strokeWidth={3} /></button>
-                    <button onClick={(e) => handleOpenTransactionModal(acc, 'income', e)} className={`p-1.5 rounded-lg transition-colors ${isAdvanced ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}><Plus size={14} strokeWidth={3} /></button>
+                    <button aria-label={`Add expense to ${acc.name}`} onClick={(e) => handleOpenTransactionModal(acc, 'expense', e)} className="rounded-lg border border-white/15 bg-white/15 p-1.5 text-white transition-colors hover:bg-white/25"><Minus size={14} strokeWidth={3} /></button>
+                    <button aria-label={`Add income to ${acc.name}`} onClick={(e) => handleOpenTransactionModal(acc, 'income', e)} className="rounded-lg border border-white/15 bg-white/15 p-1.5 text-white transition-colors hover:bg-white/25"><Plus size={14} strokeWidth={3} /></button>
                   </div>
               </div>
 
@@ -518,20 +531,20 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                  const amountOwed = balanceAsOfStmt < 0 ? Math.abs(balanceAsOfStmt) : 0;
                  
                  return (
-                   <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 text-xs">
+                   <div className="mt-4 border-t border-white/20 pt-4 text-xs">
                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-slate-500 font-medium">Statement Balance</span>
-                        <span className="font-bold text-rose-500">₱{amountOwed.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        <span className="font-medium text-white/70">Statement Balance</span>
+                        <span className="font-bold text-white">₱{amountOwed.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                      </div>
                      {acc.due_date && (
                         <div className="flex justify-between items-center">
-                           <span className="text-slate-500">Due Date</span>
+                           <span className="text-white/70">Due Date</span>
                            <span className="font-medium">{acc.due_date}</span>
                         </div>
                      )}
                      {acc.statement_date && (
                         <div className="flex justify-between items-center mt-1">
-                           <span className="text-slate-500">Next Statement</span>
+                           <span className="text-white/70">Next Statement</span>
                            <span className="font-medium">{acc.statement_date}</span>
                         </div>
                      )}
@@ -539,16 +552,16 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                  );
               })()}
               {acc.credit_limit && (
-                <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
+                <div className="mt-4 border-t border-white/20 pt-4">
                   <div className="flex justify-between text-xs mb-1.5">
-                    <span className="text-slate-500">Credit Limit</span>
+                    <span className="text-white/70">Credit Limit</span>
                     <span className="font-medium">
                       ₱{acc.credit_limit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      <span className="text-rose-500 ml-1 font-bold">({((Math.abs(acc.balance) / acc.credit_limit) * 100).toFixed(0)}% used)</span>
+                      <span className="ml-1 font-bold text-white/75">({((Math.abs(acc.balance) / acc.credit_limit) * 100).toFixed(0)}% used)</span>
                     </span>
                   </div>
-                  <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                    <div className="h-full bg-rose-500 rounded-full" style={{ width: `${(Math.abs(acc.balance) / acc.credit_limit) * 100}%` }} />
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/15">
+                    <div className="h-full rounded-full bg-white/85" style={{ width: `${Math.min(100, (Math.abs(acc.balance) / acc.credit_limit) * 100)}%` }} />
                   </div>
                 </div>
               )}
@@ -556,6 +569,8 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
           );
         })}
       </div>
+        </>
+      )}
     
       {/* Add Account Modal */}
       {isAddAccountModalOpen && (
@@ -685,7 +700,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
               
               <button 
                 onClick={handleAddAccount}
-                disabled={!newAccount.name || !newAccount.balance}
+                disabled={!newAccount.name || newAccount.balance === ''}
                 className={`w-full py-4 rounded-xl font-bold mt-2 disabled:opacity-50 transition-colors ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white'}`}
               >
                 {editingAccount ? 'Save Changes' : 'Add Account'}
@@ -738,13 +753,13 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Title / Merchant</label>
+                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">{newTx.type === 'income' ? 'Source / Description' : 'Merchant / Description'}</label>
                   <input 
                     type="text" 
                     value={newTx.title}
                     onChange={(e) => setNewTx(prev => ({ ...prev, title: e.target.value }))}
                     className={`w-full px-4 py-3 rounded-xl text-sm outline-none transition-colors ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
-                    placeholder="e.g., Groceries, Salary"
+                    placeholder={newTx.type === 'income' ? 'e.g. Salary, client payment, interest' : 'e.g. Supermarket, rent, fuel'}
                   />
                 </div>
 

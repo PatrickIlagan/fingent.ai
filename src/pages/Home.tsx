@@ -12,6 +12,14 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
   const [balanceType, setBalanceType] = useState<'Total Balance' | 'Digital Wallets' | 'Cash on Hand' | 'Bank Accounts'>('Total Balance');
   const [isBalanceDropdownOpen, setIsBalanceDropdownOpen] = useState(false);
 
+  const accountColor = (account: any) => account.color || (String(account.type).toLowerCase() === 'card'
+    ? 'from-slate-700 to-slate-900'
+    : String(account.type).toLowerCase() === 'digital' || String(account.type).toLowerCase() === 'wallet'
+      ? 'from-blue-400 to-blue-600'
+      : String(account.type).toLowerCase() === 'cash'
+        ? 'from-violet-500 to-violet-700'
+        : 'from-emerald-500 to-emerald-700');
+
   useEffect(() => {
     async function fetchData() {
       const [accRes, txRes, wealthRes, liabRes, goalsRes, portRes, budgetRes] = await Promise.all([
@@ -46,11 +54,11 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
   if (balanceType === 'Total Balance') {
     totalCash = data.accounts.reduce((sum, a) => sum + (a.balance || 0), 0);
   } else if (balanceType === 'Digital Wallets') {
-    totalCash = data.accounts.filter(a => a.type === 'wallet').reduce((sum, a) => sum + (a.balance || 0), 0);
+    totalCash = data.accounts.filter(a => ['digital', 'wallet'].includes(String(a.type).toLowerCase())).reduce((sum, a) => sum + (a.balance || 0), 0);
   } else if (balanceType === 'Bank Accounts') {
-    totalCash = data.accounts.filter(a => a.type === 'bank').reduce((sum, a) => sum + (a.balance || 0), 0);
+    totalCash = data.accounts.filter(a => String(a.type).toLowerCase() === 'bank').reduce((sum, a) => sum + (a.balance || 0), 0);
   } else if (balanceType === 'Cash on Hand') {
-    totalCash = data.accounts.filter(a => a.type === 'cash').reduce((sum, a) => sum + (a.balance || 0), 0);
+    totalCash = data.accounts.filter(a => String(a.type).toLowerCase() === 'cash').reduce((sum, a) => sum + (a.balance || 0), 0);
   }
 
   const colors = ['#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#3B82F6', '#EC4899', '#14B8A6'];
@@ -359,11 +367,11 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 {data.accounts.map(acc => (
-                  <div key={acc.id} onClick={() => onNavigate?.('accounts')} className="bg-white dark:bg-slate-800 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-700 transition-transform hover:-translate-y-1 hover:shadow-md cursor-pointer">
-                    <div className="w-12 h-12 rounded-full bg-slate-50 dark:bg-slate-700/50 mb-4 flex items-center justify-center font-bold text-slate-400 border border-slate-100 dark:border-slate-700 shadow-sm">
-                      <Wallet className="w-6 h-6 text-emerald-500 opacity-80" />
+                  <div key={acc.id} onClick={() => onNavigate?.('accounts')} className={`cursor-pointer rounded-3xl bg-gradient-to-br ${accountColor(acc)} p-5 text-white shadow-sm ring-1 ring-black/5 transition-transform hover:-translate-y-1 hover:shadow-lg`}>
+                    <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/20 bg-white/15 shadow-sm backdrop-blur-sm">
+                      <Wallet className="w-6 h-6 text-white" />
                     </div>
-                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{acc.name}</p>
+                    <p className="text-sm font-semibold text-white/80">{acc.name}</p>
                     <p className="text-xl font-bold tracking-tight mt-1">₱{acc.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                   </div>
                 ))}

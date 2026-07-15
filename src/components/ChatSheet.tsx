@@ -28,8 +28,11 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
     window.setTimeout(async () => {
       const reply = runLocalCopilot(userMsg);
       const accountOptions = reply.transaction ? await getAccountOptions(reply.transaction.accountHint) : undefined;
+      const operationAccountOptions = reply.operation?.kind === 'liability'
+        ? await getAccountOptions(String(reply.operation.payload.account_hint || ''), reply.operation.payload.type === 'Credits' ? ['card', 'credit'] : undefined)
+        : undefined;
       const byokGuidance = shouldUseByokGuidance(reply) ? await getByokGuidance(reply).catch(() => null) : null;
-      setMessages(prev => [...prev, { role: 'agent', text: reply.text, actions: reply.actions, transaction: reply.transaction, operation: reply.operation, investment: reply.investment, transfer: reply.transfer, accountOptions, byokGuidance }]);
+      setMessages(prev => [...prev, { role: 'agent', text: reply.text, actions: reply.actions, transaction: reply.transaction, operation: reply.operation, investment: reply.investment, transfer: reply.transfer, accountOptions, operationAccountOptions, byokGuidance }]);
       if (reply.navigateNow) { onNavigate(reply.navigateNow); onClose(); }
       setIsTyping(false);
     }, 220);
@@ -58,7 +61,7 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
     }
   };
 
-  const saveOperation = async (operation: OperationDraft) => {
+  const saveOperation = async (operation: OperationDraft, account?: AccountOption) => {
     const endpoint = {
       account: '/api/accounts',
       liability: '/api/liabilities',
@@ -72,9 +75,10 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
       budget: '/api/budgets'
     }[operation.kind];
     try {
-      const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(operation.payload) });
+      const { account_hint: _accountHint, ...payload } = operation.payload;
+      const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, ...(operation.kind === 'liability' && account ? { account_id: account.id, paid_using: account.name } : {}) }) });
       if (!response.ok) throw new Error('Unable to save this ' + operation.kind.replace('-', ' ') + '.');
-      setMessages(prev => [...prev, { role: 'agent', text: 'Saved locally: ' + operation.label + '.' }]);
+      setMessages(prev => [...prev, { role: 'agent', text: 'Saved locally: ' + operation.label + (account ? (operation.payload.type === 'Credits' ? ' linked to ' : ' deducted from ') + account.name : '') + '.' }]);
       triggerRefresh();
     } catch (error) {
       setMessages(prev => [...prev, { role: 'agent', text: error instanceof Error ? error.message : 'Unable to save this action.' }]);
@@ -158,7 +162,7 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
                   {m.actions?.length > 0 && <div className="mt-2 flex max-w-[95%] flex-wrap gap-2">{m.actions.map((action: CopilotAction) => <button key={action.tab} onClick={() => { onNavigate(action.tab); onClose(); }} className={`rounded-full border px-3 py-1.5 text-xs font-bold transition-colors ${isAdvanced ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-slate-50'}`}>{action.label}</button>)}</div>}
                   {m.byokGuidance && <div className={`mt-2 max-w-[95%] rounded-xl border p-3 text-sm ${isAdvanced ? 'border-violet-500/30 bg-violet-500/10 text-violet-100' : 'border-violet-200 bg-violet-50 text-violet-950'}`}><p className="text-[11px] font-black uppercase tracking-wider text-violet-600 dark:text-violet-300">BYOK guidance · generic intent only, no chat shared</p><p className="mt-1 whitespace-pre-wrap">{m.byokGuidance}</p></div>}
                   {m.transaction && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50'}`}><p className="text-xs font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Private action draft</p><p className="mt-1 text-sm font-bold">{m.transaction.type === 'expense' ? 'Expense' : 'Income'} · PHP {m.transaction.amount.toLocaleString()} · {m.transaction.category}</p><p className="mt-1 text-xs text-slate-500">Date: {m.transaction.date} · External-AI-safe envelope: {m.transaction.redactedCommand}</p>{m.accountOptions?.length ? <div className="mt-3 flex flex-wrap gap-2">{m.accountOptions.map(account => <button key={account.id} onClick={() => saveTransaction(m.transaction!, account)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700">Save with {account.name}</button>)}</div> : <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">No matching local account was found. Add or select an account in Accounts first.</p>}</div>}
-                  {m.operation && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-violet-500/30 bg-violet-500/10' : 'border-violet-200 bg-violet-50'}`}><p className="text-xs font-black uppercase tracking-wider text-violet-700 dark:text-violet-300">Private action draft</p><p className="mt-1 text-sm font-bold">{m.operation.label}</p><p className="mt-1 text-xs text-slate-500">External-AI-safe envelope: {m.operation.redactedCommand}</p><button onClick={() => saveOperation(m.operation!)} className="mt-3 rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-700">Save locally</button></div>}
+                  {m.operation && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-violet-500/30 bg-violet-500/10' : 'border-violet-200 bg-violet-50'}`}><p className="text-xs font-black uppercase tracking-wider text-violet-700 dark:text-violet-300">Private action draft</p><p className="mt-1 text-sm font-bold">{m.operation.label}</p><p className="mt-1 text-xs text-slate-500">External-AI-safe envelope: {m.operation.redactedCommand}</p>{m.operation.kind === 'liability' ? <div className="mt-3 flex flex-wrap gap-2"><button onClick={() => saveOperation(m.operation!)} className="rounded-lg border border-violet-300 px-3 py-2 text-xs font-bold text-violet-700 hover:bg-violet-100 dark:border-violet-500/40 dark:text-violet-200 dark:hover:bg-violet-500/20">Save without account</button>{m.operationAccountOptions?.map(account => <button key={account.id} onClick={() => saveOperation(m.operation!, account)} className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-700">{m.operation.payload.type === 'Credits' ? 'Link ' : 'Deduct from '}{account.name}</button>)}</div> : <button onClick={() => saveOperation(m.operation!)} className="mt-3 rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-700">Save locally</button>}</div>}
                   {m.investment && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-sky-500/30 bg-sky-500/10' : 'border-sky-200 bg-sky-50'}`}><p className="text-xs font-black uppercase tracking-wider text-sky-700 dark:text-sky-300">Private investment draft</p><p className="mt-1 text-sm font-bold">{m.investment.ticker} · {m.investment.type} · USD {m.investment.invested.toLocaleString()}</p><p className="mt-1 text-xs text-slate-500">{m.investment.shares ? m.investment.shares + ' shares' : 'Share count will be auto-calculated from the current price when saved.'} Date: {m.investment.date}</p><p className="mt-1 text-xs text-slate-500">External-AI-safe envelope: {m.investment.redactedCommand}</p><button onClick={() => saveInvestment(m.investment!)} className="mt-3 rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white hover:bg-sky-700">Save investment locally</button></div>}
                   {m.transfer && <div className={`mt-3 max-w-[95%] rounded-xl border p-3 text-left ${isAdvanced ? 'border-amber-500/30 bg-amber-500/10' : 'border-amber-200 bg-amber-50'}`}><p className="text-xs font-black uppercase tracking-wider text-amber-700 dark:text-amber-300">Private transfer draft</p><p className="mt-1 text-sm font-bold">PHP {m.transfer.amount.toLocaleString()} · {m.transfer.fromHint} to {m.transfer.toHint}</p><p className="mt-1 text-xs text-slate-500">Date: {m.transfer.date} · External-AI-safe envelope: {m.transfer.redactedCommand}</p><button onClick={() => saveTransfer(m.transfer!)} className="mt-3 rounded-lg bg-amber-600 px-3 py-2 text-xs font-bold text-white hover:bg-amber-700">Save transfer locally</button></div>}
                 </div>
@@ -204,19 +208,32 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
   );
 }
 
-type AccountOption = { id: number; name: string };
-type ChatMessage = { role: 'user' | 'agent'; text: string; actions?: CopilotAction[]; transaction?: TransactionDraft; operation?: OperationDraft; investment?: InvestmentDraft; transfer?: TransferDraft; accountOptions?: AccountOption[]; byokGuidance?: string | null };
+type AccountOption = { id: number; name: string; type: string };
+type ChatMessage = { role: 'user' | 'agent'; text: string; actions?: CopilotAction[]; transaction?: TransactionDraft; operation?: OperationDraft; investment?: InvestmentDraft; transfer?: TransferDraft; accountOptions?: AccountOption[]; operationAccountOptions?: AccountOption[]; byokGuidance?: string | null };
 
-async function getAccountOptions(hint: string): Promise<AccountOption[]> {
+async function getAccountOptions(hint: string, allowedTypes?: string[]): Promise<AccountOption[]> {
   try {
     const response = await fetch('/api/copilot/accounts');
     if (!response.ok) return [];
-    const accounts = await response.json() as AccountOption[];
-    const normalizedHint = hint.toLowerCase().trim();
-    if (!normalizedHint) return accounts.slice(0, 5);
-    const exact = accounts.filter(account => account.name.toLowerCase() === normalizedHint);
-    if (exact.length) return exact;
-    return accounts.filter(account => account.name.toLowerCase().includes(normalizedHint) || normalizedHint.includes(account.name.toLowerCase())).slice(0, 5);
+    const allAccounts = await response.json() as AccountOption[];
+    const accounts = allowedTypes?.length ? allAccounts.filter(account => allowedTypes.includes(String(account.type).toLowerCase())) : allAccounts;
+    const normalize = (value: string) => value.toLowerCase().replace(/\b(?:my|account|wallet|credit card|on hand)\b/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+    const normalizedHint = normalize(hint);
+    if (!normalizedHint) return accounts.slice(0, 8);
+    const hintTokens = normalizedHint.split(' ');
+    const typeAliases: Record<string, string[]> = { cash: ['cash'], digital: ['digital', 'wallet', 'gcash', 'maya'], bank: ['bank'], card: ['card', 'credit'] };
+    const scored = accounts.map(account => {
+      const name = normalize(account.name);
+      const type = String(account.type).toLowerCase();
+      const typeMatch = Object.entries(typeAliases).some(([accountType, aliases]) => type.includes(accountType) && aliases.some(alias => normalizedHint.includes(alias)));
+      const score = name === normalizedHint ? 100
+        : name.includes(normalizedHint) || normalizedHint.includes(name) ? 85
+          : hintTokens.every(token => name.includes(token)) ? 75
+            : typeMatch ? 60
+              : 0;
+      return { account, score };
+    }).filter(result => result.score > 0).sort((left, right) => right.score - left.score);
+    return (scored.length ? scored.map(result => result.account) : accounts).slice(0, 8);
   } catch {
     return [];
   }

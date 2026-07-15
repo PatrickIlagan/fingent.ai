@@ -935,13 +935,13 @@ To run FinGent as a desktop application:
     try {
       const db = await getDb();
       const { id } = req.params;
-      const { name, type, balance, color, purpose, credit_limit, interest_rate_pa } = req.body;
+      const { name, type, balance, color, purpose, credit_limit, interest_rate_pa, statement_date = null, due_date = null } = req.body;
       
       const oldAccount = await db.get("SELECT balance FROM accounts WHERE id = ?", [id]);
       
       await db.run(
-        "UPDATE accounts SET name = ?, type = ?, balance = ?, color = ?, purpose = ?, credit_limit = ?, interest_rate_pa = ? WHERE id = ?",
-        [name, type, balance, color, purpose, credit_limit, interest_rate_pa, id]
+        "UPDATE accounts SET name = ?, type = ?, balance = ?, color = ?, purpose = ?, credit_limit = ?, interest_rate_pa = ?, statement_date = ?, due_date = ? WHERE id = ?",
+        [name, type, balance, color, purpose, credit_limit, interest_rate_pa, statement_date, due_date, id]
       );
       
       if (oldAccount && parseFloat(oldAccount.balance) !== parseFloat(balance)) {
@@ -1220,7 +1220,12 @@ To run FinGent as a desktop application:
   app.get("/api/liabilities", async (req, res) => {
     try {
       const db = await getDb();
-      const liabilities = await db.all("SELECT * FROM liabilities");
+      const liabilities = await db.all(`
+        SELECT l.*, a.name AS linked_account_name, a.type AS linked_account_type
+        FROM liabilities l
+        LEFT JOIN accounts a ON a.id = l.account_id
+        ORDER BY l.date ASC, l.id DESC
+      `);
       res.json(liabilities);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1230,12 +1235,38 @@ To run FinGent as a desktop application:
   app.post("/api/liabilities", async (req, res) => {
     try {
       const db = await getDb();
-      const { name, type, amount, date, provider, status, card_name, total_amount, remaining_amount, total_months, current_month, merchant, paid_using, is_recurring } = req.body;
-      const result = await db.run(
-        "INSERT INTO liabilities (name, type, amount, date, provider, status, card_name, total_amount, remaining_amount, total_months, current_month, merchant, paid_using, is_recurring) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [name, type, amount, date, provider, status, card_name, total_amount, remaining_amount, total_months, current_month, merchant, paid_using, is_recurring]
-      );
-      res.json({ id: result.lastInsertRowid });
+      const { name, type, amount, date, provider, status, card_name, total_amount, remaining_amount, total_months, current_month, merchant, paid_using, is_recurring, account_id = null } = req.body;
+      const numericAmount = Number(amount);
+      if (!name || !Number.isFinite(numericAmount) || numericAmount <= 0) return res.status(400).json({ error: 'A name and positive amount are required.' });
+      const linkedAccount = account_id ? await db.get("SELECT id, name, type FROM accounts WHERE id = ?", [account_id]) : null;
+      if (account_id && !linkedAccount) return res.status(400).json({ error: 'The selected account no longer exists.' });
+      if (type === 'Credits' && linkedAccount && !['card', 'credit'].includes(String(linkedAccount.type).toLowerCase())) return res.status(400).json({ error: 'Credit due dates can only be linked to a credit-card account.' });
+
+      await db.exec('BEGIN');
+      try {
+        const result = await db.run(
+          "INSERT INTO liabilities (name, type, amount, date, provider, status, card_name, total_amount, remaining_amount, total_months, current_month, merchant, paid_using, is_recurring, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [name, type, numericAmount, date, provider, status, card_name, total_amount, remaining_amount, total_months, current_month, merchant, paid_using, is_recurring, linkedAccount?.id || null]
+        );
+        // A Credit record represents an existing card statement/due date. It
+        // must not charge the card a second time. Other linked records represent
+        // money actually leaving the selected account and appear in its history.
+        if (linkedAccount && type !== 'Credits') {
+          await db.run("UPDATE accounts SET balance = balance - ? WHERE id = ?", [numericAmount, linkedAccount.id]);
+          const transactionDate = /^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) ? date : new Date().toISOString().slice(0, 10);
+          const category = type === 'Quick Expenses' ? 'Expenses' : type;
+          await db.run(
+            "INSERT INTO transactions (account_id, type, amount, category, description, notes, date) VALUES (?, 'expense', ?, ?, ?, ?, ?)",
+            [linkedAccount.id, numericAmount, category, name, `Linked to ${type} record #${result.lastInsertRowid}.`, transactionDate]
+          );
+          await upsertPersonalCategory(db, category, 'expense');
+        }
+        await db.exec('COMMIT');
+        res.json({ id: result.lastInsertRowid, account: linkedAccount?.name || null, deducted: Boolean(linkedAccount && type !== 'Credits') });
+      } catch (error) {
+        await db.exec('ROLLBACK');
+        throw error;
+      }
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

@@ -10,6 +10,7 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
   const isAdvanced = themeMode === 'advanced';
 
   const [liabilitiesData, setLiabilitiesData] = useState<any[]>([]);
+  const [accounts, setAccounts] = useState<any[]>([]);
 
   const { triggerRefresh, shouldRefresh } = useStore();
 
@@ -30,8 +31,12 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
             totalMonths: d.total_months,
             currentMonth: d.current_month,
             paidUsing: d.paid_using,
-            isRecurring: d.is_recurring
+            isRecurring: d.is_recurring,
+            accountId: d.account_id ? String(d.account_id) : '',
+            linkedAccountName: d.linked_account_name || ''
          }));
+
+         setAccounts(Array.isArray(accData) ? accData : []);
 
          // Append credit card statement balances as Credits
          if (Array.isArray(accData)) {
@@ -67,9 +72,11 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
                    notes: `Statement Date: ${card.statement_date}`,
                    icon: CreditCard,
                    color: 'text-rose-500 bg-rose-50 dark:bg-rose-500/20',
-                   cardName: card.name,
-                   provider: card.name,
-                   isCardStatement: true
+	                   cardName: card.name,
+	                   provider: card.name,
+	                   accountId: String(card.id),
+	                   linkedAccountName: card.name,
+	                   isCardStatement: true
                  });
                }
             });
@@ -85,7 +92,7 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
   const [newLiability, setNewLiability] = useState({ 
     title: '', amount: '', date: '', category: 'Quick Expenses', notes: '',
     merchant: '', paidUsing: 'Cash', provider: '', 
-    totalAmount: '', remainingAmount: '', totalMonths: '', currentMonth: '', cardName: '', isRecurring: false
+    totalAmount: '', remainingAmount: '', totalMonths: '', currentMonth: '', cardName: '', isRecurring: false, accountId: ''
   });
 
   const [includedCategories, setIncludedCategories] = useState<string[]>(['Quick Expenses', 'Bills', 'Credits', 'Debts', 'Installments']);
@@ -124,9 +131,10 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
       remaining_amount: parseFloat(newLiability.remainingAmount) || 0,
       total_months: parseInt(newLiability.totalMonths) || 0,
       current_month: parseInt(newLiability.currentMonth) || 0,
-      card_name: newLiability.cardName || newLiability.title,
-      is_recurring: newLiability.isRecurring,
-      status: 'Unpaid'
+	      card_name: newLiability.cardName || newLiability.title,
+	      is_recurring: newLiability.isRecurring,
+	      account_id: newLiability.accountId ? Number(newLiability.accountId) : null,
+	      status: 'Unpaid'
     };
 
     try {
@@ -143,7 +151,7 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
     setIsModalOpen(false);
     setNewLiability({ 
       title: '', amount: '', date: '', category: category ? category.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ') : 'Quick Expenses', notes: '',
-      merchant: '', paidUsing: 'Cash', provider: '', totalAmount: '', remainingAmount: '', totalMonths: '', currentMonth: '', cardName: '', isRecurring: false
+	      merchant: '', paidUsing: 'Cash', provider: '', totalAmount: '', remainingAmount: '', totalMonths: '', currentMonth: '', cardName: '', isRecurring: false, accountId: ''
     });
   };
 
@@ -171,6 +179,9 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
     { name: 'Debts', icon: Landmark, color: 'text-blue-500 bg-blue-50 dark:bg-blue-500/20' },
     { name: 'Installments', icon: Home, color: 'text-indigo-500 bg-indigo-50 dark:bg-indigo-500/20' }
   ];
+  const eligibleAccounts = newLiability.category === 'Credits'
+    ? accounts.filter(account => ['card', 'credit'].includes(String(account.type).toLowerCase()))
+    : accounts.filter(account => String(account.type).toLowerCase() !== 'investments');
 
   if (selectedLiability) {
     return (
@@ -213,7 +224,7 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
           <div className={`rounded-3xl p-6 sm:p-8 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
             <h3 className="text-lg font-bold mb-6">Details</h3>
             <div className="space-y-4">
-              {selectedLiability.type === 'Quick Expenses' && (
+	              {selectedLiability.type === 'Quick Expenses' && (
                 <>
                   <div className="flex justify-between border-b pb-3 border-slate-100 dark:border-slate-700">
                     <span className="text-slate-500 dark:text-slate-400">Merchant</span>
@@ -224,7 +235,14 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
                     <span className="font-medium">{selectedLiability.paidUsing || 'Cash'}</span>
                   </div>
                 </>
-              )}
+	              )}
+
+	              {selectedLiability.linkedAccountName && (
+	                <div className="flex justify-between border-b pb-3 border-slate-100 dark:border-slate-700">
+	                  <span className="text-slate-500 dark:text-slate-400">Linked Account</span>
+	                  <span className="font-medium">{selectedLiability.linkedAccountName}</span>
+	                </div>
+	              )}
 
               {(selectedLiability.type === 'Bills') && (
                 <>
@@ -474,7 +492,7 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
               </div>
 
               {/* Dynamic Fields Based on Category */}
-              {newLiability.category === 'Expenses' && (
+	              {newLiability.category === 'Quick Expenses' && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Merchant / Location</label>
@@ -501,7 +519,29 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
                     </select>
                   </div>
                 </div>
-              )}
+	              )}
+
+	              <div>
+	                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">
+	                  {newLiability.category === 'Credits' ? 'Linked Credit Card (Optional)' : 'Deduct From Account (Optional)'}
+	                </label>
+	                <select
+	                  value={newLiability.accountId}
+	                  onChange={(e) => {
+	                    const selected = accounts.find(account => String(account.id) === e.target.value);
+	                    setNewLiability(prev => ({ ...prev, accountId: e.target.value, paidUsing: selected?.name || prev.paidUsing }));
+	                  }}
+	                  className={`w-full px-4 py-3 rounded-xl text-sm outline-none transition-colors appearance-none ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
+	                >
+	                  <option value="">{newLiability.category === 'Credits' ? 'No linked card' : 'Do not deduct from an account'}</option>
+	                  {eligibleAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {account.type} · ₱{Number(account.balance || 0).toLocaleString()}</option>)}
+	                </select>
+	                <p className="mt-1 text-[11px] text-slate-500">
+	                  {newLiability.category === 'Credits'
+	                    ? 'This links the due date to a card without charging it again. Card purchases belong in the card account transaction history.'
+	                    : 'When selected, FinGent deducts the amount and records an expense in that account’s transaction history.'}
+	                </p>
+	              </div>
 
               {(newLiability.category === 'Bills' || newLiability.category === 'Recurring') && (
                 <div className="space-y-4">
@@ -599,7 +639,7 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
                   <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Category</label>
                   <select 
                     value={newLiability.category}
-                    onChange={(e) => setNewLiability(prev => ({ ...prev, category: e.target.value }))}
+	                    onChange={(e) => setNewLiability(prev => ({ ...prev, category: e.target.value, accountId: '' }))}
                     disabled={!isAll}
                     className={`w-full px-4 py-3 rounded-xl text-sm outline-none transition-colors appearance-none ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500 disabled:opacity-50' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500 disabled:opacity-50'}`}
                   >

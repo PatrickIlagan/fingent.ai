@@ -95,6 +95,7 @@ async function initDb(db: any) {
   await db.exec(`ALTER TABLE accounts ADD COLUMN statement_date INTEGER;`).catch(() => {});
   await db.exec(`ALTER TABLE accounts ADD COLUMN due_date INTEGER;`).catch(() => {});
   await db.exec(`ALTER TABLE transactions ADD COLUMN notes TEXT;`).catch(() => {});
+  await db.exec(`ALTER TABLE liabilities ADD COLUMN account_id INTEGER;`).catch(() => {});
 
   
   await db.exec(`
@@ -176,7 +177,8 @@ async function initDb(db: any) {
       current_month INTEGER,
       merchant TEXT,
       paid_using TEXT,
-      is_recurring BOOLEAN DEFAULT 0
+      is_recurring BOOLEAN DEFAULT 0,
+      account_id INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS career (

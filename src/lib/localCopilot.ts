@@ -172,6 +172,20 @@ function transactionAccountHint(message: string, intent: TransactionDraft['type'
 
 function parseTransactionCommand(message: string): TransactionDraft | null {
   const normalized = message.trim();
+  const quickDeposit = normalized.match(/^(?:please\s+)?(?:add|put|deposit|credit)\s+(?:₱|php\s*)?(\d[\d,]*(?:\.\d{1,2})?)\s+(?:pesos?\s+)?(?:on|to|into|for)\s+(?:my\s+)?(.+?)(?:\s+(?:today|yesterday|tomorrow|ngayon|kahapon|bukas))?[.!?]?$/i);
+  if (quickDeposit) {
+    const amount = Number(quickDeposit[1].replace(/,/g, ''));
+    const accountHint = cleanPhrase(quickDeposit[2]);
+    if (Number.isFinite(amount) && amount > 0 && accountHint) return {
+      type: 'income',
+      amount,
+      category: 'Deposit',
+      accountHint,
+      description: 'Account deposit',
+      date: dateFromMessage(normalized),
+      redactedCommand: 'Action: INCOME [AMOUNT] to [ACCOUNT] for [REASON].'
+    };
+  }
   const isExpense = /\b(spent|spend|paid|pay|bought|buy|purchase|purchased|charged|charge|ordered|order|expense|cash out|gumastos|nagastos|bumili|binili|nagbayad|bayad|umorder)\b/i.test(normalized)
     || (/\bused\b/i.test(normalized) && /\b(?:for|to\s+(?:buy|pay)|at)\b/i.test(normalized));
   const intent = isExpense ? 'expense'
@@ -271,11 +285,11 @@ function parseOperationCommand(message: string): OperationDraft | null {
     return operation('account', 'Account: ' + account[2], 'accounts', { name: account[2], type, balance: amountFrom(account[3] || ''), interest_rate_pa: 0, image_logo_name: '', color: '', purpose: '', credit_limit: null, statement_date: null, due_date: null });
   }
 
-  const liability = trimmed.match(/^(?:add|create)\s+(?:an?\s+)?(bill|debt|credit|installment|quick expense)\s+(.+?)\s+(?:for|amount|of)\s+(.+?)(?:\s+(?:due|on)\s+(\d{4}-\d{2}-\d{2}))?$/i);
+  const liability = trimmed.match(/^(?:add|create)\s+(?:an?\s+)?(bill|debt|credit|installment|quick expense)\s+(.+?)\s+(?:for|amount|of)\s+(.+?)(?:\s+(?:due|on)\s+(\d{4}-\d{2}-\d{2}))?(?:\s+(?:from|using|via|with)\s+(.+?))?$/i);
   if (liability) {
     const typeMap: Record<string, string> = { bill: 'Bills', debt: 'Debts', credit: 'Credits', installment: 'Installments', 'quick expense': 'Quick Expenses' };
     const amount = amountFrom(liability[3]);
-    if (amount > 0) return operation('liability', titleCase(liability[1]) + ': ' + liability[2], 'liabilities-' + typeMap[liability[1].toLowerCase()].toLowerCase(), { name: liability[2], type: typeMap[liability[1].toLowerCase()], amount, date: liability[4] || today(), provider: '', status: 'Unpaid', card_name: '', total_amount: amount, remaining_amount: amount, total_months: 0, current_month: 0, merchant: '', paid_using: '', is_recurring: false });
+    if (amount > 0) return operation('liability', titleCase(liability[1]) + ': ' + liability[2], 'liabilities-' + typeMap[liability[1].toLowerCase()].toLowerCase(), { name: liability[2], type: typeMap[liability[1].toLowerCase()], amount, date: liability[4] || today(), provider: '', status: 'Unpaid', card_name: '', total_amount: amount, remaining_amount: amount, total_months: 0, current_month: 0, merchant: '', paid_using: '', is_recurring: false, account_hint: cleanPhrase(liability[5] || '') });
   }
 
   const incomeFlow = trimmed.match(/^(?:add|create|set)\s+(?:an?\s+)?income flow\s+(.+?)\s+(?:for|amount|of)\s+(.+)$/i);
@@ -345,11 +359,18 @@ export function runLocalCopilot(message: string): CopilotReply {
 
   const transaction = parseTransactionCommand(trimmed);
   if (transaction) {
+    if ((transaction.type === 'expense' && transaction.category === 'General') || (transaction.type === 'income' && transaction.category === 'Income')) {
+      return { text: transaction.type === 'expense' ? 'What was the expense for? Include a short reason or category, for example “I spent 500 on groceries using GCash.”' : 'What was the income source? Include a short description, for example “I received 5,000 salary into BDO.”' };
+    }
     const accountText = transaction.accountHint ? ' from “' + transaction.accountHint + '”' : '';
     return {
-      text: 'I prepared a local ' + transaction.type + ' draft for ' + transaction.category + accountText + '. Review it, then explicitly save it. Your details stay in FinGent and are never sent to an AI service.',
+      text: 'I prepared a local ' + transaction.type + ' draft for ' + transaction.category + accountText + '. ' + (transaction.accountHint ? 'Confirm the matched account below.' : 'Choose the account before saving.') + ' Your details stay in FinGent and are never sent to an AI service.',
       transaction
     };
+  }
+
+  if (/\b(spent|paid|bought|expense|received|salary|income|deposit|gumastos|nagbayad|bumili|sweldo|sahod)\b/i.test(trimmed)) {
+    return { text: 'I need the amount, reason or income source, and account before I can prepare this safely. Example: “I spent 500 on food using GCash” or “I received 10,000 salary into BDO.”' };
   }
 
   if (/\b(privacy|private|data|secure|security)\b/.test(lower)) {

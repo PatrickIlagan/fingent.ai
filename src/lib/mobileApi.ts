@@ -416,6 +416,21 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
       if (shares && average) await insert('portfolio_transactions', { portfolio_id: id, type: 'Buy', shares, price: average, date: body.date || today() });
       return json({ id, shares, avg_price: average, date: body.date || today(), price_resolved: false });
     }
+    if (collection === 'liabilities') {
+      const amount = number(body.amount);
+      const linkedAccount = body.account_id ? await find('accounts', Number(body.account_id)) : null;
+      if (!body.name || amount <= 0) return json({ error: 'A name and positive amount are required.' }, 400);
+      if (body.account_id && !linkedAccount) return json({ error: 'The selected account no longer exists.' }, 400);
+      if (body.type === 'Credits' && linkedAccount && !['card', 'credit'].includes(String(linkedAccount.type).toLowerCase())) return json({ error: 'Credit due dates can only be linked to a credit-card account.' }, 400);
+      const id = await insert(collection, { ...body, amount, account_id: linkedAccount?.id || null });
+      if (linkedAccount && body.type !== 'Credits') {
+        const category = body.type === 'Quick Expenses' ? 'Expenses' : String(body.type || 'Expenses');
+        await adjustBalance(linkedAccount.id, amount, 'expense');
+        await insert('transactions', { account_id: linkedAccount.id, type: 'expense', amount, category, description: body.name, notes: `Linked to ${body.type} record #${id}.`, date: /^\d{4}-\d{2}-\d{2}$/.test(String(body.date || '')) ? body.date : today() });
+        await ensureCategory(category, 'expense');
+      }
+      return json({ id, account: linkedAccount?.name || null, deducted: Boolean(linkedAccount && body.type !== 'Credits') });
+    }
     const insertedId = await insert(collection, { ...body, active: collection === 'categories' ? 1 : body.active });
     if (collection === 'income_flows') await ensureCategory(body.category ?? 'Income', 'income');
     if (collection === 'income_flows' && body.name && body.date) await insert('calendar_events', { name: body.name, type: 'income', amount: body.amount, date: body.date, color: 'emerald', icon: 'ArrowDown', provider: 'Manual', source: 'income_flow' });
