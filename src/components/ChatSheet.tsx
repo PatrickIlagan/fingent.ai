@@ -127,7 +127,7 @@ export function ChatSheet({ isOpen, onClose, onNavigate }: { isOpen: boolean; on
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: '100%', opacity: 0 }}
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className={`fixed bottom-0 left-0 right-0 h-[80vh] rounded-t-3xl md:w-[400px] md:right-8 md:bottom-28 md:left-auto md:rounded-3xl md:h-[600px] md:shadow-2xl z-50 flex flex-col ${
+            className={`fixed bottom-0 left-0 right-0 h-[80vh] rounded-t-3xl pb-[env(safe-area-inset-bottom)] md:pb-0 md:w-[400px] md:right-8 md:bottom-28 md:left-auto md:rounded-3xl md:h-[600px] md:shadow-2xl z-50 flex flex-col ${
               isAdvanced ? 'bg-slate-900 border-t md:border border-slate-700 text-white' : 'bg-white border-t md:border border-slate-200 text-slate-900'
             }`}
           >

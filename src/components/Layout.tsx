@@ -114,7 +114,7 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
     <div data-accent={accentColor} className={`min-h-screen w-full flex flex-col md:flex-row transition-colors duration-500 ${isAdvanced ? 'bg-slate-900 text-slate-100 dark' : `bg-gradient-to-br ${accent.page} text-slate-900`}`}>
       
       {/* Top Header (Mobile & Desktop) */}
-      <header className={`fixed top-0 left-0 right-0 h-16 z-30 flex items-center justify-between px-4 md:px-8 border-b shadow-sm backdrop-blur-md ${isAdvanced ? 'bg-slate-900/80 border-slate-700' : 'bg-gradient-to-r from-emerald-50/80 to-teal-50/80 border-emerald-100'}`}>
+      <header className={`fixed top-0 left-0 right-0 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] z-30 flex items-center justify-between px-4 md:px-8 border-b shadow-sm backdrop-blur-md ${isAdvanced ? 'bg-slate-900/80 border-slate-700' : 'bg-gradient-to-r from-emerald-50/80 to-teal-50/80 border-emerald-100'}`}>
         <div className="flex items-center gap-2">
           <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-white font-bold bg-gradient-to-br ${accent.gradient} shadow-sm`}>
             F
@@ -138,7 +138,7 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
       </header>
 
       {/* Desktop Sidebar Nav */}
-      <aside className={`hidden md:flex flex-col fixed top-16 left-0 bottom-0 w-64 border-r z-20 pt-8 px-4 ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-gradient-to-b from-white to-emerald-50/30 border-emerald-100'}`}>
+      <aside className={`hidden md:flex flex-col fixed top-[calc(4rem+env(safe-area-inset-top))] left-0 bottom-0 w-64 border-r z-20 pt-8 px-4 ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-gradient-to-b from-white to-emerald-50/30 border-emerald-100'}`}>
         <div className="flex-1 space-y-2 overflow-y-auto hide-scrollbar pb-4">
           {selectedBusiness && (
             <div className="mb-4">
@@ -258,7 +258,7 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
         {isMobileMenuOpen && (
           <>
             <motion.button aria-label="Close navigation" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsMobileMenuOpen(false)} className="fixed inset-0 z-50 bg-slate-950/45 backdrop-blur-sm md:hidden" />
-            <motion.aside initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }} transition={{ type: 'spring', damping: 28, stiffness: 280 }} className={`fixed inset-y-0 left-0 z-[60] flex w-[min(20rem,88vw)] flex-col border-r shadow-2xl md:hidden ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-white border-emerald-100'}`}>
+            <motion.aside initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }} transition={{ type: 'spring', damping: 28, stiffness: 280 }} className={`fixed inset-y-0 left-0 z-[60] flex w-[min(20rem,88vw)] flex-col border-r pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl md:hidden ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-white border-emerald-100'}`}>
               <div className={`flex h-16 shrink-0 items-center justify-between border-b px-4 ${isAdvanced ? 'border-slate-700' : accent.border}`}><div className="flex items-center gap-2 font-black"><div className={`flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br text-sm text-white ${accent.gradient}`}>F</div>FinGent</div><button onClick={() => setIsMobileMenuOpen(false)} aria-label="Close navigation" className="rounded-xl p-2 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={20} /></button></div>
               <nav className="flex-1 overflow-y-auto p-3 pb-6">
                 {selectedBusiness && <button onClick={() => { setSelectedBusiness(null); setCurrentTab('business'); setIsMobileMenuOpen(false); }} className={`mb-3 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold ${isAdvanced ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-emerald-50'}`}><ArrowLeft size={16} /> Back to Portfolio</button>}
@@ -274,7 +274,7 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
         )}
       </AnimatePresence>
 
-      <main className="flex-1 pb-[calc(6.75rem+env(safe-area-inset-bottom))] md:pb-8 pt-20 md:pt-24 px-4 md:pl-72 md:pr-8 max-w-[1920px] mx-auto w-full min-h-screen overflow-y-auto hide-scrollbar">
+      <main className="flex-1 pb-[calc(6.75rem+env(safe-area-inset-bottom))] md:pb-8 pt-[calc(5rem+env(safe-area-inset-top))] md:pt-[calc(6rem+env(safe-area-inset-top))] px-4 md:pl-72 md:pr-8 max-w-[1920px] mx-auto w-full min-h-screen overflow-y-auto hide-scrollbar">
         {children}
       </main>
 

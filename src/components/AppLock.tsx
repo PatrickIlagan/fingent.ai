@@ -1,5 +1,6 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { LockKeyhole, ShieldCheck } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { createAppLock, hasAppLock, verifyAppLock } from '../lib/appLock';
 
 export function AppLock({ children, onUnlock }: { children: ReactNode; onUnlock: (password: string) => Promise<void> }) {
@@ -16,6 +17,19 @@ export function AppLock({ children, onUnlock }: { children: ReactNode; onUnlock:
       .catch(reason => { if (active) { setError(reason instanceof Error ? reason.message : 'Could not verify app protection.'); setMode('setup'); } });
     return () => { active = false; };
   }, []);
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const relockWhenHidden = () => {
+      if (document.visibilityState === 'hidden' && mode === 'unlocked') {
+        setPassword('');
+        setConfirm('');
+        setError('');
+        setMode('unlock');
+      }
+    };
+    document.addEventListener('visibilitychange', relockWhenHidden);
+    return () => document.removeEventListener('visibilitychange', relockWhenHidden);
+  }, [mode]);
   if (mode === 'checking') return null;
   if (mode === 'unlocked') return <>{children}</>;
 

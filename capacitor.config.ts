@@ -5,14 +5,29 @@ const config: CapacitorConfig = {
   appName: 'FinGent',
   webDir: 'dist',
   server: {
-    androidScheme: 'https'
+    androidScheme: 'https',
+    iosScheme: 'https'
   },
   plugins: {
     CapacitorSQLite: {
-      androidIsEncryption: true
+      androidIsEncryption: true,
+      iosDatabaseLocation: 'Library/CapacitorDatabase',
+      iosIsEncryption: true,
+      iosKeychainPrefix: 'ai.fingent.mobile'
     },
     FirebaseAuthentication: {
       providers: ['google.com']
+    }
+  },
+  experimental: {
+    ios: {
+      spm: {
+        packageOptions: {
+          '@capacitor-firebase/authentication': {
+            symlink: true
+          }
+        }
+      }
     }
   }
 };

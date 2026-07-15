@@ -249,7 +249,7 @@ async function portfolioTransaction(portfolioId: string, body: JsonRecord) {
 }
 
 async function route(pathname: string, search: URLSearchParams, method: string, body: JsonRecord) {
-  if (pathname === '/api/health') return json({ status: 'ok', platform: 'android-native' });
+  if (pathname === '/api/health') return json({ status: 'ok', platform: `${Capacitor.getPlatform()}-native` });
   if (pathname === '/api/system/sync/export' && method === 'GET') return json(await exportSyncSnapshot());
   if (pathname === '/api/system/sync/import' && method === 'POST') {
     await importSyncSnapshot(body);
@@ -542,7 +542,7 @@ export async function installNativeApi(passphrase: string) {
   const secret = await sqlite.isSecretStored();
   if (secret.result) {
     const valid = await sqlite.checkEncryptionSecret(passphrase);
-    if (!valid.result) throw new Error('This password cannot unlock the encrypted Android database.');
+    if (!valid.result) throw new Error('This password cannot unlock the encrypted mobile database.');
   } else {
     const exists = await sqlite.isDatabase(DATABASE);
     databaseMode = exists.result ? 'encryption' : 'secret';
@@ -557,7 +557,7 @@ export async function installNativeApi(passphrase: string) {
       const requestMethod = (init?.method ?? (typeof input === 'object' && 'method' in input ? input.method : 'GET')).toUpperCase();
       return await route(url.pathname, url.searchParams, requestMethod, await readBody(init));
     } catch (error) {
-      return json({ error: error instanceof Error ? error.message : 'The local Android database could not complete this request.' }, 500);
+      return json({ error: error instanceof Error ? error.message : 'The local mobile database could not complete this request.' }, 500);
     }
   };
 }
