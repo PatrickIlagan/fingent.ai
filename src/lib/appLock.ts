@@ -72,6 +72,24 @@ export async function verifyAppLock(password: string) {
   return difference === 0;
 }
 
+export const LOCKED_EVENT = 'fingent-locked';
+
+/** Desktop: closes the local database and ends the server session. */
+export async function lockApp() {
+  if (Capacitor.isNativePlatform()) return;
+  await fetch('/api/system/lock', { method: 'POST', cache: 'no-store', referrerPolicy: 'no-referrer' }).catch(() => undefined);
+}
+
+/** Desktop: return to the lock screen if the local server reports that its session ended. */
+export function installLockedResponseGuard() {
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const response = await originalFetch(input, init);
+    if (response.status === 401 && response.headers.get('X-FinGent-Locked')) window.dispatchEvent(new Event(LOCKED_EVENT));
+    return response;
+  };
+}
+
 export async function changeAppLock(currentPassword: string, nextPassword: string) {
   if (!Capacitor.isNativePlatform()) throw new Error('Changing the desktop app password is not available yet.');
   if (!(await verifyAppLock(currentPassword))) throw new Error('Your current app password is incorrect.');

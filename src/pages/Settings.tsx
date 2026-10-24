@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { useStore } from '../store/useStore';
 import { Settings as SettingsIcon, Bot, CheckCircle2, Download, Upload, Shield, KeyRound, LockKeyhole, Moon, Sun, RefreshCw, CloudUpload, CloudDownload, AlertTriangle, Monitor, Save, FileSpreadsheet, FileText, Palette, PanelsTopLeft, Eye, EyeOff } from 'lucide-react';
 import { isFirebaseConfigured } from '../lib/firebase';
@@ -10,6 +11,8 @@ import { restoreFromDrive, syncToDrive } from '../lib/driveSync';
 export function Settings() {
   const { themeMode, setThemeMode, accentColor, setAccentColor, hiddenTabs, toggleTabVisibility, triggerRefresh } = useStore();
   const isAdvanced = themeMode === 'advanced';
+  // The mobile apps keep records in their own encrypted store, so the desktop .db file cannot be exported or imported there.
+  const isNative = Capacitor.isNativePlatform();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [encPassword, setEncPassword] = useState('');
@@ -213,21 +216,23 @@ export function Settings() {
           <div className="md:col-span-2 grid gap-4 md:grid-cols-3">
             <div className={`rounded-2xl border p-4 ${isAdvanced ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50'}`}><h4 className="font-bold flex items-center gap-2"><FileSpreadsheet size={18} /> Complete Excel workbook</h4><p className="mt-1 text-sm text-slate-500">Export every module to a formatted multi-sheet workbook with formulas and charts.</p><button onClick={() => exportEverythingWorkbook().catch(error => alert(error.message || 'Excel export failed.'))} className={`mt-3 rounded-xl px-3 py-2 text-sm font-bold ${isAdvanced ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>Export Excel</button></div>
             <div className={`rounded-2xl border p-4 ${isAdvanced ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50'}`}><h4 className="font-bold flex items-center gap-2"><FileText size={18} /> Financial statement PDF</h4><p className="mt-1 text-sm text-slate-500">Save a styled statement with balances, transactions, ventures, and freelancing data.</p><button onClick={() => exportEverythingPdfStatement().catch(error => alert(error.message || 'PDF export failed.'))} className={`mt-3 rounded-xl px-3 py-2 text-sm font-bold ${isAdvanced ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-white hover:bg-slate-900'}`}>Export PDF</button></div>
-            <div className={`rounded-2xl border p-4 ${isAdvanced ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50'}`}><h4 className="font-bold flex items-center gap-2"><Download size={18} /> Complete database backup</h4><p className="mt-1 text-sm text-slate-500">Export the encrypted <code>.db</code> for full-fidelity restore. Import requires the same FinGent app password.</p><button onClick={handleExport} className={`mt-3 rounded-xl px-3 py-2 text-sm font-bold border ${isAdvanced ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-white'}`}>Export database</button></div>
+            {isNative
+              ? <div className={`rounded-2xl border p-4 ${isAdvanced ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50'}`}><h4 className="font-bold flex items-center gap-2"><Download size={18} /> Complete backup</h4><p className="mt-1 text-sm text-slate-500">On mobile, use the encrypted Google Drive sync above for a full backup. It restores on Android, iOS, and Windows.</p></div>
+              : <div className={`rounded-2xl border p-4 ${isAdvanced ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50'}`}><h4 className="font-bold flex items-center gap-2"><Download size={18} /> Complete database backup</h4><p className="mt-1 text-sm text-slate-500">Export the encrypted <code>.db</code> for full-fidelity restore. Import requires the same FinGent app password.</p><button onClick={handleExport} className={`mt-3 rounded-xl px-3 py-2 text-sm font-bold border ${isAdvanced ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-white'}`}>Export database</button></div>}
           </div>
           <div className="md:col-span-2 mb-2">
             <h4 className="font-bold flex items-center gap-2 mb-2"><Monitor size={18} /> FinGent for Windows</h4>
             <p className="text-sm text-slate-500">Use the official <code>FinGent-Setup.exe</code> installer distributed with a release. The installed app runs its own loopback-only server and stores your SQLite database in your Windows user profile—not in the installer folder or a hosted service.</p>
           </div>
         </div>
-        <div className="pt-6 border-t border-slate-100 dark:border-slate-700 grid md:grid-cols-2 gap-4">
+        {!isNative && <div className="pt-6 border-t border-slate-100 dark:border-slate-700 grid md:grid-cols-2 gap-4">
           <div className="md:col-span-2">
             <h4 className="font-bold flex items-center gap-2 mb-2"><Upload size={18} /> Local Import</h4>
             <p className="text-sm text-slate-500 mb-4">Restore a full-fidelity <code>.db</code> backup. FinGent validates the SQLite file before replacing the current database; this operation cannot import Excel or PDF exports.</p>
             <input type="file" accept=".db" className="hidden" ref={fileInputRef} onChange={handleImport} />
             <button disabled={importing} onClick={() => fileInputRef.current?.click()} className={`px-4 py-2 rounded-xl text-sm font-bold border transition-colors disabled:opacity-60 ${isAdvanced ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-slate-50'}`}>{importing ? <RefreshCw size={16} className="mr-1 inline animate-spin" /> : null}Import database</button>
           </div>
-        </div>
+        </div>}
       </div>
 
       <div className={`rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>

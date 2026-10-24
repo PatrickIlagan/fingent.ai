@@ -1,7 +1,10 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { LockKeyhole, ShieldCheck } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
-import { createAppLock, hasAppLock, verifyAppLock } from '../lib/appLock';
+import { LOCKED_EVENT, createAppLock, hasAppLock, lockApp, verifyAppLock } from '../lib/appLock';
+
+const DESKTOP_IDLE_LOCK_MS = 10 * 60 * 1000;
+const ACTIVITY_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'];
 
 export function AppLock({ children, onUnlock }: { children: ReactNode; onUnlock: (password: string) => Promise<void> }) {
   const [mode, setMode] = useState<'checking' | 'setup' | 'unlock' | 'unlocked'>('checking');
@@ -29,6 +32,31 @@ export function AppLock({ children, onUnlock }: { children: ReactNode; onUnlock:
     };
     document.addEventListener('visibilitychange', relockWhenHidden);
     return () => document.removeEventListener('visibilitychange', relockWhenHidden);
+  }, [mode]);
+  useEffect(() => {
+    // Desktop windows stay open for long periods, so lock after inactivity
+    // or when the local server reports that the session has ended.
+    if (Capacitor.isNativePlatform() || mode !== 'unlocked') return;
+    const relock = () => {
+      setPassword('');
+      setConfirm('');
+      setError('');
+      setMode('unlock');
+    };
+    let lastActivity = Date.now();
+    const markActive = () => { lastActivity = Date.now(); };
+    const idleCheck = window.setInterval(() => {
+      if (Date.now() - lastActivity < DESKTOP_IDLE_LOCK_MS) return;
+      void lockApp();
+      relock();
+    }, 30_000);
+    ACTIVITY_EVENTS.forEach(name => window.addEventListener(name, markActive, { passive: true }));
+    window.addEventListener(LOCKED_EVENT, relock);
+    return () => {
+      window.clearInterval(idleCheck);
+      ACTIVITY_EVENTS.forEach(name => window.removeEventListener(name, markActive));
+      window.removeEventListener(LOCKED_EVENT, relock);
+    };
   }, [mode]);
   if (mode === 'checking') return null;
   if (mode === 'unlocked') return <>{children}</>;

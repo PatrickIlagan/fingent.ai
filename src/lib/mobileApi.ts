@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection } from '@capacitor-community/sqlite';
+import { businessMetrics, categoryAliasGroup, resolveCategoryAlias } from './sharedRules';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -41,6 +42,7 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 
 const today = () => new Date().toISOString().slice(0, 10);
 const number = (value: unknown) => Number(value) || 0;
+const isActive = (record: JsonRecord) => record.active !== 0 && record.active !== false;
 
 async function getDatabase() {
   if (database) return database;
@@ -153,6 +155,31 @@ async function ensureCategory(name: unknown, type: 'income' | 'expense') {
   await insert('categories', { name: normalized, type, active: 1 });
 }
 
+async function resolveCategory(value: unknown) {
+  const supplied = String(value ?? 'Uncategorized').trim() || 'Uncategorized';
+  if (!categoryAliasGroup(supplied)) return supplied;
+  return resolveCategoryAlias(supplied, (await list('categories')).filter(isActive).map((item) => String(item.name)));
+}
+
+// Like the server, categories used on past transactions appear in Categories unless archived.
+async function backfillCategories(transactions: JsonRecord[]) {
+  const used = new Map<string, { name: string; types: Set<string> }>();
+  for (const transaction of transactions) {
+    const name = String(transaction.category ?? '').trim();
+    if (!name) continue;
+    const entry = used.get(name.toLowerCase()) ?? { name, types: new Set<string>() };
+    entry.types.add(transaction.type === 'income' ? 'income' : 'expense');
+    used.set(name.toLowerCase(), entry);
+  }
+  const categories = await list('categories');
+  for (const [key, entry] of used) {
+    const type = entry.types.size > 1 ? 'both' : [...entry.types][0];
+    const existing = categories.find((item) => String(item.name).toLowerCase() === key);
+    if (!existing) await insert('categories', { name: entry.name, type, active: 1 });
+    else if (isActive(existing) && existing.type !== type && existing.type !== 'both') await replace('categories', existing.id as number, { ...existing, type: 'both' });
+  }
+}
+
 async function adjustBalance(accountId: unknown, amount: unknown, type: unknown, reverse = false) {
   const account = await find('accounts', Number(accountId));
   if (!account) return;
@@ -211,7 +238,7 @@ async function copilotInvestment(body: JsonRecord) {
 async function transactionResponse(method: string, path: string, body: JsonRecord) {
   const id = path.split('/').pop()!;
   if (method === 'POST') {
-    const category = String(body.category ?? 'Uncategorized').trim() || 'Uncategorized';
+    const category = await resolveCategory(body.category);
     await adjustBalance(body.account_id, body.amount, body.type);
     await ensureCategory(category, body.type === 'income' ? 'income' : 'expense');
     return json({ id: await insert('transactions', { ...body, category, notes: body.notes ?? '', date: body.date || today() }) });
@@ -220,7 +247,7 @@ async function transactionResponse(method: string, path: string, body: JsonRecor
   if (!previous) return json({ error: 'Transaction not found.' }, 404);
   if (method === 'PUT') {
     await adjustBalance(previous.account_id, previous.amount, previous.type, true);
-    const category = String(body.category ?? 'Uncategorized').trim() || 'Uncategorized';
+    const category = await resolveCategory(body.category);
     await adjustBalance(body.account_id, body.amount, body.type);
     await ensureCategory(category, body.type === 'income' ? 'income' : 'expense');
     await replace('transactions', id, { ...previous, ...body, category, notes: body.notes ?? '', date: body.date || today() });
@@ -363,10 +390,13 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
     }
     if (method === 'GET') {
       const db = await getDatabase();
+      const weekStart = new Date(`${today()}T00:00:00Z`);
+      weekStart.setUTCDate(weekStart.getUTCDate() - 6);
       const routineRows = (await list('personal_routines')).filter((item) => item.active !== 0 && item.active !== false);
       return json(await Promise.all(routineRows.map(async (item) => {
         const completed = await db.query('SELECT COUNT(*) AS count FROM mobile_routine_logs WHERE routine_id = ? AND date = ?', [item.id as number, today()]);
-        return { ...item, completed_today: Number(completed.values?.[0]?.count ?? 0), completed_this_week: 0 };
+        const week = await db.query('SELECT COUNT(*) AS count FROM mobile_routine_logs WHERE routine_id = ? AND date >= ?', [item.id as number, weekStart.toISOString().slice(0, 10)]);
+        return { ...item, completed_today: Number(completed.values?.[0]?.count ?? 0), completed_this_week: Number(week.values?.[0]?.count ?? 0) };
       })));
     }
   }
@@ -380,7 +410,7 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
   }
 
   const matched = Object.entries(collections).find(([base]) => pathname === base || new RegExp(`^${base}/\\d+$`).test(pathname));
-  if (!matched) return json({ error: `Android endpoint not implemented: ${pathname}` }, 501);
+  if (!matched) return json({ error: `This feature is not available in the mobile app: ${pathname}` }, 501);
   const [base, collection] = matched;
   const id = pathname === base ? null : pathname.split('/').pop()!;
 
@@ -390,9 +420,15 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
       const accounts = await list('accounts');
       records = records.map((transaction) => ({ ...transaction, account_name: accounts.find((account) => account.id === transaction.account_id)?.name ?? 'Deleted account' }));
     }
+    if (collection === 'businesses') {
+      const [items, transactions] = await Promise.all([list('business_items'), list('business_transactions')]);
+      const ownedBy = (business: JsonRecord) => (record: JsonRecord) => Number(record.business_id) === Number(business.id);
+      records = records.map((business) => ({ ...business, ...businessMetrics(business.type, transactions.filter(ownedBy(business)), items.filter(ownedBy(business))) }));
+    }
     if (collection === 'categories') {
       const transactions = await list('transactions');
-      records = records.filter((item) => item.active !== 0 && item.active !== false).map((category) => {
+      await backfillCategories(transactions);
+      records = (await list('categories')).filter((item) => item.active !== 0 && item.active !== false).map((category) => {
         const related = transactions.filter((transaction) => String(transaction.category).toLowerCase() === String(category.name).toLowerCase());
         return { ...category, transaction_count: related.length, total_amount: related.reduce((sum, transaction) => sum + number(transaction.amount), 0), last_used: related.map((transaction) => String(transaction.date ?? '')).sort().at(-1) ?? null };
       });
@@ -513,7 +549,17 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
       for (const tx of await list('transactions')) if (String(tx.category).toLowerCase() === oldName.toLowerCase()) await replace('transactions', tx.id as number, { ...tx, category: nextName });
       await replace(collection, id, { ...existing, ...body, name: nextName, active: 1 });
     } else await replace(collection, id, { ...existing, ...body });
+    // Like the server, a manual balance change is recorded so account history still adds up.
+    if (collection === 'accounts' && body.balance !== undefined && number(body.balance) !== number(existing.balance)) {
+      const difference = number(body.balance) - number(existing.balance);
+      await insert('transactions', { account_id: existing.id, type: difference > 0 ? 'income' : 'expense', amount: Math.abs(difference), category: 'Adjustment', description: 'Balance Adjustment', notes: '', date: new Date().toISOString() });
+    }
     return json({ success: true });
+  }
+  if (collection === 'businesses') {
+    for (const childCollection of ['business_deals', 'business_items', 'business_transactions']) {
+      for (const child of await list(childCollection)) if (Number(child.business_id) === Number(existing.id)) await remove(childCollection, child.id as number);
+    }
   }
   if (collection === 'accounts') {
     for (const transaction of await list('transactions')) if (transaction.account_id === existing.id) await remove('transactions', transaction.id as number);

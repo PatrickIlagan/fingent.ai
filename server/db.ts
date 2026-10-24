@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3-multiple-ciphers';
+import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
 
@@ -8,9 +9,26 @@ let databasePassphrase: Buffer | null = null;
 
 export async function unlockDatabase(passphrase: string) {
   if (!passphrase || passphrase.length < 12) throw new Error('A valid app password is required to unlock the local database.');
-  if (dbInstance) return;
-  databasePassphrase = Buffer.from(passphrase, 'utf8');
-  await getDb();
+  const candidate = Buffer.from(passphrase, 'utf8');
+  if (dbInstance) {
+    // Already open: only the password that opened it is accepted.
+    if (databasePassphrase && candidate.length === databasePassphrase.length && crypto.timingSafeEqual(candidate, databasePassphrase)) return;
+    throw new Error('The local database could not be unlocked with this app password.');
+  }
+  databasePassphrase = candidate;
+  try {
+    await getDb();
+  } catch (error) {
+    databasePassphrase = null;
+    throw error;
+  }
+}
+
+/** Closes the database and forgets its key until the app password is entered again. */
+export async function lockDatabase() {
+  await closeDb();
+  databasePassphrase?.fill(0);
+  databasePassphrase = null;
 }
 
 export function getDataDir() {

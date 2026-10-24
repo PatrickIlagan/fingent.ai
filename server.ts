@@ -3,48 +3,20 @@ import multer from "multer";
 import fsModule from "fs";
 import crypto from "crypto";
 import path from "path";
-import { closeDb, getDataDir, getDb, unlockDatabase, validateDatabaseFile } from "./server/db";
+import { closeDb, getDataDir, getDb, lockDatabase, unlockDatabase, validateDatabaseFile } from "./server/db";
+import { businessMetrics, categoryAliasGroup, formatTicker, resolveCategoryAlias as resolveCategoryLabel } from "./src/lib/sharedRules";
 // yahoo-finance2 exposes its constructor as CommonJS's `.default`. Using an
 // explicit require keeps the production CJS bundle compatible with Electron.
 const YahooFinance = require('yahoo-finance2').default;
 const yahooFinance = new YahooFinance();
 
-// Category families keep English, Tagalog, and Taglish labels in one budget/reporting bucket.
-// The user's existing preferred category label is preserved whenever possible.
-const CATEGORY_ALIAS_GROUPS = [
-  { canonical: 'Food', aliases: ['food', 'pagkain', 'food & dining', 'dining', 'groceries', 'grocery'] },
-  { canonical: 'Transport', aliases: ['transport', 'transportation', 'pamasahe', 'commute'] },
-  { canonical: 'Housing', aliases: ['housing', 'bahay', 'rent', 'upa'] },
-  { canonical: 'Utilities', aliases: ['utilities', 'utility', 'kuryente', 'tubig', 'internet', 'load'] },
-  { canonical: 'Health', aliases: ['health', 'kalusugan', 'gamot', 'medical'] },
-  { canonical: 'Education', aliases: ['education', 'edukasyon', 'tuition', 'school', 'paaralan'] },
-  { canonical: 'Entertainment', aliases: ['entertainment', 'aliwan', 'sine', 'laro'] },
-  { canonical: 'Shopping', aliases: ['shopping', 'pamimili', 'clothing', 'damit'] }
-];
-
-function normalizedCategoryName(value: string) {
-  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
-}
-
 async function resolveCategoryAlias(db: any, value: string) {
-  const supplied = String(value || '').trim();
-  const normalized = normalizedCategoryName(supplied);
-  const group = CATEGORY_ALIAS_GROUPS.find(item => item.aliases.includes(normalized));
-  if (!group) return supplied;
+  const group = categoryAliasGroup(value);
+  if (!group) return String(value || '').trim();
 
   const placeholders = group.aliases.map(() => '?').join(', ');
   const existing = await db.all(`SELECT name FROM categories WHERE active = 1 AND LOWER(name) IN (${placeholders})`, group.aliases);
-  const canonical = existing.find((item: { name: string }) => normalizedCategoryName(item.name) === normalizedCategoryName(group.canonical));
-  return canonical?.name || existing[0]?.name || group.canonical;
-}
-
-function formatTicker(ticker: string, type: string) {
-  if (!ticker) return ticker;
-  let t = ticker.toUpperCase().trim();
-  if (type === "Cryptos" && !t.includes("-")) {
-    t = t + "-USD";
-  }
-  return t;
+  return resolveCategoryLabel(value, existing.map((item: { name: string }) => item.name));
 }
 
 async function recalculateFreelanceServiceHours(db: any, serviceId: string | number) {
@@ -138,6 +110,29 @@ function saveAppLock(password: string) {
   fsModule.renameSync(temporary, target);
 }
 
+// Unlocking issues an HttpOnly session cookie, and every other /api route
+// requires it. Local programs and other web pages therefore cannot read data
+// from the loopback server without the app password.
+const SESSION_COOKIE = 'fingent_session';
+const PUBLIC_API_PATHS = new Set(['/api/health', '/api/system/lock/status', '/api/system/lock/setup', '/api/system/lock/unlock']);
+const activeSessions = new Set<string>();
+
+function sessionToken(req: express.Request) {
+  const cookie = String(req.headers.cookie || '').split(';').map(part => part.trim()).find(part => part.startsWith(`${SESSION_COOKIE}=`));
+  return cookie ? cookie.slice(SESSION_COOKIE.length + 1) : '';
+}
+
+function startSession(res: express.Response) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  activeSessions.add(token);
+  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/`);
+}
+
+function endSessions(res: express.Response) {
+  activeSessions.clear();
+  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
+}
+
 
 async function startServer() {
   const app = express();
@@ -158,6 +153,15 @@ async function startServer() {
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
     next();
   });
+  app.use((req, res, next) => {
+    // Express routing ignores case and repeated slashes, so normalize before deciding.
+    const pathname = req.path.toLowerCase().replace(/\/{2,}/g, '/').replace(/(.)\/$/, '$1');
+    if (pathname !== '/api' && !pathname.startsWith('/api/')) return next();
+    if (PUBLIC_API_PATHS.has(pathname)) return next();
+    if (activeSessions.has(sessionToken(req))) return next();
+    res.setHeader('X-FinGent-Locked', '1');
+    res.status(401).json({ error: 'FinGent is locked. Unlock the app to continue.' });
+  });
 
   // The Electron wrapper uses a fresh loopback port on every launch. Store the
   // password verifier beside the encrypted database instead of browser storage,
@@ -176,6 +180,7 @@ async function startServer() {
       // if they mistype the existing password during the one-time migration.
       await unlockDatabase(password);
       saveAppLock(password);
+      startSession(res);
       res.json({ success: true });
     } catch (error: any) { res.status(401).json({ error: error.message || 'Could not protect FinGent.' }); }
   });
@@ -187,15 +192,17 @@ async function startServer() {
       if (!record) return res.status(409).json({ error: 'No app password is configured yet.' });
       if (!matchesAppLock(password, record)) return res.status(401).json({ error: 'Incorrect password.' });
       await unlockDatabase(password);
+      startSession(res);
       res.json({ success: true });
     } catch (error: any) { res.status(401).json({ error: error.message || 'Could not unlock FinGent.' }); }
   });
 
-  app.post('/api/system/unlock', async (req, res) => {
+  app.post('/api/system/lock', async (_req, res) => {
     try {
-      await unlockDatabase(String(req.body?.password || ''));
+      await lockDatabase();
+      endSessions(res);
       res.json({ success: true });
-    } catch (error: any) { res.status(401).json({ error: error.message || 'Could not unlock FinGent.' }); }
+    } catch (error: any) { res.status(500).json({ error: error.message || 'Could not lock FinGent.' }); }
   });
 
   // API Routes
@@ -598,6 +605,8 @@ To run FinGent as a desktop application:
       const db = await getDb();
       const historical = await db.all("SELECT category, GROUP_CONCAT(DISTINCT type) AS types FROM transactions WHERE TRIM(category) != '' GROUP BY LOWER(category)");
       for (const row of historical) {
+        // Archived categories stay on historic transactions without being revived here.
+        if (await db.get("SELECT id FROM categories WHERE name = ? COLLATE NOCASE AND active = 0", [row.category])) continue;
         await upsertPersonalCategory(db, row.category, String(row.types || '').includes('income') ? 'income' : 'expense');
         if (String(row.types || '').includes('income') && String(row.types || '').includes('expense')) {
           const category = await db.get("SELECT id FROM categories WHERE name = ? COLLATE NOCASE", [row.category]);
@@ -1428,30 +1437,7 @@ To run FinGent as a desktop application:
       for (const b of businesses) {
          const transactions = await db.all("SELECT * FROM business_transactions WHERE business_id = ?", [b.id]);
          const items = await db.all("SELECT * FROM business_items WHERE business_id = ?", [b.id]);
-         
-         const thisMonth = new Date().toISOString().slice(0, 7);
-         const active = (item: any) => item.status === 'Active';
-         if (b.type === 'Store') {
-            const orders = transactions.filter((t:any) => t.type === 'income' && String(t.date || '').startsWith(thisMonth));
-            b.mrr = orders.reduce((sum:any, t:any) => sum + (Number(t.amount) || 0), 0);
-            b.customers = new Set(orders.map((t:any) => t.description).filter(Boolean)).size;
-         } else if (b.type === 'SaaS') {
-            const subscriptions = items.filter((i:any) => ['user', 'subscription'].includes(i.type) && active(i));
-            b.customers = subscriptions.length;
-            b.mrr = subscriptions.reduce((sum:any, item:any) => sum + (Number(item.value) || 0), 0);
-         } else if (['Agency', 'Professional Services'].includes(b.type)) {
-            const clients = items.filter((i:any) => i.type === 'client' && active(i));
-            b.customers = clients.length;
-            b.mrr = clients.reduce((sum:any, item:any) => sum + (Number(item.value) || 0), 0);
-         } else if (b.type === 'Creator') {
-            const partnerships = items.filter((i:any) => i.type === 'partnership' && active(i));
-            b.customers = partnerships.length;
-            b.mrr = partnerships.reduce((sum:any, item:any) => sum + (Number(item.value) || 0), 0);
-         } else {
-            b.mrr = 0;
-            b.customers = 0;
-         }
-         b.growth = 0;
+         Object.assign(b, businessMetrics(b.type, transactions, items));
       }
       res.json(businesses);
     } catch (e: any) {
