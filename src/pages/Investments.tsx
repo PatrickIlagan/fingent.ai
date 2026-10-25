@@ -5,6 +5,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, 
 import { Plus, X, ArrowUpRight, History, Trash2, Edit2, TrendingUp, TrendingDown, Activity, RefreshCw, Download, FileText } from 'lucide-react';
 import { exportPdf } from '../lib/export';
 import { exportExcel } from '../lib/workbookExport';
+import { FALLBACK_FX_RATES } from '../lib/sharedRules';
 
 const getSymbol = (currency?: string) => {
   if (currency === 'USD') return '$';
@@ -74,7 +75,25 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
         if (data && data.PHP) setExchangeRates(data);
       })
       .catch(console.error);
+
+    fetch('/api/accounts')
+      .then(res => res.json())
+      .then(data => setCashAccounts((Array.isArray(data) ? data : []).filter((account: any) => String(account.type).toLowerCase() !== 'investments')))
+      .catch(console.error);
   }, []);
+
+  // Accounts hold pesos, so trades in other currencies are converted before cash moves.
+  const toPesos = (amount: number, currency = 'PHP') => currency === 'PHP' ? amount : amount / (exchangeRates[currency] || 1) * (exchangeRates.PHP || 1);
+  const cashAccountField = (value: string, onChange: (value: string) => void, label: string, pesos: number, effect: string) => (
+    <div className="col-span-2">
+      <label className="block text-xs font-medium text-slate-500 mb-1">{label}</label>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`}>
+        <option value="">Don't record a cash movement</option>
+        {cashAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · ₱{Number(account.balance || 0).toLocaleString()}</option>)}
+      </select>
+      {value && pesos > 0 && <p className="mt-1 text-xs text-slate-500">₱{pesos.toLocaleString(undefined, { maximumFractionDigits: 2 })} will be {effect} {cashAccounts.find(account => String(account.id) === value)?.name}.</p>}
+    </div>
+  );
 
   const [selectedHolding, setSelectedHolding] = useState<any | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -83,7 +102,10 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
   
   const [chartMode, setChartMode] = useState<'Portfolio' | 'Asset Breakdown'>('Portfolio');
   const [displayCurrency, setDisplayCurrency] = useState<'USD'|'PHP'>('USD');
-  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({ PHP: 58.5, EUR: 0.92, GBP: 0.79, USD: 1 });
+  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>(FALLBACK_FX_RATES);
+  const [cashAccounts, setCashAccounts] = useState<any[]>([]);
+  const [assetAccountId, setAssetAccountId] = useState('');
+  const [txAccountId, setTxAccountId] = useState('');
 
   const [timeframe, setTimeframe] = useState('1M');
   const timeframes = ['1W', '1M', '6M', '1Y', '5Y', 'YTD', 'All'];
@@ -269,9 +291,12 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
             avg_price: finalAvgPrice,
             ticker: newAsset.ticker || '',
             currency: newAsset.currency,
-            platform: newAsset.platform || ''
+            platform: newAsset.platform || '',
+            account_id: assetAccountId ? Number(assetAccountId) : null,
+            cash_amount: assetAccountId ? toPesos(finalInvested, newAsset.currency) : 0
           })
         });
+        setAssetAccountId('');
       }
       
       // Refresh
@@ -311,11 +336,14 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
           type: newTx.type,
           shares: shares || 0,
           price: parseFloat(newTx.price),
-          date: newTx.date
+          date: newTx.date,
+          account_id: txAccountId ? Number(txAccountId) : null,
+          cash_amount: txAccountId ? toPesos((shares || 0) * parseFloat(newTx.price), selectedHolding.currency) : 0
         })
       });
-      
+
       setIsTxModalOpen(false);
+      setTxAccountId('');
       setNewTx({ date: new Date().toISOString().split('T')[0], type: 'Buy', amount: '', price: '', totalAmount: '' });
       
       // Refresh
@@ -529,6 +557,12 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
                       : `Calculated Total: ${getSymbol(selectedHolding?.currency)}${newTx.amount && newTx.price ? (parseFloat(newTx.amount) * parseFloat(newTx.price)).toLocaleString() : 0}`
                     }
                  </div>
+                 {(newTx.type === 'Buy' || newTx.type === 'Sell') && cashAccountField(
+                   txAccountId, setTxAccountId,
+                   newTx.type === 'Buy' ? 'Pay from account (optional)' : 'Deposit to account (optional)',
+                   toPesos((txInputMode === 'total' ? parseFloat(newTx.totalAmount) || 0 : (parseFloat(newTx.amount) || 0) * (parseFloat(newTx.price) || 0)), selectedHolding?.currency),
+                   newTx.type === 'Buy' ? 'deducted from' : 'added to'
+                 )}
                </div>
             </div>
 
@@ -941,9 +975,10 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
                     value={newAsset.platform}
                     onChange={(e) => setNewAsset({ ...newAsset, platform: e.target.value })}
                     className={`w-full px-4 py-3 rounded-xl text-sm outline-none ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} 
-                    placeholder="e.g. Binance, Gotrade, Local Shop" 
+                    placeholder="e.g. Binance, Gotrade, Local Shop"
                   />
                </div>
+               {!editingId && cashAccountField(assetAccountId, setAssetAccountId, 'Pay from account (optional)', toPesos(parseFloat(newAsset.invested) || 0, newAsset.currency), 'deducted from')}
             </div>
 
             <button 

@@ -14,6 +14,7 @@ import {
   Filter,
   Building,
 } from "lucide-react";
+import { AccountChoiceDialog } from "../components/RecordDialogs";
 import { useStore } from "../store/useStore";
 import { motion } from "framer-motion";
 import html2canvas from "html2canvas";
@@ -749,15 +750,25 @@ function InvoicesTab({
   };
 
 
+  const [payingInvoice, setPayingInvoice] = useState<any | null>(null);
+  const [depositAccounts, setDepositAccounts] = useState<any[]>([]);
+
   const handleMarkAsPaid = async (inv: any) => {
-    try {
-      await fetch(`/api/freelancing/invoices/${inv.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...inv, status: 'Paid' })
-      });
-      fetchAll();
-    } catch (e) {}
+    const response = await fetch("/api/accounts").catch(() => null);
+    const data = response?.ok ? await response.json() : [];
+    setDepositAccounts((Array.isArray(data) ? data : []).filter((account: any) => String(account.type).toLowerCase() !== "investments"));
+    setPayingInvoice(inv);
+  };
+
+  const recordInvoicePayment = async (accountId: number | null) => {
+    const response = await fetch(`/api/freelancing/invoices/${payingInvoice.id}/pay`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account_id: accountId })
+    });
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "Could not mark this invoice as paid.");
+    setPayingInvoice(null);
+    fetchAll();
   };
 
   const handleEdit = async () => {
@@ -1048,6 +1059,19 @@ function InvoicesTab({
             <div className="flex justify-end gap-3 mt-6"><button onClick={() => { setIsEditOpen(false); setEditInvoice(null); }} className="px-5 py-2.5 font-bold text-sm text-slate-500">Cancel</button><button onClick={handleEdit} className={`px-5 py-2.5 rounded-xl font-bold text-sm text-white ${isAdvanced ? "bg-violet-600 hover:bg-violet-700" : "bg-slate-900 hover:bg-slate-800"}`}>Save changes</button></div>
           </div>
         </div>
+      )}
+      {payingInvoice && (
+        <AccountChoiceDialog
+          advanced={isAdvanced}
+          title={`Mark ${payingInvoice.invoice_number} as paid`}
+          message={<>Record <strong>₱{Number(payingInvoice.amount || 0).toLocaleString()}</strong> from {payingInvoice.client_name || "this client"} as income in one of your accounts.</>}
+          accounts={depositAccounts}
+          accountLabel="Deposit to"
+          noneLabel="Don't record a deposit"
+          confirmLabel="Mark as paid"
+          onConfirm={recordInvoicePayment}
+          onClose={() => setPayingInvoice(null)}
+        />
       )}
     </div>
   );

@@ -4,6 +4,8 @@ import { useStore } from '../store/useStore';
 import { Receipt, CreditCard, ShoppingBag, Home, Zap, X, RefreshCw, Landmark, ArrowUpRight, ArrowRight, CheckCircle2, History, Download, FileText } from 'lucide-react';
 import { exportPdf } from '../lib/export';
 import { exportExcel } from '../lib/workbookExport';
+import { isAutopayLiability } from '../lib/sharedRules';
+import { AccountChoiceDialog, DeleteRecordDialog } from '../components/RecordDialogs';
 
 export function Liabilities({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
   const { themeMode } = useStore();
@@ -88,7 +90,33 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedLiability, setSelectedLiability] = useState<any | null>(null);
-  
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  const payLiability = async (accountId: number | null) => {
+    const liability = selectedLiability;
+    const headers = { 'Content-Type': 'application/json' };
+    if (liability.isCardStatement) {
+      // A statement balance is owed on the card account, so paying it is a transfer onto the card.
+      const response = await fetch('/api/transfers', { method: 'POST', headers, body: JSON.stringify({ from_account_id: accountId, to_account_id: Number(liability.accountId), amount: liability.amount, notes: `${liability.title} payment.` }) });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not record the payment.');
+      setPaymentOpen(false); setSelectedLiability(null); triggerRefresh();
+      return;
+    }
+    const response = await fetch(`/api/liabilities/${liability.id}/pay`, { method: 'PUT', headers, body: JSON.stringify({ account_id: accountId }) });
+    const saved = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(saved.error || 'Could not mark this as paid.');
+    const legs = !accountId ? 0 : liability.type === 'Credits' && liability.account_id && Number(liability.account_id) !== accountId ? 2 : 1;
+    setSelectedLiability({ ...liability, status: saved.status, date: saved.date, current_month: saved.current_month, currentMonth: saved.current_month, remaining_amount: saved.remaining_amount, remainingAmount: saved.remaining_amount, linked_transaction_count: Number(liability.linked_transaction_count || 0) + legs });
+    setPaymentOpen(false); triggerRefresh();
+  };
+
+  const deleteLiability = async (undo: boolean) => {
+    const response = await fetch(`/api/liabilities/${selectedLiability.id}${undo ? '?undo=1' : ''}`, { method: 'DELETE' });
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not delete this record.');
+    setDeleteOpen(false); setSelectedLiability(null); triggerRefresh();
+  };
+
   const [newLiability, setNewLiability] = useState({ 
     title: '', amount: '', date: '', category: 'Quick Expenses', notes: '',
     merchant: '', paidUsing: 'Cash', provider: '', 
@@ -184,6 +212,15 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
     : accounts.filter(account => String(account.type).toLowerCase() !== 'investments');
 
   if (selectedLiability) {
+    const autopay = !selectedLiability.isCardStatement && isAutopayLiability(selectedLiability);
+    const cardId = selectedLiability.isCardStatement || selectedLiability.type === 'Credits' ? Number(selectedLiability.accountId) || null : null;
+    const paymentAccounts = accounts.filter(account => String(account.type).toLowerCase() !== 'investments' && Number(account.id) !== cardId);
+    // Bills and quick expenses added with "Deduct From Account" before payments were linked may already be paid.
+    const possiblyDeducted = !selectedLiability.isCardStatement && Boolean(selectedLiability.account_id) && ['Bills', 'Quick Expenses'].includes(selectedLiability.type) && !selectedLiability.is_recurring && Number(selectedLiability.linked_transaction_count) > 0;
+    const amountText = `₱${Number(selectedLiability.amount || 0).toLocaleString()}`;
+    const rollNote = selectedLiability.type === 'Installments' && Number(selectedLiability.totalMonths) ? ` This covers month ${Number(selectedLiability.currentMonth || 0) + 1} of ${selectedLiability.totalMonths}.`
+      : selectedLiability.type === 'Debts' && Number(selectedLiability.remainingAmount) > 0 ? ` ₱${Math.max(0, Number(selectedLiability.remainingAmount) - Number(selectedLiability.amount || 0)).toLocaleString()} will remain.`
+      : selectedLiability.is_recurring ? ' The due date then moves to next month.' : '';
     return (
       <div className="space-y-6">
         <div className="flex justify-between items-center">
@@ -294,13 +331,14 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
               )}
             </div>
 
-            <div className="mt-8">
-              <button onClick={async () => { if (selectedLiability.isCardStatement) return; const response = await fetch(`/api/liabilities/${selectedLiability.id}/pay`, { method: 'PUT' }); if (response.ok) { setSelectedLiability({ ...selectedLiability, status: 'Paid' }); triggerRefresh(); } }}
-                disabled={selectedLiability.isCardStatement || selectedLiability.status === 'Paid'}
-                className={`w-full py-4 rounded-xl font-bold transition-colors ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white'}`}
+            <div className="mt-8 space-y-2">
+              <button onClick={() => setPaymentOpen(true)}
+                disabled={autopay || (!selectedLiability.isCardStatement && selectedLiability.status === 'Paid')}
+                className={`w-full py-4 rounded-xl font-bold transition-colors disabled:opacity-60 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white'}`}
               >
-                {selectedLiability.isCardStatement ? 'Managed by Card Account' : selectedLiability.status === 'Paid' ? 'Paid' : 'Mark as Paid'}
+                {selectedLiability.isCardStatement ? 'Pay statement' : autopay ? `Auto-paid monthly from ${selectedLiability.linkedAccountName || 'the linked account'}` : selectedLiability.status === 'Paid' ? 'Paid' : 'Mark as Paid'}
               </button>
+              {!selectedLiability.isCardStatement && <button onClick={() => setDeleteOpen(true)} className="w-full rounded-xl py-3 text-sm font-bold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10">Delete</button>}
             </div>
           </div>
 
@@ -320,6 +358,11 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
             </div>
           )}
         </div>
+
+        {paymentOpen && (selectedLiability.isCardStatement
+          ? <AccountChoiceDialog advanced={isAdvanced} title="Pay statement" message={<>Transfer <strong>{amountText}</strong> onto {selectedLiability.cardName} to pay its statement balance.</>} accounts={paymentAccounts} accountLabel="Pay from" confirmLabel="Record payment" onConfirm={payLiability} onClose={() => setPaymentOpen(false)} />
+          : <AccountChoiceDialog advanced={isAdvanced} title="Mark as paid" message={<>Record a payment of <strong>{amountText}</strong> for {selectedLiability.name}.{rollNote}{possiblyDeducted && <> {amountText} was already deducted from {selectedLiability.linkedAccountName} when this was added, so the default is not to record it again.</>}</>} accounts={paymentAccounts} defaultAccountId={possiblyDeducted ? null : selectedLiability.type === 'Credits' ? undefined : Number(selectedLiability.account_id) || undefined} accountLabel="Pay from" noneLabel="Already paid — don't record a transaction" confirmLabel="Mark as paid" onConfirm={payLiability} onClose={() => setPaymentOpen(false)} />)}
+        {deleteOpen && <DeleteRecordDialog advanced={isAdvanced} title={`Delete ${selectedLiability.name}?`} message="This removes the record from Liabilities and the calendar." linkedCount={Number(selectedLiability.linked_transaction_count || 0)} onDelete={deleteLiability} onClose={() => setDeleteOpen(false)} />}
       </div>
     );
   }

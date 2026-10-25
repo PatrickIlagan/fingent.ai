@@ -1,6 +1,6 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection } from '@capacitor-community/sqlite';
-import { businessMetrics, categoryAliasGroup, resolveCategoryAlias } from './sharedRules';
+import { addMonth, businessMetrics, categoryAliasGroup, dueOccurrences, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, isAutopayLiability, isIsoDate, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, ratesFromFrankfurter, resolveCategoryAlias } from './sharedRules';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -43,6 +43,25 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 const today = () => new Date().toISOString().slice(0, 10);
 const number = (value: unknown) => Number(value) || 0;
 const isActive = (record: JsonRecord) => record.active !== 0 && record.active !== false;
+
+async function getJson(url: string) {
+  try {
+    const response = await CapacitorHttp.get({ url, connectTimeout: 8000, readTimeout: 8000 });
+    if (response.status !== 200) return null;
+    return typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+  } catch {
+    return null;
+  }
+}
+
+/** Live crypto price from Coinbase's public spot API (e.g. BTC-USD). Only the symbol leaves the device. */
+async function cryptoQuote(symbol: string) {
+  const data = await getJson(`https://api.coinbase.com/v2/prices/${encodeURIComponent(symbol)}/spot`);
+  const price = Number(data?.data?.amount);
+  return price > 0 ? { price, currency: String(data.data.currency || 'USD') } : null;
+}
+
+let lastRates: Record<string, number> = FALLBACK_FX_RATES;
 
 async function getDatabase() {
   if (database) return database;
@@ -187,6 +206,77 @@ async function adjustBalance(accountId: unknown, amount: unknown, type: unknown,
   await replace('accounts', account.id as number, { ...account, balance: number(account.balance) + number(amount) * sign * (reverse ? -1 : 1) });
 }
 
+type AccountEntry = { account_id: unknown; type: 'income' | 'expense'; amount: number; category: string; description: string; notes?: string; date: string; source?: string | null; source_id?: number | null };
+
+/** Changes an account balance and records the matching transaction, linked to the record that caused it. */
+async function recordAccountTransaction(entry: AccountEntry) {
+  await adjustBalance(entry.account_id, entry.amount, entry.type);
+  const id = await insert('transactions', { ...entry, account_id: Number(entry.account_id), notes: entry.notes || '', source: entry.source ?? null, source_id: entry.source_id ?? null });
+  await ensureCategory(entry.category, entry.type);
+  return id;
+}
+
+async function recordTransfer(from: JsonRecord, to: JsonRecord, amount: number, date: string, notes: string, source: string | null = null, sourceId: number | null = null) {
+  await recordAccountTransaction({ account_id: from.id, type: 'expense', amount, category: 'Transfer', description: `Transfer to ${to.name}`, notes, date, source, source_id: sourceId });
+  await recordAccountTransaction({ account_id: to.id, type: 'income', amount, category: 'Transfer', description: `Transfer from ${from.name}`, notes, date, source, source_id: sourceId });
+}
+
+async function linkedTransactions(source: string, sourceId: unknown, legacyNote: string, transactions?: JsonRecord[]) {
+  return (transactions ?? await list('transactions')).filter((transaction) => transaction.source
+    ? transaction.source === source && Number(transaction.source_id) === Number(sourceId)
+    : transaction.notes === legacyNote);
+}
+
+/** Deletes transactions and restores the account balances they changed. */
+async function removeTransactions(transactions: JsonRecord[]) {
+  for (const transaction of transactions) {
+    await adjustBalance(transaction.account_id, transaction.amount, transaction.type, true);
+    await remove('transactions', transaction.id as number);
+  }
+}
+
+// Same rules as the server: recurring deposits and auto-paid bills post on each
+// due date and roll forward; older records without source links only roll forward.
+async function postDueRecurring() {
+  const now = today();
+  const transactions = await list('transactions');
+  const recurring = [
+    ...(await list('income_flows')).filter((row) => row.is_recurring === true || Number(row.is_recurring) === 1).map((row) => ({ row, kind: 'income_flow', collection: 'income_flows' })),
+    ...(await list('liabilities')).filter(isAutopayLiability).map((row) => ({ row, kind: 'liability', collection: 'liabilities' })),
+  ];
+  for (const { row, kind, collection } of recurring) {
+    if (!isIsoDate(row.date)) continue;
+    const { due, next } = dueOccurrences(String(row.date), now);
+    if (!due.length) continue;
+    const notes = kind === 'income_flow' ? legacyIncomeFlowNote(row.id) : legacyLiabilityNote(row.type, row.id);
+    const linked = await linkedTransactions(kind, row.id, notes, transactions);
+    const account = row.account_id ? await find('accounts', Number(row.account_id)) : null;
+    if (account && linked.some((transaction) => transaction.source === kind)) {
+      for (const date of due) {
+        if (linked.some((transaction) => transaction.date === date)) continue;
+        await recordAccountTransaction(kind === 'income_flow'
+          ? { account_id: account.id, type: 'income', amount: number(row.amount), category: String(row.category || 'Income'), description: String(row.name), notes, date, source: kind, source_id: Number(row.id) }
+          : { account_id: account.id, type: 'expense', amount: number(row.amount), category: liabilityCategory(row.type), description: String(row.name), notes, date, source: kind, source_id: Number(row.id) });
+      }
+    }
+    await replace(collection, row.id as number, { ...row, date: next });
+  }
+}
+
+let recurringCheckedOn = '';
+let recurringRun: Promise<void> | null = null;
+
+/** Runs the recurring catch-up at most once a day; concurrent requests share one run. */
+function ensureRecurringPosted() {
+  const day = today();
+  if (recurringCheckedOn === day) return Promise.resolve();
+  recurringRun ??= (async () => {
+    await postDueRecurring();
+    recurringCheckedOn = day;
+  })().finally(() => { recurringRun = null; });
+  return recurringRun;
+}
+
 async function recalculateFreelanceHours(serviceId: unknown) {
   if (!serviceId) return;
   const service = await find('freelancing_services', Number(serviceId));
@@ -209,22 +299,20 @@ async function copilotTransfer(body: JsonRecord) {
   const from = match(body.fromHint);
   const to = match(body.toHint);
   if (!from || !to || from.id === to.id) return json({ error: 'Could not uniquely match two different local accounts. Use their exact names.' }, 400);
-  const date = body.date || today();
-  await adjustBalance(from.id, amount, 'expense');
-  await adjustBalance(to.id, amount, 'income');
-  await insert('transactions', { account_id: from.id, type: 'expense', amount, category: 'Transfer', description: `Transfer to ${to.name}`, notes: 'Added locally through FinGent Copilot after user confirmation.', date });
-  await insert('transactions', { account_id: to.id, type: 'income', amount, category: 'Transfer', description: `Transfer from ${from.name}`, notes: 'Added locally through FinGent Copilot after user confirmation.', date });
+  await recordTransfer(from, to, amount, String(body.date || today()), 'Added locally through FinGent Copilot after user confirmation.');
   return json({ success: true, from: from.name, to: to.name });
 }
 
 async function copilotInvestment(body: JsonRecord) {
   const invested = number(body.invested);
-  const price = number(body.avg_price);
-  const shares = number(body.shares) || (price ? invested / price : 0);
-  const ticker = String(body.ticker ?? '').trim().toUpperCase();
-  if (!ticker || invested <= 0 || !shares || !price) return json({ error: 'Ticker, invested amount, share count, and price are required in offline mode.' }, 400);
   const type = body.type === 'Cryptos' ? 'Cryptos' : 'Stocks';
-  const existing = (await list('portfolios')).find((item) => String(item.ticker).toUpperCase() === ticker && item.type === type);
+  const ticker = formatTicker(String(body.ticker ?? ''), type);
+  let price = number(body.avg_price);
+  // Crypto prices are available online; stock purchases still need an explicit price on mobile.
+  if (!price && ticker && type === 'Cryptos') price = (await cryptoQuote(ticker))?.price ?? 0;
+  const shares = number(body.shares) || (price ? invested / price : 0);
+  if (!ticker || invested <= 0 || !shares || !price) return json({ error: type === 'Cryptos' ? 'Current price was unavailable. Add the amount and price, then try again.' : 'Stock purchases on mobile need the share count and price.' }, 400);
+  const existing = (await list('portfolios')).find((item) => formatTicker(String(item.ticker ?? ''), type) === ticker && item.type === type);
   const date = body.date || today();
   if (existing) {
     await portfolioTransaction(String(existing.id), { type: 'Buy', shares, price, date });
@@ -261,6 +349,8 @@ async function transactionResponse(method: string, path: string, body: JsonRecor
 async function portfolioTransaction(portfolioId: string, body: JsonRecord) {
   const portfolio = await find('portfolios', portfolioId);
   if (!portfolio) return json({ error: 'Investment not found.' }, 404);
+  const cashAccount = body.account_id ? await find('accounts', Number(body.account_id)) : null;
+  if (body.account_id && !cashAccount) return json({ error: 'The selected account no longer exists.' }, 400);
   const shares = number(body.shares);
   const price = number(body.price);
   const currentShares = number(portfolio.shares);
@@ -272,15 +362,43 @@ async function portfolioTransaction(portfolioId: string, body: JsonRecord) {
   const currentPrice = number(portfolio.current_price) || price || currentAverage;
   await insert('portfolio_transactions', { portfolio_id: Number(portfolioId), type: body.type, shares, price, date: body.date || today() });
   await replace('portfolios', portfolioId, { ...portfolio, shares: nextShares, invested: nextInvested, avg_price: nextAverage, current_value: nextShares * currentPrice, current_price: currentPrice });
+  // The client converts the trade into the account's pesos before sending cash_amount.
+  if (cashAccount && number(body.cash_amount) > 0 && (body.type === 'Buy' || body.type === 'Sell')) {
+    await recordAccountTransaction({ account_id: cashAccount.id, type: body.type === 'Buy' ? 'expense' : 'income', amount: number(body.cash_amount), category: 'Investments', description: `${body.type === 'Buy' ? 'Bought' : 'Sold'} ${portfolio.name}`, date: String(body.date || today()), source: 'portfolio', source_id: Number(portfolioId) });
+  }
   return json({ success: true });
 }
 
 async function route(pathname: string, search: URLSearchParams, method: string, body: JsonRecord) {
   if (pathname === '/api/health') return json({ status: 'ok', platform: `${Capacitor.getPlatform()}-native` });
+  if (method === 'GET') await ensureRecurringPosted().catch((error) => console.error('Recurring entries could not be posted.', error));
   if (pathname === '/api/system/sync/export' && method === 'GET') return json(await exportSyncSnapshot());
   if (pathname === '/api/system/sync/import' && method === 'POST') {
     await importSyncSnapshot(body);
+    recurringCheckedOn = '';
     return json({ success: true });
+  }
+  if (pathname === '/api/transfers' && method === 'POST') {
+    const amount = number(body.amount);
+    const from = body.from_account_id ? await find('accounts', Number(body.from_account_id)) : null;
+    const to = body.to_account_id ? await find('accounts', Number(body.to_account_id)) : null;
+    if (amount <= 0) return json({ error: 'A positive transfer amount is required.' }, 400);
+    if (!from || !to || from.id === to.id) return json({ error: 'Choose two different existing accounts.' }, 400);
+    await recordTransfer(from, to, amount, String(body.date || today()), String(body.notes || ''));
+    return json({ success: true, from: from.name, to: to.name });
+  }
+  const invoicePayment = pathname.match(/^\/api\/freelancing\/invoices\/(\d+)\/pay$/);
+  if (invoicePayment && method === 'POST') {
+    const invoice = await find('freelancing_invoices', invoicePayment[1]);
+    if (!invoice) return json({ error: 'Invoice not found.' }, 404);
+    if (invoice.status === 'Paid') return json({ success: true, deposited: false });
+    const account = body.account_id ? await find('accounts', Number(body.account_id)) : null;
+    if (body.account_id && !account) return json({ error: 'The selected account no longer exists.' }, 400);
+    if (account && number(invoice.amount) > 0) {
+      await recordAccountTransaction({ account_id: account.id, type: 'income', amount: number(invoice.amount), category: 'Freelance Income', description: `Invoice ${invoice.invoice_number}${invoice.client_name ? ` · ${invoice.client_name}` : ''}`, date: today(), source: 'invoice', source_id: Number(invoice.id) });
+    }
+    await replace('freelancing_invoices', invoicePayment[1], { ...invoice, status: 'Paid' });
+    return json({ success: true, deposited: Boolean(account), account: account?.name || null });
   }
   if (pathname === '/api/wealth') {
     const accounts = await list('accounts');
@@ -297,9 +415,26 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
   if (pathname === '/api/copilot/accounts') return json((await list('accounts')).map(({ id, name, type }) => ({ id, name, type })).sort((a, b) => String(a.name).localeCompare(String(b.name))));
   if (pathname === '/api/copilot/transfers' && method === 'POST') return copilotTransfer(body);
   if (pathname === '/api/copilot/investments/buy' && method === 'POST') return copilotInvestment(body);
-  if (pathname === '/api/rates') return json({ PHP: 58.5, EUR: 0.92, GBP: 0.79, USD: 1, cached: true });
-  if (pathname.startsWith('/api/quote/')) return json({ error: 'Live prices need an internet quote provider and are unavailable in offline mode.' }, 503);
-  if (pathname === '/api/portfolios/sync') return json({ success: true, updated: 0, message: 'Offline mode kept your last saved prices.' });
+  if (pathname === '/api/rates') {
+    const rates = ratesFromFrankfurter(await getJson(FX_RATES_URL));
+    if (rates) lastRates = rates;
+    return json(rates ?? { ...lastRates, cached: true });
+  }
+  if (pathname.startsWith('/api/quote/')) {
+    if (search.get('type') !== 'Cryptos') return json({ error: 'Live stock prices are not available in the mobile app yet.' }, 503);
+    const quote = await cryptoQuote(formatTicker(decodeURIComponent(pathname.slice('/api/quote/'.length)), 'Cryptos'));
+    return quote ? json({ price: quote.price }) : json({ error: 'Live price unavailable. Check your connection or enter the price yourself.' }, 503);
+  }
+  if (pathname === '/api/portfolios/sync') {
+    let updated = 0;
+    for (const portfolio of (await list('portfolios')).filter((item) => item.type === 'Cryptos' && String(item.ticker ?? '').trim())) {
+      const quote = await cryptoQuote(formatTicker(String(portfolio.ticker), 'Cryptos'));
+      if (!quote) continue;
+      await replace('portfolios', portfolio.id as number, { ...portfolio, current_price: quote.price, current_value: quote.price * number(portfolio.shares), currency: quote.currency });
+      updated += 1;
+    }
+    return json({ success: true, updated, message: 'Crypto prices refresh when online. Stock prices keep their last saved values on mobile.' });
+  }
 
   if (pathname === '/api/freelancing/overview') {
     const businesses = await list('freelance_businesses');
@@ -349,9 +484,43 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
 
   const liabilityPayment = pathname.match(/^\/api\/liabilities\/(\d+)\/pay$/);
   if (liabilityPayment && method === 'PUT') {
-    const liability = await find('liabilities', liabilityPayment[1]);
+    const id = Number(liabilityPayment[1]);
+    const liability = await find('liabilities', id);
     if (!liability) return json({ error: 'Liability not found.' }, 404);
-    await replace('liabilities', liabilityPayment[1], { ...liability, status: 'Paid' });
+    const account = body.account_id ? await find('accounts', Number(body.account_id)) : null;
+    if (body.account_id && !account) return json({ error: 'The selected account no longer exists.' }, 400);
+    const amount = number(liability.amount);
+    const notes = legacyLiabilityNote(liability.type, id);
+    if (account && amount > 0) {
+      // Paying a card's due date from another account moves money onto the card.
+      const card = liability.type === 'Credits' && liability.account_id && Number(liability.account_id) !== account.id ? await find('accounts', Number(liability.account_id)) : null;
+      if (card) await recordTransfer(account, card, amount, today(), notes, 'liability', id);
+      else await recordAccountTransaction({ account_id: account.id, type: 'expense', amount, category: liabilityCategory(liability.type), description: String(liability.name), notes, date: today(), source: 'liability', source_id: id });
+    }
+    const update = liabilityAfterPayment(liability);
+    await replace('liabilities', id, { ...liability, ...update });
+    return json({ success: true, ...update, account: account?.name || null });
+  }
+
+  const undoableDelete = pathname.match(/^\/api\/(liabilities|income_flows)\/(\d+)$/);
+  if (undoableDelete && method === 'DELETE' && search.get('undo') === '1') {
+    const [, collection, id] = undoableDelete;
+    const record = await find(collection, id);
+    if (record && collection === 'liabilities') await removeTransactions(await linkedTransactions('liability', id, legacyLiabilityNote(record.type, id)));
+    if (record && collection === 'income_flows') {
+      await removeTransactions(await linkedTransactions('income_flow', id, legacyIncomeFlowNote(id)));
+      for (const event of await list('calendar_events')) {
+        const legacyMatch = event.source_id == null && event.name === record.name && number(event.amount) === number(record.amount);
+        if (event.source === 'income_flow' && (Number(event.source_id) === Number(id) || legacyMatch)) await remove('calendar_events', event.id as number);
+      }
+      for (const budget of await list('budgets')) {
+        let plan: JsonRecord = {};
+        try { plan = typeof budget.categories === 'string' ? JSON.parse(budget.categories) : (budget.categories as JsonRecord) ?? {}; } catch {}
+        const legacyMatch = plan.sourceIncomeFlowId === undefined && String(budget.name).startsWith(`Auto Budget: ${record.name} (`);
+        if (Number(plan.sourceIncomeFlowId) === Number(id) || legacyMatch) await remove('budgets', budget.id as number);
+      }
+    }
+    await remove(collection, id);
     return json({ success: true });
   }
 
@@ -420,6 +589,15 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
       const accounts = await list('accounts');
       records = records.map((transaction) => ({ ...transaction, account_name: accounts.find((account) => account.id === transaction.account_id)?.name ?? 'Deleted account' }));
     }
+    if (collection === 'liabilities' || collection === 'income_flows') {
+      const [accounts, transactions] = await Promise.all([list('accounts'), list('transactions')]);
+      const kind = collection === 'liabilities' ? 'liability' : 'income_flow';
+      records = await Promise.all(records.map(async (record) => {
+        const account = accounts.find((item) => Number(item.id) === Number(record.account_id));
+        const note = kind === 'liability' ? legacyLiabilityNote(record.type, record.id) : legacyIncomeFlowNote(record.id);
+        return { ...record, linked_account_name: account?.name ?? null, linked_account_type: account?.type ?? null, linked_transaction_count: (await linkedTransactions(kind, record.id, note, transactions)).length };
+      }));
+    }
     if (collection === 'businesses') {
       const [items, transactions] = await Promise.all([list('business_items'), list('business_transactions')]);
       const ownedBy = (business: JsonRecord) => (record: JsonRecord) => Number(record.business_id) === Number(business.id);
@@ -486,10 +664,12 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
       if (body.account_id && !linkedAccount) return json({ error: 'The selected deposit account no longer exists.' }, 400);
       const id = await insert(collection, { ...body, amount, account_id: linkedAccount?.id || null });
       await ensureCategory(body.category ?? 'Income', 'income');
-      await insert('calendar_events', { name: body.name, type: 'income', amount, date: body.date, color: 'emerald', icon: 'ArrowDown', provider: 'Manual', source: 'income_flow' });
+      await insert('calendar_events', { name: body.name, type: 'income', amount, date: body.date, color: 'emerald', icon: 'ArrowDown', provider: 'Manual', source: 'income_flow', source_id: id });
       if (linkedAccount) {
-        await adjustBalance(linkedAccount.id, amount, 'income');
-        await insert('transactions', { account_id: linkedAccount.id, type: 'income', amount, category: body.category || 'Income', description: body.name, notes: `Auto-deposited from income flow #${id}.`, date: body.date });
+        await recordAccountTransaction({ account_id: linkedAccount.id, type: 'income', amount, category: String(body.category || 'Income'), description: String(body.name), notes: legacyIncomeFlowNote(id), date: String(body.date), source: 'income_flow', source_id: id });
+        // The first deposit is posted, so a recurring flow's next date moves to next month.
+        const saved = await find(collection, id);
+        if (saved && body.is_recurring && isIsoDate(body.date)) await replace(collection, id, { ...saved, date: addMonth(String(body.date)) });
       }
       if (body.budget_preset_id) {
         const preset = await find('budget_presets', Number(body.budget_preset_id));
@@ -508,18 +688,37 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
               transactions: []
             };
           });
-          const plan = { id: Date.now(), name: `Auto Budget: ${body.name} (${preset.name})`, type: body.is_recurring ? 'recurring' : 'specific', isGrouped: true, startDate: body.date, endDate: body.date, totalLimit: amount, groups };
+          const plan = { id: Date.now(), sourceIncomeFlowId: id, name: `Auto Budget: ${body.name} (${preset.name})`, type: body.is_recurring ? 'recurring' : 'specific', isGrouped: true, startDate: body.date, endDate: body.date, totalLimit: amount, groups };
           await insert('budgets', { name: plan.name, total_amount: amount, categories: JSON.stringify(plan), month: body.date });
         }
       }
+      if (body.is_recurring) recurringCheckedOn = '';
       return json({ id, account: linkedAccount?.name || null, budget_created: Boolean(body.budget_preset_id) });
     }
     if (collection === 'portfolios') {
-      const shares = body.shares == null ? 0 : number(body.shares);
-      const average = body.avg_price == null ? (shares ? number(body.invested) / shares : 0) : number(body.avg_price);
-      const id = await insert(collection, { ...body, shares, avg_price: average, current_price: body.current_price ?? average, current_value: body.current_value ?? shares * average });
-      if (shares && average) await insert('portfolio_transactions', { portfolio_id: id, type: 'Buy', shares, price: average, date: body.date || today() });
-      return json({ id, shares, avg_price: average, date: body.date || today(), price_resolved: false });
+      const fundingAccount = body.account_id ? await find('accounts', Number(body.account_id)) : null;
+      if (body.account_id && !fundingAccount) return json({ error: 'The selected account no longer exists.' }, 400);
+      const ticker = body.ticker ? formatTicker(String(body.ticker), String(body.type)) : body.ticker;
+      // Like the server, a crypto holding is valued at the live price when one is available.
+      const quote = ticker && body.type === 'Cryptos' ? await cryptoQuote(String(ticker)) : null;
+      let shares = body.shares == null ? 0 : number(body.shares);
+      let average = body.avg_price == null ? (shares ? number(body.invested) / shares : 0) : number(body.avg_price);
+      let currentValue = body.current_value == null ? shares * average : number(body.current_value);
+      if (quote) {
+        if (body.shares == null && currentValue > 0) {
+          shares = currentValue / quote.price;
+          average = shares ? number(body.invested) / shares : 0;
+        } else currentValue = quote.price * shares;
+      }
+      const date = String(body.date || today());
+      const { account_id: _account, cash_amount: _cash, ...holding } = body;
+      const id = await insert(collection, { ...holding, ticker, shares, avg_price: average, current_price: quote?.price ?? body.current_price ?? average, current_value: currentValue });
+      if (shares && average) await insert('portfolio_transactions', { portfolio_id: id, type: 'Buy', shares, price: average, date });
+      // The client converts the purchase into the account's pesos before sending cash_amount.
+      if (fundingAccount && number(body.cash_amount) > 0) {
+        await recordAccountTransaction({ account_id: fundingAccount.id, type: 'expense', amount: number(body.cash_amount), category: 'Investments', description: `Bought ${body.name}`, date, source: 'portfolio', source_id: id });
+      }
+      return json({ id, shares, avg_price: average, date, price_resolved: Boolean(quote) });
     }
     if (collection === 'liabilities') {
       const amount = number(body.amount);
@@ -528,12 +727,13 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
       if (body.account_id && !linkedAccount) return json({ error: 'The selected account no longer exists.' }, 400);
       if (body.type === 'Credits' && linkedAccount && !['card', 'credit'].includes(String(linkedAccount.type).toLowerCase())) return json({ error: 'Credit due dates can only be linked to a credit-card account.' }, 400);
       const id = await insert(collection, { ...body, amount, account_id: linkedAccount?.id || null });
+      // Deducting at creation is the first payment, so the record moves on as if paid.
       if (linkedAccount && body.type !== 'Credits') {
-        const category = body.type === 'Quick Expenses' ? 'Expenses' : String(body.type || 'Expenses');
-        await adjustBalance(linkedAccount.id, amount, 'expense');
-        await insert('transactions', { account_id: linkedAccount.id, type: 'expense', amount, category, description: body.name, notes: `Linked to ${body.type} record #${id}.`, date: /^\d{4}-\d{2}-\d{2}$/.test(String(body.date || '')) ? body.date : today() });
-        await ensureCategory(category, 'expense');
+        await recordAccountTransaction({ account_id: linkedAccount.id, type: 'expense', amount, category: liabilityCategory(body.type), description: String(body.name), notes: legacyLiabilityNote(body.type, id), date: isIsoDate(body.date) ? String(body.date) : today(), source: 'liability', source_id: id });
+        const saved = await find(collection, id);
+        if (saved) await replace(collection, id, { ...saved, ...liabilityAfterPayment(saved) });
       }
+      if (body.is_recurring) recurringCheckedOn = '';
       return json({ id, account: linkedAccount?.name || null, deducted: Boolean(linkedAccount && body.type !== 'Credits') });
     }
     const insertedId = await insert(collection, { ...body, active: collection === 'categories' ? 1 : body.active });

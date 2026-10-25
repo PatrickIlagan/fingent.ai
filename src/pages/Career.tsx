@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { Briefcase, CheckCircle2, ChevronRight, TrendingUp, Edit2, Check, X, CalendarDays, Plus, Target } from 'lucide-react';
+import { DeleteRecordDialog } from '../components/RecordDialogs';
 
 export function Career({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
   const { themeMode, triggerRefresh } = useStore();
@@ -22,6 +23,7 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
   
   const [incomeViewMode, setIncomeViewMode] = useState<"list" | "add" | "details">("list");
   const [selectedFlowId, setSelectedFlowId] = useState<number | null>(null);
+  const [deletingFlow, setDeletingFlow] = useState<any | null>(null);
   const [incomeForm, setIncomeForm] = useState({ name: '', amount: '', date: '', category: 'Income', is_recurring: false, budget_preset_id: '', account_id: '' });
   const [calendarEvents, setCalendarEvents] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
@@ -304,12 +306,7 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
                     </div>
                  </div>
                  
-                 <button onClick={async () => {
-                     if (confirm('Delete income flow?')) {
-                        await fetch(`/api/income_flows/${flow.id}`, { method: 'DELETE' });
-                        window.location.reload();
-                     }
-                  }} className="p-3 rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 transition-colors">
+                 <button onClick={() => setDeletingFlow(flow)} className="p-3 rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 transition-colors">
                     <X className="w-5 h-5" />
                  </button>
               </div>
@@ -365,8 +362,18 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
       );
   }
 
+  const deleteFlowDialog = deletingFlow && <DeleteRecordDialog advanced={isAdvanced} title={`Delete ${deletingFlow.name}?`}
+    message="This removes the income flow. Undoing also removes its calendar entry and any auto budget it created."
+    linkedCount={Number(deletingFlow.linked_transaction_count || 0)}
+    onDelete={async (undo) => {
+      const response = await fetch(`/api/income_flows/${deletingFlow.id}${undo ? '?undo=1' : ''}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not delete this income flow.');
+      window.location.reload();
+    }}
+    onClose={() => setDeletingFlow(null)} />;
+
   if (incomeViewMode === 'add') return renderIncomeBuilder();
-  if (incomeViewMode === 'details') return renderIncomeDetails();
+  if (incomeViewMode === 'details') return <>{renderIncomeDetails()}{deleteFlowDialog}</>;
 
   if (category === 'calendar') return (
     <div className="space-y-6 pb-10">
@@ -561,12 +568,7 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
                                  <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">{flow.is_recurring ? 'Recurring' : 'One-time'}</span>
                               </div>
                            </div>
-                           <button onClick={async () => {
-                              if (confirm('Delete income flow?')) {
-                                 await fetch(`/api/income_flows/${flow.id}`, { method: 'DELETE' });
-                                 window.location.reload();
-                              }
-                           }} className="text-slate-400 hover:text-rose-500"><X className="w-4 h-4" /></button>
+                           <button onClick={(event) => { event.stopPropagation(); setDeletingFlow(flow); }} className="text-slate-400 hover:text-rose-500"><X className="w-4 h-4" /></button>
                         </div>
                         <div className="text-xs text-slate-500 font-medium space-y-1 mt-3">
                            <p>📅 Next date: {new Date(flow.date).toLocaleDateString()}</p>
@@ -642,7 +644,7 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
           </div>
         </div>
       )}
-
+      {deleteFlowDialog}
     </div>
   );
 }

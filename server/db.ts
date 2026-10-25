@@ -127,6 +127,9 @@ async function initDb(db: any) {
   await db.exec(`ALTER TABLE accounts ADD COLUMN statement_date INTEGER;`).catch(() => {});
   await db.exec(`ALTER TABLE accounts ADD COLUMN due_date INTEGER;`).catch(() => {});
   await db.exec(`ALTER TABLE transactions ADD COLUMN notes TEXT;`).catch(() => {});
+  await db.exec(`ALTER TABLE transactions ADD COLUMN source TEXT;`).catch(() => {});
+  await db.exec(`ALTER TABLE transactions ADD COLUMN source_id INTEGER;`).catch(() => {});
+  await db.exec(`ALTER TABLE calendar_events ADD COLUMN source_id INTEGER;`).catch(() => {});
   await db.exec(`ALTER TABLE liabilities ADD COLUMN account_id INTEGER;`).catch(() => {});
   await db.exec(`ALTER TABLE categories ADD COLUMN keywords TEXT DEFAULT '';`).catch(() => {});
 
@@ -156,6 +159,8 @@ async function initDb(db: any) {
       description TEXT,
       notes TEXT,
       date TEXT NOT NULL,
+      source TEXT,
+      source_id INTEGER,
       FOREIGN KEY(account_id) REFERENCES accounts(id)
     );
 
@@ -192,7 +197,8 @@ async function initDb(db: any) {
       avg_price REAL,
       ticker TEXT,
       current_price REAL,
-      currency TEXT DEFAULT 'USD'
+      currency TEXT DEFAULT 'USD',
+      platform TEXT
     );
 
     CREATE TABLE IF NOT EXISTS liabilities (
@@ -268,7 +274,8 @@ async function initDb(db: any) {
       color TEXT,
       icon TEXT,
       provider TEXT,
-      source TEXT
+      source TEXT,
+      source_id INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS income_flows (

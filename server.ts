@@ -4,7 +4,7 @@ import fsModule from "fs";
 import crypto from "crypto";
 import path from "path";
 import { closeDb, getDataDir, getDb, lockDatabase, unlockDatabase, validateDatabaseFile } from "./server/db";
-import { businessMetrics, categoryAliasGroup, formatTicker, resolveCategoryAlias as resolveCategoryLabel } from "./src/lib/sharedRules";
+import { addMonth, businessMetrics, categoryAliasGroup, dueOccurrences, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, ratesFromFrankfurter, isAutopayLiability, isIsoDate, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, resolveCategoryAlias as resolveCategoryLabel } from "./src/lib/sharedRules";
 // yahoo-finance2 exposes its constructor as CommonJS's `.default`. Using an
 // explicit require keeps the production CJS bundle compatible with Electron.
 const YahooFinance = require('yahoo-finance2').default;
@@ -40,6 +40,80 @@ async function upsertPersonalCategory(db: any, name: string, type: 'income' | 'e
   } else {
     await db.run("INSERT INTO categories (name, type, active) VALUES (?, ?, 1)", [normalized, type]);
   }
+}
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+type AccountEntry = { account_id: number; type: 'income' | 'expense'; amount: number; category: string; description: string; notes?: string; date: string; source?: string | null; source_id?: number | null };
+
+/** Changes an account balance and records the matching transaction, linked to the record that caused it. */
+async function recordAccountTransaction(db: any, entry: AccountEntry) {
+  await db.run("UPDATE accounts SET balance = balance + ? WHERE id = ?", [entry.type === 'income' ? entry.amount : -entry.amount, entry.account_id]);
+  const result = await db.run(
+    "INSERT INTO transactions (account_id, type, amount, category, description, notes, date, source, source_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [entry.account_id, entry.type, entry.amount, entry.category, entry.description, entry.notes || '', entry.date, entry.source || null, entry.source_id ?? null]
+  );
+  await upsertPersonalCategory(db, entry.category, entry.type);
+  return result.lastInsertRowid;
+}
+
+async function recordTransfer(db: any, from: { id: number; name: string }, to: { id: number; name: string }, amount: number, date: string, notes: string, source: string | null = null, sourceId: number | null = null) {
+  await recordAccountTransaction(db, { account_id: from.id, type: 'expense', amount, category: 'Transfer', description: 'Transfer to ' + to.name, notes, date, source, source_id: sourceId });
+  await recordAccountTransaction(db, { account_id: to.id, type: 'income', amount, category: 'Transfer', description: 'Transfer from ' + from.name, notes, date, source, source_id: sourceId });
+}
+
+async function linkedTransactions(db: any, source: string, sourceId: number | string, legacyNote: string) {
+  return db.all("SELECT * FROM transactions WHERE (source = ? AND source_id = ?) OR (source IS NULL AND notes = ?)", [source, Number(sourceId), legacyNote]);
+}
+
+/** Deletes transactions and restores the account balances they changed. */
+async function removeTransactions(db: any, transactions: any[]) {
+  for (const transaction of transactions) {
+    await db.run("UPDATE accounts SET balance = balance + ? WHERE id = ?", [transaction.type === 'income' ? -transaction.amount : transaction.amount, transaction.account_id]);
+    await db.run("DELETE FROM transactions WHERE id = ?", [transaction.id]);
+  }
+}
+
+// Recurring income deposits and auto-paid bills post on each due date, then
+// roll to the next month. Records saved before transactions carried a source
+// link only roll forward, so months that may already be recorded are not duplicated.
+async function postDueRecurring(db: any) {
+  const now = today();
+  const recurring = [
+    ...(await db.all("SELECT * FROM income_flows WHERE is_recurring = 1")).map((row: any) => ({ row, kind: 'income_flow', table: 'income_flows' })),
+    ...(await db.all("SELECT * FROM liabilities WHERE is_recurring = 1")).filter(isAutopayLiability).map((row: any) => ({ row, kind: 'liability', table: 'liabilities' })),
+  ];
+  for (const { row, kind, table } of recurring) {
+    if (!isIsoDate(row.date)) continue;
+    const { due, next } = dueOccurrences(row.date, now);
+    if (!due.length) continue;
+    const notes = kind === 'income_flow' ? legacyIncomeFlowNote(row.id) : legacyLiabilityNote(row.type, row.id);
+    const linked = await linkedTransactions(db, kind, row.id, notes);
+    const account = row.account_id ? await db.get("SELECT id FROM accounts WHERE id = ?", [row.account_id]) : null;
+    if (account && linked.some((transaction: any) => transaction.source === kind)) {
+      for (const date of due) {
+        if (linked.some((transaction: any) => transaction.date === date)) continue;
+        await recordAccountTransaction(db, kind === 'income_flow'
+          ? { account_id: account.id, type: 'income', amount: Number(row.amount), category: row.category || 'Income', description: row.name, notes, date, source: kind, source_id: row.id }
+          : { account_id: account.id, type: 'expense', amount: Number(row.amount), category: liabilityCategory(row.type), description: row.name, notes, date, source: kind, source_id: row.id });
+      }
+    }
+    await db.run(`UPDATE ${table} SET date = ? WHERE id = ?`, [next, row.id]);
+  }
+}
+
+let recurringCheckedOn = '';
+let recurringRun: Promise<void> | null = null;
+
+/** Runs the recurring catch-up at most once a day; concurrent requests share one run. */
+function ensureRecurringPosted() {
+  const day = today();
+  if (recurringCheckedOn === day) return Promise.resolve();
+  recurringRun ??= (async () => {
+    await postDueRecurring(await getDb());
+    recurringCheckedOn = day;
+  })().finally(() => { recurringRun = null; });
+  return recurringRun;
 }
 
 const DRIVE_BACKUP_NAME = 'fingent-backup.enc';
@@ -161,6 +235,13 @@ async function startServer() {
     if (activeSessions.has(sessionToken(req))) return next();
     res.setHeader('X-FinGent-Locked', '1');
     res.status(401).json({ error: 'FinGent is locked. Unlock the app to continue.' });
+  });
+  app.use(async (req, _res, next) => {
+    // Unlocked reads first post any recurring entries that have come due.
+    const pathname = req.path.toLowerCase();
+    if (req.method !== 'GET' || !pathname.startsWith('/api/') || PUBLIC_API_PATHS.has(pathname)) return next();
+    try { await ensureRecurringPosted(); } catch (error) { console.error('Recurring entries could not be posted.', error); }
+    next();
   });
 
   // The Electron wrapper uses a fresh loopback port on every launch. Store the
@@ -389,7 +470,7 @@ To run FinGent as a desktop application:
       validateDatabaseFile(req.file.path);
       await closeDb();
       fsModule.copyFileSync(req.file.path, dbPath);
-      
+      recurringCheckedOn = '';
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -431,6 +512,7 @@ To run FinGent as a desktop application:
         await db.exec('ROLLBACK; PRAGMA foreign_keys = ON;');
         throw error;
       }
+      recurringCheckedOn = '';
       res.json({ success: true });
     } catch (error: any) { res.status(500).json({ error: error.message }); }
   });
@@ -551,10 +633,23 @@ To run FinGent as a desktop application:
       const to = match(toHint);
       if (!from || !to) return res.status(400).json({ error: 'Could not uniquely match both local accounts. Use the exact account names.' });
       if (from.id === to.id) return res.status(400).json({ error: 'Choose two different accounts for a transfer.' });
-      await db.run("UPDATE accounts SET balance = balance - ? WHERE id = ?", [value, from.id]);
-      await db.run("UPDATE accounts SET balance = balance + ? WHERE id = ?", [value, to.id]);
-      await db.run("INSERT INTO transactions (account_id, type, amount, category, description, notes, date) VALUES (?, 'expense', ?, 'Transfer', ?, ?, ?)", [from.id, value, 'Transfer to ' + to.name, 'Added locally through FinGent Copilot after user confirmation.', date]);
-      await db.run("INSERT INTO transactions (account_id, type, amount, category, description, notes, date) VALUES (?, 'income', ?, 'Transfer', ?, ?, ?)", [to.id, value, 'Transfer from ' + from.name, 'Added locally through FinGent Copilot after user confirmation.', date]);
+      await recordTransfer(db, from, to, value, date, 'Added locally through FinGent Copilot after user confirmation.');
+      res.json({ success: true, from: from.name, to: to.name });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/transfers", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { from_account_id, to_account_id, amount, date = today(), notes = '' } = req.body;
+      const value = Number(amount);
+      if (!Number.isFinite(value) || value <= 0) return res.status(400).json({ error: 'A positive transfer amount is required.' });
+      const from = await db.get("SELECT id, name FROM accounts WHERE id = ?", [from_account_id]);
+      const to = await db.get("SELECT id, name FROM accounts WHERE id = ?", [to_account_id]);
+      if (!from || !to || from.id === to.id) return res.status(400).json({ error: 'Choose two different existing accounts.' });
+      await recordTransfer(db, from, to, value, date, String(notes || ''));
       res.json({ success: true, from: from.name, to: to.name });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -973,20 +1068,17 @@ To run FinGent as a desktop application:
     }
   });
 
+  let lastRates = FALLBACK_FX_RATES;
   app.get("/api/rates", async (req, res) => {
     try {
-      const phpQuote = await yahooFinance.quote("PHP=X");
-      const eurQuote = await yahooFinance.quote("EURUSD=X");
-      const gbpQuote = await yahooFinance.quote("GBPUSD=X");
-      res.json({
-        PHP: phpQuote?.regularMarketPrice || 58.5,
-        EUR: eurQuote?.regularMarketPrice ? 1 / eurQuote.regularMarketPrice : 0.92,
-        GBP: gbpQuote?.regularMarketPrice ? 1 / gbpQuote.regularMarketPrice : 0.79,
-        USD: 1
-      });
+      const response = await fetch(FX_RATES_URL, { signal: AbortSignal.timeout(8000) });
+      const rates = response.ok ? ratesFromFrankfurter(await response.json()) : null;
+      if (!rates) throw new Error('Exchange rates were unavailable.');
+      lastRates = rates;
+      res.json(rates);
     } catch(e) {
       console.error(e);
-      res.json({ PHP: 58.5, EUR: 0.92, GBP: 0.79, USD: 1 });
+      res.json({ ...lastRates, cached: true });
     }
   });
 
@@ -1094,7 +1186,9 @@ To run FinGent as a desktop application:
   app.post("/api/portfolios", async (req, res) => {
     try {
       const db = await getDb();
-      let { type, name, invested, current_value, shares = null, avg_price = null, ticker = null, currency = "USD", platform = null, date = new Date().toISOString().split('T')[0] } = req.body;
+      let { type, name, invested, current_value, shares = null, avg_price = null, ticker = null, currency = "USD", platform = null, date = new Date().toISOString().split('T')[0], account_id = null, cash_amount = 0 } = req.body;
+      const fundingAccount = account_id ? await db.get("SELECT id FROM accounts WHERE id = ?", [account_id]) : null;
+      if (account_id && !fundingAccount) return res.status(400).json({ error: 'The selected account no longer exists.' });
       let priceResolved = false;
       
       if (ticker) { ticker = formatTicker(ticker, type);
@@ -1121,12 +1215,16 @@ To run FinGent as a desktop application:
       );
       
       const newId = result.lastInsertRowid;
-      
+
       if (shares && shares > 0 && avg_price && avg_price > 0) {
          await db.run(
            "INSERT INTO portfolio_transactions (portfolio_id, type, shares, price, date) VALUES (?, ?, ?, ?, ?)",
            [newId, 'Buy', shares, avg_price, date]
          );
+      }
+      // The client converts the purchase into the account's pesos before sending cash_amount.
+      if (fundingAccount && Number(cash_amount) > 0) {
+         await recordAccountTransaction(db, { account_id: fundingAccount.id, type: 'expense', amount: Number(cash_amount), category: 'Investments', description: 'Bought ' + name, date, source: 'portfolio', source_id: Number(newId) });
       }
 
       res.json({ id: newId, shares, avg_price, date, price_resolved: priceResolved });
@@ -1140,8 +1238,10 @@ To run FinGent as a desktop application:
     try {
       const db = await getDb();
       const { id } = req.params;
-      const { type, shares, price, date } = req.body;
-      
+      const { type, shares, price, date, account_id = null, cash_amount = 0 } = req.body;
+      const cashAccount = account_id ? await db.get("SELECT id FROM accounts WHERE id = ?", [account_id]) : null;
+      if (account_id && !cashAccount) return res.status(400).json({ error: 'The selected account no longer exists.' });
+
       await db.run(
         "INSERT INTO portfolio_transactions (portfolio_id, type, shares, price, date) VALUES (?, ?, ?, ?, ?)",
         [id, type, shares, price, date]
@@ -1185,6 +1285,9 @@ To run FinGent as a desktop application:
            "UPDATE portfolios SET shares = ?, invested = ?, avg_price = ?, current_value = ? WHERE id = ?",
            [newShares, newInvested, newAvgPrice, currentValue, id]
          );
+         if (cashAccount && Number(cash_amount) > 0 && (type === 'Buy' || type === 'Sell')) {
+           await recordAccountTransaction(db, { account_id: cashAccount.id, type: type === 'Buy' ? 'expense' : 'income', amount: Number(cash_amount), category: 'Investments', description: (type === 'Buy' ? 'Bought ' : 'Sold ') + p.name, date: date || today(), source: 'portfolio', source_id: Number(id) });
+         }
       }
       
       res.json({ success: true });
@@ -1220,7 +1323,8 @@ To run FinGent as a desktop application:
     try {
       const db = await getDb();
       const liabilities = await db.all(`
-        SELECT l.*, a.name AS linked_account_name, a.type AS linked_account_type
+        SELECT l.*, a.name AS linked_account_name, a.type AS linked_account_type,
+          (SELECT COUNT(*) FROM transactions t WHERE (t.source = 'liability' AND t.source_id = l.id) OR (t.source IS NULL AND t.notes = 'Linked to ' || l.type || ' record #' || l.id || '.')) AS linked_transaction_count
         FROM liabilities l
         LEFT JOIN accounts a ON a.id = l.account_id
         ORDER BY l.date ASC, l.id DESC
@@ -1245,22 +1349,20 @@ To run FinGent as a desktop application:
       try {
         const result = await db.run(
           "INSERT INTO liabilities (name, type, amount, date, provider, status, card_name, total_amount, remaining_amount, total_months, current_month, merchant, paid_using, is_recurring, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [name, type, numericAmount, date, provider, status, card_name, total_amount, remaining_amount, total_months, current_month, merchant, paid_using, is_recurring, linkedAccount?.id || null]
+          [name, type, numericAmount, date, provider, status, card_name, total_amount, remaining_amount, total_months, current_month, merchant, paid_using, is_recurring ? 1 : 0, linkedAccount?.id || null]
         );
         // A Credit record represents an existing card statement/due date. It
         // must not charge the card a second time. Other linked records represent
         // money actually leaving the selected account and appear in its history.
+        // Deducting at creation is the first payment, so the record moves on as if paid.
         if (linkedAccount && type !== 'Credits') {
-          await db.run("UPDATE accounts SET balance = balance - ? WHERE id = ?", [numericAmount, linkedAccount.id]);
-          const transactionDate = /^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) ? date : new Date().toISOString().slice(0, 10);
-          const category = type === 'Quick Expenses' ? 'Expenses' : type;
-          await db.run(
-            "INSERT INTO transactions (account_id, type, amount, category, description, notes, date) VALUES (?, 'expense', ?, ?, ?, ?, ?)",
-            [linkedAccount.id, numericAmount, category, name, `Linked to ${type} record #${result.lastInsertRowid}.`, transactionDate]
-          );
-          await upsertPersonalCategory(db, category, 'expense');
+          const id = Number(result.lastInsertRowid);
+          await recordAccountTransaction(db, { account_id: linkedAccount.id, type: 'expense', amount: numericAmount, category: liabilityCategory(type), description: name, notes: legacyLiabilityNote(type, id), date: isIsoDate(date) ? date : today(), source: 'liability', source_id: id });
+          const update = liabilityAfterPayment({ type, amount: numericAmount, date, is_recurring, total_months, current_month, remaining_amount });
+          await db.run("UPDATE liabilities SET status = ?, date = ?, current_month = ?, remaining_amount = ? WHERE id = ?", [update.status, update.date, update.current_month, update.remaining_amount, id]);
         }
         await db.exec('COMMIT');
+        if (is_recurring) recurringCheckedOn = '';
         res.json({ id: result.lastInsertRowid, account: linkedAccount?.name || null, deducted: Boolean(linkedAccount && type !== 'Credits') });
       } catch (error) {
         await db.exec('ROLLBACK');
@@ -1275,6 +1377,9 @@ To run FinGent as a desktop application:
     try {
       const db = await getDb();
       const { id } = req.params;
+      const liability = await db.get("SELECT * FROM liabilities WHERE id = ?", [id]);
+      // ?undo=1 also removes the payments this record created and restores balances.
+      if (liability && req.query.undo === '1') await removeTransactions(db, await linkedTransactions(db, 'liability', id, legacyLiabilityNote(liability.type, id)));
       await db.run("DELETE FROM liabilities WHERE id = ?", [id]);
       res.json({ success: true });
     } catch (error: any) {
@@ -1286,8 +1391,23 @@ To run FinGent as a desktop application:
     try {
       const db = await getDb();
       const { id } = req.params;
-      await db.run("UPDATE liabilities SET status = 'Paid' WHERE id = ?", [id]);
-      res.json({ success: true });
+      const liability = await db.get("SELECT * FROM liabilities WHERE id = ?", [id]);
+      if (!liability) return res.status(404).json({ error: 'Liability not found.' });
+      const account = req.body?.account_id ? await db.get("SELECT id, name FROM accounts WHERE id = ?", [req.body.account_id]) : null;
+      if (req.body?.account_id && !account) return res.status(400).json({ error: 'The selected account no longer exists.' });
+      const amount = Number(liability.amount) || 0;
+      const notes = legacyLiabilityNote(liability.type, id);
+      if (account && amount > 0) {
+        // Paying a card's due date from another account moves money onto the card.
+        const card = liability.type === 'Credits' && liability.account_id && Number(liability.account_id) !== account.id
+          ? await db.get("SELECT id, name FROM accounts WHERE id = ?", [liability.account_id])
+          : null;
+        if (card) await recordTransfer(db, account, card, amount, today(), notes, 'liability', Number(id));
+        else await recordAccountTransaction(db, { account_id: account.id, type: 'expense', amount, category: liabilityCategory(liability.type), description: liability.name, notes, date: today(), source: 'liability', source_id: Number(id) });
+      }
+      const update = liabilityAfterPayment(liability);
+      await db.run("UPDATE liabilities SET status = ?, date = ?, current_month = ?, remaining_amount = ? WHERE id = ?", [update.status, update.date, update.current_month, update.remaining_amount, id]);
+      res.json({ success: true, ...update, account: account?.name || null });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -1296,7 +1416,10 @@ To run FinGent as a desktop application:
   app.get("/api/income_flows", async (req, res) => {
     try {
       const db = await getDb();
-      const rows = await db.all("SELECT * FROM income_flows");
+      const rows = await db.all(`
+        SELECT f.*, (SELECT COUNT(*) FROM transactions t WHERE (t.source = 'income_flow' AND t.source_id = f.id) OR (t.source IS NULL AND t.notes = 'Auto-deposited from income flow #' || f.id || '.')) AS linked_transaction_count
+        FROM income_flows f
+      `);
       res.json(rows);
     } catch(err: any) { res.status(500).json({error: err.message}); }
   });
@@ -1311,11 +1434,13 @@ To run FinGent as a desktop application:
       await db.exec('BEGIN');
       try {
         const result = await db.run("INSERT INTO income_flows (name, amount, date, is_recurring, budget_preset_id, account_id, category) VALUES (?, ?, ?, ?, ?, ?, ?)", [name, numericAmount, date, is_recurring ? 1 : 0, budget_preset_id, linkedAccount?.id || null, category]);
+        const flowId = Number(result.lastInsertRowid);
         await upsertPersonalCategory(db, category, 'income');
-        await db.run("INSERT INTO calendar_events (name, type, amount, date, color, icon, provider, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [name, 'income', numericAmount, date, 'emerald', 'ArrowDown', 'Manual', 'income_flow']);
+        await db.run("INSERT INTO calendar_events (name, type, amount, date, color, icon, provider, source, source_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [name, 'income', numericAmount, date, 'emerald', 'ArrowDown', 'Manual', 'income_flow', flowId]);
         if (linkedAccount) {
-          await db.run("UPDATE accounts SET balance = balance + ? WHERE id = ?", [numericAmount, linkedAccount.id]);
-          await db.run("INSERT INTO transactions (account_id, type, amount, category, description, notes, date) VALUES (?, 'income', ?, ?, ?, ?, ?)", [linkedAccount.id, numericAmount, category, name, `Auto-deposited from income flow #${result.lastInsertRowid}.`, date]);
+          await recordAccountTransaction(db, { account_id: linkedAccount.id, type: 'income', amount: numericAmount, category, description: name, notes: legacyIncomeFlowNote(flowId), date, source: 'income_flow', source_id: flowId });
+          // The first deposit is posted, so a recurring flow's next date moves to next month.
+          if (is_recurring && isIsoDate(date)) await db.run("UPDATE income_flows SET date = ? WHERE id = ?", [addMonth(date), flowId]);
         }
 
         if (budget_preset_id) {
@@ -1335,11 +1460,13 @@ To run FinGent as a desktop application:
                 transactions: []
               };
             });
-            const budgetData = { id: Date.now(), name: `Auto Budget: ${name} (${preset.name})`, type: is_recurring ? 'recurring' : 'specific', isGrouped: true, startDate: date, endDate: date, totalLimit: numericAmount, groups };
+            const budgetData = { id: Date.now(), sourceIncomeFlowId: flowId, name: `Auto Budget: ${name} (${preset.name})`, type: is_recurring ? 'recurring' : 'specific', isGrouped: true, startDate: date, endDate: date, totalLimit: numericAmount, groups };
             await db.run("INSERT INTO budgets (name, total_amount, categories, month) VALUES (?, ?, ?, ?)", [budgetData.name, numericAmount, JSON.stringify(budgetData), date]);
           }
         }
         await db.exec('COMMIT');
+        // A backdated recurring flow catches up on the next read instead of tomorrow.
+        if (is_recurring) recurringCheckedOn = '';
         res.json({ id: result.lastInsertRowid, account: linkedAccount?.name || null, budget_created: Boolean(budget_preset_id) });
       } catch (error) {
         await db.exec('ROLLBACK');
@@ -1350,6 +1477,18 @@ To run FinGent as a desktop application:
   app.delete("/api/income_flows/:id", async (req, res) => {
     try {
       const db = await getDb();
+      const flow = await db.get("SELECT * FROM income_flows WHERE id = ?", [req.params.id]);
+      // ?undo=1 also removes its deposits (restoring balances), calendar entry, and auto budget.
+      if (flow && req.query.undo === '1') {
+        await removeTransactions(db, await linkedTransactions(db, 'income_flow', flow.id, legacyIncomeFlowNote(flow.id)));
+        await db.run("DELETE FROM calendar_events WHERE source = 'income_flow' AND (source_id = ? OR (source_id IS NULL AND name = ? AND amount = ?))", [flow.id, flow.name, flow.amount]);
+        for (const budget of await db.all("SELECT id, name, categories FROM budgets")) {
+          let plan: any = {};
+          try { plan = JSON.parse(budget.categories || '{}'); } catch {}
+          const legacyMatch = plan.sourceIncomeFlowId === undefined && String(budget.name).startsWith(`Auto Budget: ${flow.name} (`);
+          if (plan.sourceIncomeFlowId === flow.id || legacyMatch) await db.run("DELETE FROM budgets WHERE id = ?", [budget.id]);
+        }
+      }
       await db.run("DELETE FROM income_flows WHERE id = ?", [req.params.id]);
       res.json({ success: true });
     } catch(err: any) { res.status(500).json({error: err.message}); }
@@ -1848,6 +1987,24 @@ To run FinGent as a desktop application:
         [i.service_id || null, i.invoice_number, i.amount, i.issue_date, i.due_date, i.status || 'Draft', i.client_name, i.client_email, i.client_address, JSON.stringify(i.items || []), i.notes || '', req.params.id]
       );
       res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/freelancing/invoices/:id/pay", async (req, res) => {
+    try {
+      const db = await getDb();
+      const invoice = await db.get("SELECT * FROM freelancing_invoices WHERE id = ?", [req.params.id]);
+      if (!invoice) return res.status(404).json({ error: 'Invoice not found.' });
+      if (invoice.status === 'Paid') return res.json({ success: true, deposited: false });
+      const account = req.body?.account_id ? await db.get("SELECT id, name FROM accounts WHERE id = ?", [req.body.account_id]) : null;
+      if (req.body?.account_id && !account) return res.status(400).json({ error: 'The selected account no longer exists.' });
+      if (account && Number(invoice.amount) > 0) {
+        await recordAccountTransaction(db, { account_id: account.id, type: 'income', amount: Number(invoice.amount), category: 'Freelance Income', description: `Invoice ${invoice.invoice_number}${invoice.client_name ? ' · ' + invoice.client_name : ''}`, date: today(), source: 'invoice', source_id: invoice.id });
+      }
+      await db.run("UPDATE freelancing_invoices SET status = 'Paid' WHERE id = ?", [invoice.id]);
+      res.json({ success: true, deposited: Boolean(account), account: account?.name || null });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

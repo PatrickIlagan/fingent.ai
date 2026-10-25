@@ -70,9 +70,13 @@ export function Calendar() {
          });
       });
       
+      // A recurring flow's first occurrence is already a saved calendar entry.
+      const savedIncome = new Set((Array.isArray(calendarEvents) ? calendarEvents : []).filter((event: any) => event.source === 'income_flow').map((event: any) => `${event.name}|${event.date}`));
       (Array.isArray(incomeFlows) ? incomeFlows : []).forEach((flow: any) => {
          if (flow.is_recurring) {
-            const dateStr = `${year}-${month}-${flow.date.toString().padStart(2, '0')}`;
+            const day = String(flow.date).includes('-') ? String(flow.date).split('-')[2] : String(flow.date).padStart(2, '0');
+            const dateStr = `${year}-${month}-${day}`;
+            if (savedIncome.has(`${flow.name}|${dateStr}`)) return;
             formattedEvents.push({
               id: `inc-${flow.id}`,
               date: dateStr,
