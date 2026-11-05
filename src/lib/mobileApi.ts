@@ -1,6 +1,6 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection } from '@capacitor-community/sqlite';
-import { addMonth, businessMetrics, categoryAliasGroup, dueOccurrences, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, isAutopayLiability, isIsoDate, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, ratesFromFrankfurter, resolveCategoryAlias } from './sharedRules';
+import { accountGoalSavings, addMonth, businessMetrics, entryId, goalProgress, isGoalError, localDate, parseList, planGoalContribution, planGoalWithdrawal, withWholeAccounts, categoryAliasGroup, dueOccurrences, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, isAutopayLiability, isIsoDate, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, ratesFromFrankfurter, resolveCategoryAlias } from './sharedRules';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -40,7 +40,7 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
   headers: { 'Content-Type': 'application/json' },
 });
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localDate();
 const number = (value: unknown) => Number(value) || 0;
 const isActive = (record: JsonRecord) => record.active !== 0 && record.active !== false;
 
@@ -235,8 +235,25 @@ async function removeTransactions(transactions: JsonRecord[]) {
   }
 }
 
+async function goalContext() {
+  const [goals, accounts] = await Promise.all([list('goals'), list('accounts')]);
+  return { goals: goals.map((goal): JsonRecord & { sources: any[]; transactions: any[] } => ({ ...goal, sources: parseList(goal.sources), transactions: parseList(goal.transactions) })), accounts };
+}
+
+async function saveGoalState(goal: JsonRecord, saved: number, sources: unknown[], transactions: unknown[]) {
+  await replace('goals', goal.id as number, { ...goal, saved, sources, transactions });
+}
+
+/** Records the transfer when goal money moves between accounts, then saves the goal. */
+async function applyGoalContribution(goal: JsonRecord, plan: any) {
+  if (plan.transfer) await recordTransfer(plan.from, plan.saveIn, plan.entry.amount, plan.entry.date, `${plan.entry.type === 'autosave' ? 'Auto-save' : 'Saved'} for ${goal.name}.`, 'goal', Number(goal.id));
+  await saveGoalState(goal, plan.saved, plan.sources, [plan.entry, ...(goal.transactions as unknown[])]);
+}
+
 // Same rules as the server: recurring deposits and auto-paid bills post on each
-// due date and roll forward; older records without source links only roll forward.
+// due date (a one-time `next_amount` replaces the usual amount once) and roll
+// forward; older records without source links roll forward once, then post
+// from `auto_post_from` on. Goal auto-saves skip months without enough money.
 async function postDueRecurring() {
   const now = today();
   const transactions = await list('transactions');
@@ -251,15 +268,33 @@ async function postDueRecurring() {
     const notes = kind === 'income_flow' ? legacyIncomeFlowNote(row.id) : legacyLiabilityNote(row.type, row.id);
     const linked = await linkedTransactions(kind, row.id, notes, transactions);
     const account = row.account_id ? await find('accounts', Number(row.account_id)) : null;
-    if (account && linked.some((transaction) => transaction.source === kind)) {
-      for (const date of due) {
-        if (linked.some((transaction) => transaction.date === date)) continue;
-        await recordAccountTransaction(kind === 'income_flow'
-          ? { account_id: account.id, type: 'income', amount: number(row.amount), category: String(row.category || 'Income'), description: String(row.name), notes, date, source: kind, source_id: Number(row.id) }
-          : { account_id: account.id, type: 'expense', amount: number(row.amount), category: liabilityCategory(row.type), description: String(row.name), notes, date, source: kind, source_id: Number(row.id) });
-      }
+    const hasLinkedPosts = linked.some((transaction) => transaction.source === kind);
+    for (const [index, date] of due.entries()) {
+      if (!account || linked.some((transaction) => transaction.date === date)) continue;
+      if (!hasLinkedPosts && !(isIsoDate(row.auto_post_from) && date >= String(row.auto_post_from))) continue;
+      const amount = index === 0 && number(row.next_amount) > 0 ? number(row.next_amount) : number(row.amount);
+      await recordAccountTransaction(kind === 'income_flow'
+        ? { account_id: account.id, type: 'income', amount, category: String(row.category || 'Income'), description: String(row.name), notes, date, source: kind, source_id: Number(row.id) }
+        : { account_id: account.id, type: 'expense', amount, category: liabilityCategory(row.type), description: String(row.name), notes, date, source: kind, source_id: Number(row.id) });
     }
-    await replace(collection, row.id as number, { ...row, date: next });
+    const latest = await find(collection, row.id as number);
+    if (latest) await replace(collection, row.id as number, { ...latest, date: next, next_amount: null, auto_post_from: latest.auto_post_from || now });
+  }
+
+  for (const row of (await list('goals')).filter((goal) => number(goal.autosave_amount) > 0)) {
+    if (!isIsoDate(row.autosave_date) || !row.autosave_from_account_id) continue;
+    const { due, next } = dueOccurrences(String(row.autosave_date), now);
+    if (!due.length) continue;
+    for (const [index, date] of due.entries()) {
+      const { goals, accounts } = await goalContext();
+      const goal = goals.find((item) => item.id === row.id)!;
+      const amount = index === 0 && number(row.autosave_next_amount) > 0 ? number(row.autosave_next_amount) : number(row.autosave_amount);
+      const plan = planGoalContribution(goal, goals, accounts, { amount, from_account_id: row.autosave_from_account_id, save_in_account_id: row.autosave_account_id || row.autosave_from_account_id, date, type: 'autosave' });
+      if (isGoalError(plan)) await saveGoalState(goal, number(goal.saved), goal.sources, [{ id: entryId(), date, amount, type: 'skipped', reason: plan.error }, ...goal.transactions]);
+      else await applyGoalContribution(goal, plan);
+    }
+    const latest = await find('goals', row.id as number);
+    if (latest) await replace('goals', row.id as number, { ...latest, autosave_date: next, autosave_next_amount: null });
   }
 }
 
@@ -476,7 +511,7 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
       const interest = (number(account.balance) * number(account.interest_rate_pa)) / 365;
       if (interest <= 0) continue;
       await adjustBalance(account.id, interest, 'income');
-      await insert('transactions', { account_id: account.id, type: 'income', amount: interest, category: 'Interest', description: 'Daily Interest Payout', notes: '', date: new Date().toISOString() });
+      await insert('transactions', { account_id: account.id, type: 'income', amount: interest, category: 'Interest', description: 'Daily Interest Payout', notes: '', date: today() });
       accruedCount += 1;
     }
     return json({ success: true, accruedCount });
@@ -489,7 +524,8 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
     if (!liability) return json({ error: 'Liability not found.' }, 404);
     const account = body.account_id ? await find('accounts', Number(body.account_id)) : null;
     if (body.account_id && !account) return json({ error: 'The selected account no longer exists.' }, 400);
-    const amount = number(liability.amount);
+    // The amount actually paid can differ from the usual one (a higher electricity bill).
+    const amount = number(body.amount) > 0 ? number(body.amount) : number(liability.amount);
     const notes = legacyLiabilityNote(liability.type, id);
     if (account && amount > 0) {
       // Paying a card's due date from another account moves money onto the card.
@@ -497,9 +533,119 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
       if (card) await recordTransfer(account, card, amount, today(), notes, 'liability', id);
       else await recordAccountTransaction({ account_id: account.id, type: 'expense', amount, category: liabilityCategory(liability.type), description: String(liability.name), notes, date: today(), source: 'liability', source_id: id });
     }
-    const update = liabilityAfterPayment(liability);
+    const update = liabilityAfterPayment({ ...liability, amount });
     await replace('liabilities', id, { ...liability, ...update });
     return json({ success: true, ...update, account: account?.name || null });
+  }
+
+  // Only the one-time amount for an auto-paid bill's next charge is editable.
+  const liabilityEdit = pathname.match(/^\/api\/liabilities\/(\d+)$/);
+  if (liabilityEdit && method === 'PUT') {
+    const liability = await find('liabilities', liabilityEdit[1]);
+    if (!liability) return json({ error: 'Liability not found.' }, 404);
+    const nextAmount = number(body.next_amount) > 0 ? number(body.next_amount) : null;
+    await replace('liabilities', liabilityEdit[1], { ...liability, next_amount: nextAmount });
+    return json({ success: true, next_amount: nextAmount });
+  }
+
+  const incomeFlowRoute = pathname.match(/^\/api\/income_flows\/(\d+)(\/skip)?$/);
+  if (incomeFlowRoute && (method === 'PUT' || (method === 'POST' && incomeFlowRoute[2]))) {
+    const flow = await find('income_flows', incomeFlowRoute[1]);
+    if (!flow) return json({ error: 'Income flow not found.' }, 404);
+    if (incomeFlowRoute[2]) {
+      const recurring = flow.is_recurring === true || Number(flow.is_recurring) === 1;
+      if (!recurring || !isIsoDate(flow.date)) return json({ error: 'Only a recurring income with a next date can be skipped.' }, 400);
+      await replace('income_flows', incomeFlowRoute[1], { ...flow, date: addMonth(String(flow.date)), next_amount: null });
+      return json({ success: true, date: addMonth(String(flow.date)) });
+    }
+    const changes: JsonRecord = {};
+    for (const field of ['name', 'amount', 'category', 'account_id', 'date', 'is_recurring', 'next_amount']) if (field in body) changes[field] = body[field];
+    if ('amount' in changes && !(number(changes.amount) > 0)) return json({ error: 'The usual amount must be above zero.' }, 400);
+    if ('date' in changes && !isIsoDate(changes.date)) return json({ error: 'Choose a valid date.' }, 400);
+    if ('amount' in changes) changes.amount = number(changes.amount);
+    if ('next_amount' in changes) changes.next_amount = number(changes.next_amount) > 0 ? number(changes.next_amount) : null;
+    if ('is_recurring' in changes) changes.is_recurring = Boolean(changes.is_recurring);
+    if ('account_id' in changes) {
+      changes.account_id = changes.account_id ? Number(changes.account_id) : null;
+      if (changes.account_id && !(await find('accounts', Number(changes.account_id)))) return json({ error: 'The selected deposit account no longer exists.' }, 400);
+      // Linking an account later starts automatic deposits from today, not for past months.
+      if (changes.account_id && !flow.auto_post_from) changes.auto_post_from = today();
+    }
+    await replace('income_flows', incomeFlowRoute[1], { ...flow, ...changes });
+    if ('category' in changes) await ensureCategory(changes.category, 'income');
+    recurringCheckedOn = '';
+    return json({ success: true });
+  }
+
+  const goalRoute = pathname.match(/^\/api\/goals(?:\/(\d+)(?:\/(contribute|withdraw|autosave\/skip))?)?$/);
+  if (goalRoute) {
+    const [, goalId, action] = goalRoute;
+    const { goals, accounts } = await goalContext();
+    const goal = goalId ? goals.find((item) => Number(item.id) === Number(goalId)) : undefined;
+    if (goalId && !goal) return json({ error: 'Goal not found.' }, 404);
+    const editable = ['name', 'target', 'date', 'color', 'icon', 'autosave_amount', 'autosave_next_amount', 'autosave_date', 'autosave_from_account_id', 'autosave_account_id'];
+    // Applies editable fields and whole-account links to a goal; savings change only through contribute / withdraw.
+    const applyEdits = async (record: JsonRecord) => {
+      const changes: JsonRecord = {};
+      for (const field of editable) if (field in body) changes[field] = body[field] === '' ? null : body[field];
+      let next = { ...record, ...changes };
+      if (Array.isArray(body.whole_account_ids)) {
+        const current = await goalContext();
+        const linked = withWholeAccounts(next, current.goals.map((item) => Number(item.id) === Number(record.id) ? next : item), current.accounts, body.whole_account_ids);
+        if (isGoalError(linked)) return linked.error;
+        next = { ...next, sources: linked.sources };
+      }
+      await replace('goals', record.id as number, next);
+      return null;
+    };
+    if (method === 'GET' && !goalId) return json(goals.map((item) => ({ ...item, progress: goalProgress(item, accounts) })));
+    if (method === 'POST' && !goalId) {
+      if (!String(body.name || '').trim() || !(number(body.target) > 0)) return json({ error: 'A goal needs a name and a target above zero.' }, 400);
+      const id = await insert('goals', { name: String(body.name).trim(), target: number(body.target), saved: number(body.saved), date: body.date ?? null, color: body.color || 'emerald', icon: body.icon || 'Target', sources: [], transactions: [], created_at: today() });
+      const created = await find('goals', id);
+      const failed = created && await applyEdits(created);
+      for (const start of !failed && Array.isArray(body.starting_savings) ? body.starting_savings as JsonRecord[] : []) {
+        if (!(number(start?.amount) > 0)) continue;
+        const current = await goalContext();
+        const record = current.goals.find((item) => item.id === id)!;
+        const plan = planGoalContribution(record, current.goals, current.accounts, { amount: start.amount, from_account_id: start.account_id, date: today() });
+        if (isGoalError(plan)) { await remove('goals', id); return json({ error: plan.error }, 400); }
+        await applyGoalContribution(record, plan);
+      }
+      if (failed) { await remove('goals', id); return json({ error: failed }, 400); }
+      if (body.autosave_amount) recurringCheckedOn = '';
+      return json({ id });
+    }
+    if (method === 'PUT' && goal && !action) {
+      const failed = await applyEdits(goal);
+      if (failed) return json({ error: failed }, 400);
+      if (Object.keys(body).some((key) => key.startsWith('autosave_'))) recurringCheckedOn = '';
+      return json({ success: true });
+    }
+    if (method === 'POST' && goal && action === 'contribute') {
+      const plan = planGoalContribution(goal, goals, accounts, { amount: body.amount, from_account_id: body.from_account_id, save_in_account_id: body.save_in_account_id, date: isIsoDate(body.date) ? String(body.date) : today() });
+      if (isGoalError(plan)) return json({ error: plan.error }, 400);
+      await applyGoalContribution(goal, plan);
+      return json({ success: true, transfer: plan.transfer });
+    }
+    if (method === 'POST' && goal && action === 'withdraw') {
+      const plan = planGoalWithdrawal(goal, { amount: body.amount, account_id: body.account_id ?? null, date: isIsoDate(body.date) ? String(body.date) : today() });
+      if (isGoalError(plan)) return json({ error: plan.error }, 400);
+      await saveGoalState(goal, plan.saved, plan.sources, [plan.entry, ...goal.transactions]);
+      return json({ success: true });
+    }
+    if (method === 'POST' && goal && action === 'autosave/skip') {
+      if (!isIsoDate(goal.autosave_date)) return json({ error: 'This goal has no scheduled auto-save.' }, 400);
+      const amount = number(goal.autosave_next_amount) > 0 ? number(goal.autosave_next_amount) : number(goal.autosave_amount);
+      const next = addMonth(String(goal.autosave_date));
+      await replace('goals', goal.id as number, { ...goal, autosave_date: next, autosave_next_amount: null, transactions: [{ id: entryId(), date: goal.autosave_date, amount, type: 'skipped', reason: 'Skipped by you.' }, ...goal.transactions] });
+      return json({ success: true, autosave_date: next });
+    }
+    if (method === 'DELETE' && goal) {
+      // Balances never moved into a goal, so deleting it leaves accounts untouched.
+      await remove('goals', goal.id as number);
+      return json({ success: true });
+    }
   }
 
   const undoableDelete = pathname.match(/^\/api\/(liabilities|income_flows)\/(\d+)$/);
@@ -589,6 +735,10 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
       const accounts = await list('accounts');
       records = records.map((transaction) => ({ ...transaction, account_name: accounts.find((account) => account.id === transaction.account_id)?.name ?? 'Deleted account' }));
     }
+    if (collection === 'accounts') {
+      const savings = accountGoalSavings((await goalContext()).goals, records);
+      records = records.map((account) => ({ ...account, goal_savings: savings.get(Number(account.id)) ?? [] }));
+    }
     if (collection === 'liabilities' || collection === 'income_flows') {
       const [accounts, transactions] = await Promise.all([list('accounts'), list('transactions')]);
       const kind = collection === 'liabilities' ? 'liability' : 'income_flow';
@@ -621,7 +771,7 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
       records = records.map(record => {
         try {
           const plan = typeof record.categories === 'string' ? JSON.parse(record.categories) : record.categories;
-          const currentMonth = new Date().toISOString().slice(0, 7);
+          const currentMonth = localDate().slice(0, 7);
           const periodExpenses = expenses.filter(transaction => plan.type === 'specific' ? (!plan.startDate || String(transaction.date) >= plan.startDate) && (!plan.endDate || String(transaction.date) <= plan.endDate) : String(transaction.date || '').startsWith(currentMonth));
           plan.groups = (Array.isArray(plan.groups) ? plan.groups : []).map((group: JsonRecord) => {
             const children = Array.isArray(group.categories) ? group.categories as JsonRecord[] : [];
@@ -752,7 +902,7 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
     // Like the server, a manual balance change is recorded so account history still adds up.
     if (collection === 'accounts' && body.balance !== undefined && number(body.balance) !== number(existing.balance)) {
       const difference = number(body.balance) - number(existing.balance);
-      await insert('transactions', { account_id: existing.id, type: difference > 0 ? 'income' : 'expense', amount: Math.abs(difference), category: 'Adjustment', description: 'Balance Adjustment', notes: '', date: new Date().toISOString() });
+      await insert('transactions', { account_id: existing.id, type: difference > 0 ? 'income' : 'expense', amount: Math.abs(difference), category: 'Adjustment', description: 'Balance Adjustment', notes: '', date: today() });
     }
     return json({ success: true });
   }

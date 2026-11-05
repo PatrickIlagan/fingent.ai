@@ -1,4 +1,5 @@
 export type CopilotAction = { label: string; tab: string };
+import { localDate } from './sharedRules';
 
 export type CopilotCategoryHint = {
   name: string;
@@ -126,7 +127,7 @@ function titleCase(value: string) {
 }
 
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return localDate();
 }
 
 function dateFromMessage(message: string) {
@@ -135,12 +136,12 @@ function dateFromMessage(message: string) {
   if (/\b(?:yesterday|kahapon)\b/i.test(message)) {
     const date = new Date();
     date.setDate(date.getDate() - 1);
-    return date.toISOString().slice(0, 10);
+    return localDate(date);
   }
   if (/\b(?:tomorrow|bukas)\b/i.test(message)) {
     const date = new Date();
     date.setDate(date.getDate() + 1);
-    return date.toISOString().slice(0, 10);
+    return localDate(date);
   }
   return today();
 }
@@ -340,7 +341,7 @@ function parseOperationCommand(message: string): OperationDraft | null {
   const budget = trimmed.match(/^(?:add|create)\s+(?:a\s+)?budget\s+(.+?)\s+(?:amount|for|of)\s+(.+)$/i);
   if (budget) {
     const total = amountFrom(budget[2]);
-    if (total > 0) return operation('budget', 'Budget: ' + budget[1], 'plans-budget', { name: budget[1], total_amount: total, categories: [], month: new Date().toISOString().slice(0, 7) });
+    if (total > 0) return operation('budget', 'Budget: ' + budget[1], 'plans-budget', { name: budget[1], total_amount: total, categories: [], month: localDate().slice(0, 7) });
   }
 
   return null;

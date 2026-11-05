@@ -130,6 +130,15 @@ async function initDb(db: any) {
   await db.exec(`ALTER TABLE transactions ADD COLUMN source TEXT;`).catch(() => {});
   await db.exec(`ALTER TABLE transactions ADD COLUMN source_id INTEGER;`).catch(() => {});
   await db.exec(`ALTER TABLE calendar_events ADD COLUMN source_id INTEGER;`).catch(() => {});
+  // One-time amount for the next occurrence, and the date recurring posting starts
+  // for records created before transactions carried source links.
+  for (const table of ['income_flows', 'liabilities']) {
+    await db.exec(`ALTER TABLE ${table} ADD COLUMN next_amount REAL;`).catch(() => {});
+    await db.exec(`ALTER TABLE ${table} ADD COLUMN auto_post_from TEXT;`).catch(() => {});
+  }
+  for (const column of ['created_at TEXT', 'autosave_amount REAL', 'autosave_next_amount REAL', 'autosave_date TEXT', 'autosave_from_account_id INTEGER', 'autosave_account_id INTEGER']) {
+    await db.exec(`ALTER TABLE goals ADD COLUMN ${column};`).catch(() => {});
+  }
   await db.exec(`ALTER TABLE liabilities ADD COLUMN account_id INTEGER;`).catch(() => {});
   await db.exec(`ALTER TABLE categories ADD COLUMN keywords TEXT DEFAULT '';`).catch(() => {});
 
@@ -183,7 +192,13 @@ async function initDb(db: any) {
       color TEXT,
       icon TEXT,
       sources TEXT,
-      transactions TEXT
+      transactions TEXT,
+      created_at TEXT,
+      autosave_amount REAL,
+      autosave_next_amount REAL,
+      autosave_date TEXT,
+      autosave_from_account_id INTEGER,
+      autosave_account_id INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS portfolios (
@@ -218,7 +233,9 @@ async function initDb(db: any) {
       merchant TEXT,
       paid_using TEXT,
       is_recurring BOOLEAN DEFAULT 0,
-      account_id INTEGER
+      account_id INTEGER,
+      next_amount REAL,
+      auto_post_from TEXT
     );
 
     CREATE TABLE IF NOT EXISTS career (
@@ -287,7 +304,9 @@ async function initDb(db: any) {
       is_recurring BOOLEAN DEFAULT 0,
       budget_preset_id INTEGER,
       account_id INTEGER,
-      category TEXT DEFAULT 'Income'
+      category TEXT DEFAULT 'Income',
+      next_amount REAL,
+      auto_post_from TEXT
     );
 
     CREATE TABLE IF NOT EXISTS budget_presets (

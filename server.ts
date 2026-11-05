@@ -4,7 +4,7 @@ import fsModule from "fs";
 import crypto from "crypto";
 import path from "path";
 import { closeDb, getDataDir, getDb, lockDatabase, unlockDatabase, validateDatabaseFile } from "./server/db";
-import { addMonth, businessMetrics, categoryAliasGroup, dueOccurrences, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, ratesFromFrankfurter, isAutopayLiability, isIsoDate, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, resolveCategoryAlias as resolveCategoryLabel } from "./src/lib/sharedRules";
+import { accountGoalSavings, addMonth, isGoalError, businessMetrics, categoryAliasGroup, dueOccurrences, entryId, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, goalProgress, localDate, parseList, planGoalContribution, planGoalWithdrawal, ratesFromFrankfurter, withWholeAccounts, isAutopayLiability, isIsoDate, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, resolveCategoryAlias as resolveCategoryLabel } from "./src/lib/sharedRules";
 // yahoo-finance2 exposes its constructor as CommonJS's `.default`. Using an
 // explicit require keeps the production CJS bundle compatible with Electron.
 const YahooFinance = require('yahoo-finance2').default;
@@ -42,7 +42,7 @@ async function upsertPersonalCategory(db: any, name: string, type: 'income' | 'e
   }
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localDate();
 
 type AccountEntry = { account_id: number; type: 'income' | 'expense'; amount: number; category: string; description: string; notes?: string; date: string; source?: string | null; source_id?: number | null };
 
@@ -74,9 +74,27 @@ async function removeTransactions(db: any, transactions: any[]) {
   }
 }
 
+const parseGoal = (goal: any) => ({ ...goal, sources: parseList(goal.sources), transactions: parseList(goal.transactions) });
+
+async function goalContext(db: any) {
+  return { goals: (await db.all("SELECT * FROM goals")).map(parseGoal), accounts: await db.all("SELECT * FROM accounts") };
+}
+
+async function saveGoalState(db: any, id: number, saved: number, sources: unknown[], transactions: unknown[]) {
+  await db.run("UPDATE goals SET saved = ?, sources = ?, transactions = ? WHERE id = ?", [saved, JSON.stringify(sources), JSON.stringify(transactions), id]);
+}
+
+/** Records the transfer when goal money moves between accounts, then saves the goal. */
+async function applyGoalContribution(db: any, goal: any, plan: any) {
+  if (plan.transfer) await recordTransfer(db, plan.from, plan.saveIn, plan.entry.amount, plan.entry.date, `${plan.entry.type === 'autosave' ? 'Auto-save' : 'Saved'} for ${goal.name}.`, 'goal', Number(goal.id));
+  await saveGoalState(db, goal.id, plan.saved, plan.sources, [plan.entry, ...goal.transactions]);
+}
+
 // Recurring income deposits and auto-paid bills post on each due date, then
-// roll to the next month. Records saved before transactions carried a source
-// link only roll forward, so months that may already be recorded are not duplicated.
+// roll to the next month. A one-time `next_amount` replaces the usual amount
+// for the next occurrence. Records saved before transactions carried a source
+// link roll forward once without posting (months that may already be recorded
+// aren't duplicated) and post normally from then on (`auto_post_from`).
 async function postDueRecurring(db: any) {
   const now = today();
   const recurring = [
@@ -90,15 +108,32 @@ async function postDueRecurring(db: any) {
     const notes = kind === 'income_flow' ? legacyIncomeFlowNote(row.id) : legacyLiabilityNote(row.type, row.id);
     const linked = await linkedTransactions(db, kind, row.id, notes);
     const account = row.account_id ? await db.get("SELECT id FROM accounts WHERE id = ?", [row.account_id]) : null;
-    if (account && linked.some((transaction: any) => transaction.source === kind)) {
-      for (const date of due) {
-        if (linked.some((transaction: any) => transaction.date === date)) continue;
-        await recordAccountTransaction(db, kind === 'income_flow'
-          ? { account_id: account.id, type: 'income', amount: Number(row.amount), category: row.category || 'Income', description: row.name, notes, date, source: kind, source_id: row.id }
-          : { account_id: account.id, type: 'expense', amount: Number(row.amount), category: liabilityCategory(row.type), description: row.name, notes, date, source: kind, source_id: row.id });
-      }
+    const hasLinkedPosts = linked.some((transaction: any) => transaction.source === kind);
+    for (const [index, date] of due.entries()) {
+      if (!account || linked.some((transaction: any) => transaction.date === date)) continue;
+      if (!hasLinkedPosts && !(isIsoDate(row.auto_post_from) && date >= row.auto_post_from)) continue;
+      const amount = index === 0 && Number(row.next_amount) > 0 ? Number(row.next_amount) : Number(row.amount);
+      await recordAccountTransaction(db, kind === 'income_flow'
+        ? { account_id: account.id, type: 'income', amount, category: row.category || 'Income', description: row.name, notes, date, source: kind, source_id: row.id }
+        : { account_id: account.id, type: 'expense', amount, category: liabilityCategory(row.type), description: row.name, notes, date, source: kind, source_id: row.id });
     }
-    await db.run(`UPDATE ${table} SET date = ? WHERE id = ?`, [next, row.id]);
+    await db.run(`UPDATE ${table} SET date = ?, next_amount = NULL, auto_post_from = COALESCE(auto_post_from, ?) WHERE id = ?`, [next, now, row.id]);
+  }
+
+  // Goal auto-save: never overdraws; a month without enough money is recorded as skipped.
+  for (const row of await db.all("SELECT * FROM goals WHERE autosave_amount > 0")) {
+    if (!isIsoDate(row.autosave_date) || !row.autosave_from_account_id) continue;
+    const { due, next } = dueOccurrences(row.autosave_date, now);
+    if (!due.length) continue;
+    for (const [index, date] of due.entries()) {
+      const { goals, accounts } = await goalContext(db);
+      const goal = goals.find((item: any) => item.id === row.id);
+      const amount = index === 0 && Number(row.autosave_next_amount) > 0 ? Number(row.autosave_next_amount) : Number(row.autosave_amount);
+      const plan = planGoalContribution(goal, goals, accounts, { amount, from_account_id: row.autosave_from_account_id, save_in_account_id: row.autosave_account_id || row.autosave_from_account_id, date, type: 'autosave' });
+      if (isGoalError(plan)) await saveGoalState(db, goal.id, Number(goal.saved) || 0, goal.sources, [{ id: entryId(), date, amount, type: 'skipped', reason: plan.error }, ...goal.transactions]);
+      else await applyGoalContribution(db, goal, plan);
+    }
+    await db.run("UPDATE goals SET autosave_date = ?, autosave_next_amount = NULL WHERE id = ?", [next, row.id]);
   }
 }
 
@@ -524,8 +559,9 @@ To run FinGent as a desktop application:
   app.get("/api/accounts", async (req, res) => {
     try {
       const db = await getDb();
-      const accounts = await db.all("SELECT * FROM accounts");
-      res.json(accounts);
+      const { goals, accounts } = await goalContext(db);
+      const savings = accountGoalSavings(goals, accounts);
+      res.json(accounts.map((account: any) => ({ ...account, goal_savings: savings.get(account.id) ?? [] })));
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -534,12 +570,8 @@ To run FinGent as a desktop application:
   app.get("/api/goals", async (req, res) => {
     try {
       const db = await getDb();
-      const goals = await db.all("SELECT * FROM goals");
-      res.json(goals.map((g: any) => ({
-        ...g,
-        sources: g.sources ? JSON.parse(g.sources) : [],
-        transactions: g.transactions ? JSON.parse(g.transactions) : []
-      })));
+      const { goals, accounts } = await goalContext(db);
+      res.json(goals.map((goal: any) => ({ ...goal, progress: goalProgress(goal, accounts) })));
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -619,7 +651,7 @@ To run FinGent as a desktop application:
   app.post("/api/copilot/transfers", async (req, res) => {
     try {
       const db = await getDb();
-      const { amount, fromHint, toHint, date = new Date().toISOString().slice(0, 10) } = req.body;
+      const { amount, fromHint, toHint, date = localDate() } = req.body;
       const value = Number(amount);
       if (!Number.isFinite(value) || value <= 0) return res.status(400).json({ error: 'A positive transfer amount is required.' });
       const accounts = await db.all("SELECT id, name, balance FROM accounts");
@@ -662,7 +694,7 @@ To run FinGent as a desktop application:
       const input = req.body;
       const type = input.type === 'Cryptos' ? 'Cryptos' : 'Stocks';
       const ticker = formatTicker(String(input.ticker || ''), type);
-      const date = input.date || new Date().toISOString().slice(0, 10);
+      const date = input.date || localDate();
       const invested = Number(input.invested);
       if (!ticker || !Number.isFinite(invested) || invested <= 0) return res.status(400).json({ error: 'Ticker and invested amount are required.' });
       let shares = input.shares === null || input.shares === undefined ? null : Number(input.shares);
@@ -855,7 +887,7 @@ To run FinGent as a desktop application:
   app.get("/api/personal/routines", async (_req, res) => {
     try {
       const db = await getDb();
-      const today = new Date().toISOString().slice(0, 10);
+      const today = localDate();
       res.json(await db.all(`
         SELECT r.*, EXISTS(SELECT 1 FROM personal_routine_logs l WHERE l.routine_id = r.id AND l.date = ?) AS completed_today,
           (SELECT COUNT(*) FROM personal_routine_logs l WHERE l.routine_id = r.id AND l.date >= date(?, '-6 days')) AS completed_this_week
@@ -891,7 +923,7 @@ To run FinGent as a desktop application:
   app.post("/api/personal/routines/:id/check-in", async (req, res) => {
     try {
       const db = await getDb();
-      const date = req.body.date || new Date().toISOString().slice(0, 10);
+      const date = req.body.date || localDate();
       const existing = await db.get("SELECT id FROM personal_routine_logs WHERE routine_id = ? AND date = ?", [req.params.id, date]);
       if (existing) await db.run("DELETE FROM personal_routine_logs WHERE id = ?", [existing.id]);
       else await db.run("INSERT INTO personal_routine_logs (routine_id, date) VALUES (?, ?)", [req.params.id, date]);
@@ -926,28 +958,109 @@ To run FinGent as a desktop application:
     }
   });
 
-  app.post("/api/goals", async (req, res) => {
+  // Editable goal fields. Savings and history are changed only through the
+  // contribute / withdraw routes so balances and goal totals stay consistent.
+  const GOAL_FIELDS = ['name', 'target', 'date', 'color', 'icon', 'autosave_amount', 'autosave_next_amount', 'autosave_date', 'autosave_from_account_id', 'autosave_account_id'];
+
+  async function updateGoal(db: any, id: number, body: any) {
+    const fields = GOAL_FIELDS.filter(field => Object.prototype.hasOwnProperty.call(body, field));
+    if (fields.length) await db.run(`UPDATE goals SET ${fields.map(field => `${field} = ?`).join(', ')} WHERE id = ?`, [...fields.map(field => body[field] === '' ? null : body[field]), id]);
+    if (Array.isArray(body.whole_account_ids)) {
+      const { goals, accounts } = await goalContext(db);
+      const linked = withWholeAccounts(goals.find((goal: any) => goal.id === id), goals, accounts, body.whole_account_ids);
+      if (isGoalError(linked)) throw Object.assign(new Error(linked.error), { status: 400 });
+      await db.run("UPDATE goals SET sources = ? WHERE id = ?", [JSON.stringify(linked.sources), id]);
+    }
+  }
+
+  /** Runs a multi-step write as one database transaction and sends its result (or error status). */
+  async function respondInTransaction(res: express.Response, work: (db: any) => Promise<unknown>) {
+    let db: any = null;
+    try {
+      db = await getDb();
+      await db.exec('BEGIN');
+      const result = await work(db);
+      await db.exec('COMMIT');
+      res.json(result);
+    } catch (error: any) {
+      if (db) await db.exec('ROLLBACK').catch(() => {});
+      res.status(error.status || 500).json({ error: error.message });
+    }
+  }
+
+  app.post("/api/goals", (req, res) => respondInTransaction(res, async (db) => {
+      const { name, target, saved = 0, date = null, color = 'emerald', icon = 'Target', starting_savings = [] } = req.body;
+      if (!String(name || '').trim() || !(Number(target) > 0)) throw Object.assign(new Error('A goal needs a name and a target above zero.'), { status: 400 });
+      const result = await db.run(
+        "INSERT INTO goals (name, target, saved, date, color, icon, sources, transactions, created_at) VALUES (?, ?, ?, ?, ?, ?, '[]', '[]', ?)",
+        [String(name).trim(), Number(target), Number(saved) || 0, date, color, icon, today()]
+      );
+      const id = Number(result.lastInsertRowid);
+      await updateGoal(db, id, req.body);
+      // Savings already sitting in an account count toward the goal from the start.
+      for (const start of Array.isArray(starting_savings) ? starting_savings : []) {
+        if (!(Number(start?.amount) > 0)) continue;
+        const { goals, accounts } = await goalContext(db);
+        const goal = goals.find((item: any) => item.id === id);
+        const plan = planGoalContribution(goal, goals, accounts, { amount: start.amount, from_account_id: start.account_id, date: today() });
+        if (isGoalError(plan)) throw Object.assign(new Error(plan.error), { status: 400 });
+        await applyGoalContribution(db, goal, plan);
+      }
+      if (req.body.autosave_amount) recurringCheckedOn = '';
+      return { id };
+  }));
+
+  app.put("/api/goals/:id", (req, res) => respondInTransaction(res, async (db) => {
+    if (!(await db.get("SELECT id FROM goals WHERE id = ?", [req.params.id]))) throw Object.assign(new Error('Goal not found.'), { status: 404 });
+    await updateGoal(db, Number(req.params.id), req.body);
+    if (Object.keys(req.body).some(key => key.startsWith('autosave_'))) recurringCheckedOn = '';
+    return { success: true };
+  }));
+
+  app.post("/api/goals/:id/contribute", (req, res) => respondInTransaction(res, async (db) => {
+    const { goals, accounts } = await goalContext(db);
+    const goal = goals.find((item: any) => item.id === Number(req.params.id));
+    if (!goal) throw Object.assign(new Error('Goal not found.'), { status: 404 });
+    const plan = planGoalContribution(goal, goals, accounts, { amount: req.body.amount, from_account_id: req.body.from_account_id, save_in_account_id: req.body.save_in_account_id, date: isIsoDate(req.body.date) ? req.body.date : today() });
+    if (isGoalError(plan)) throw Object.assign(new Error(plan.error), { status: 400 });
+    await applyGoalContribution(db, goal, plan);
+    return { success: true, transfer: plan.transfer };
+  }));
+
+  app.post("/api/goals/:id/withdraw", async (req, res) => {
     try {
       const db = await getDb();
-      const { name, target, saved, date, color, icon, sources, transactions } = req.body;
-      const result = await db.run(
-        "INSERT INTO goals (name, target, saved, date, color, icon, sources, transactions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [name, target, saved, date, color, icon, JSON.stringify(sources || []), JSON.stringify(transactions || [])]
-      );
-      res.json({ id: result.lastInsertRowid });
+      const { goals } = await goalContext(db);
+      const goal = goals.find((item: any) => item.id === Number(req.params.id));
+      if (!goal) return res.status(404).json({ error: 'Goal not found.' });
+      const plan = planGoalWithdrawal(goal, { amount: req.body.amount, account_id: req.body.account_id ?? null, date: isIsoDate(req.body.date) ? req.body.date : today() });
+      if (isGoalError(plan)) return res.status(400).json({ error: plan.error });
+      await saveGoalState(db, goal.id, plan.saved, plan.sources, [plan.entry, ...goal.transactions]);
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
-  app.put("/api/goals/:id", async (req, res) => {
+  app.post("/api/goals/:id/autosave/skip", async (req, res) => {
     try {
       const db = await getDb();
-      const { name, target, saved, date, color, icon, sources, transactions } = req.body;
-      await db.run(
-        "UPDATE goals SET name = ?, target = ?, saved = ?, date = ?, color = ?, icon = ?, sources = ?, transactions = ? WHERE id = ?",
-        [name, target, saved, date, color, icon, JSON.stringify(sources || []), JSON.stringify(transactions || []), req.params.id]
-      );
+      const goal = await db.get("SELECT * FROM goals WHERE id = ?", [req.params.id]);
+      if (!goal || !isIsoDate(goal.autosave_date)) return res.status(400).json({ error: 'This goal has no scheduled auto-save.' });
+      const amount = Number(goal.autosave_next_amount) > 0 ? Number(goal.autosave_next_amount) : Number(goal.autosave_amount);
+      const entries = [{ id: entryId(), date: goal.autosave_date, amount, type: 'skipped', reason: 'Skipped by you.' }, ...parseList(goal.transactions)];
+      await db.run("UPDATE goals SET autosave_date = ?, autosave_next_amount = NULL, transactions = ? WHERE id = ?", [addMonth(goal.autosave_date), JSON.stringify(entries), goal.id]);
+      res.json({ success: true, autosave_date: addMonth(goal.autosave_date) });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/goals/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      // Balances never moved into a goal, so deleting it leaves accounts untouched.
+      await db.run("DELETE FROM goals WHERE id = ?", [req.params.id]);
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1014,7 +1127,7 @@ To run FinGent as a desktop application:
           await db.run("UPDATE accounts SET balance = ? WHERE id = ?", [newBalance, account.id]);
           await db.run(
             "INSERT INTO transactions (account_id, type, amount, category, description, date) VALUES (?, ?, ?, ?, ?, ?)",
-            [account.id, 'income', dailyInterest, 'Interest', 'Daily Interest Payout', new Date().toISOString()]
+            [account.id, 'income', dailyInterest, 'Interest', 'Daily Interest Payout', localDate()]
           );
           accruedCount++;
         }
@@ -1043,7 +1156,7 @@ To run FinGent as a desktop application:
         const txType = diff > 0 ? 'income' : 'expense';
         await db.run(
           "INSERT INTO transactions (account_id, type, amount, category, description, date) VALUES (?, ?, ?, ?, ?, ?)",
-          [id, txType, Math.abs(diff), 'Adjustment', 'Balance Adjustment', new Date().toISOString()]
+          [id, txType, Math.abs(diff), 'Adjustment', 'Balance Adjustment', localDate()]
         );
       }
       
@@ -1186,7 +1299,7 @@ To run FinGent as a desktop application:
   app.post("/api/portfolios", async (req, res) => {
     try {
       const db = await getDb();
-      let { type, name, invested, current_value, shares = null, avg_price = null, ticker = null, currency = "USD", platform = null, date = new Date().toISOString().split('T')[0], account_id = null, cash_amount = 0 } = req.body;
+      let { type, name, invested, current_value, shares = null, avg_price = null, ticker = null, currency = "USD", platform = null, date = localDate(), account_id = null, cash_amount = 0 } = req.body;
       const fundingAccount = account_id ? await db.get("SELECT id FROM accounts WHERE id = ?", [account_id]) : null;
       if (account_id && !fundingAccount) return res.status(400).json({ error: 'The selected account no longer exists.' });
       let priceResolved = false;
@@ -1395,7 +1508,8 @@ To run FinGent as a desktop application:
       if (!liability) return res.status(404).json({ error: 'Liability not found.' });
       const account = req.body?.account_id ? await db.get("SELECT id, name FROM accounts WHERE id = ?", [req.body.account_id]) : null;
       if (req.body?.account_id && !account) return res.status(400).json({ error: 'The selected account no longer exists.' });
-      const amount = Number(liability.amount) || 0;
+      // The amount actually paid can differ from the usual one (a higher electricity bill).
+      const amount = Number(req.body?.amount) > 0 ? Number(req.body.amount) : Number(liability.amount) || 0;
       const notes = legacyLiabilityNote(liability.type, id);
       if (account && amount > 0) {
         // Paying a card's due date from another account moves money onto the card.
@@ -1405,9 +1519,22 @@ To run FinGent as a desktop application:
         if (card) await recordTransfer(db, account, card, amount, today(), notes, 'liability', Number(id));
         else await recordAccountTransaction(db, { account_id: account.id, type: 'expense', amount, category: liabilityCategory(liability.type), description: liability.name, notes, date: today(), source: 'liability', source_id: Number(id) });
       }
-      const update = liabilityAfterPayment(liability);
+      const update = liabilityAfterPayment({ ...liability, amount });
       await db.run("UPDATE liabilities SET status = ?, date = ?, current_month = ?, remaining_amount = ? WHERE id = ?", [update.status, update.date, update.current_month, update.remaining_amount, id]);
       res.json({ success: true, ...update, account: account?.name || null });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Only the one-time amount for an auto-paid bill's next charge is editable here.
+  app.put("/api/liabilities/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const nextAmount = Number(req.body?.next_amount) > 0 ? Number(req.body.next_amount) : null;
+      const result = await db.run("UPDATE liabilities SET next_amount = ? WHERE id = ?", [nextAmount, req.params.id]);
+      if (!result.changes) return res.status(404).json({ error: 'Liability not found.' });
+      res.json({ success: true, next_amount: nextAmount });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -1474,6 +1601,46 @@ To run FinGent as a desktop application:
       }
     } catch(err: any) { res.status(500).json({error: err.message}); }
   });
+  const INCOME_FLOW_FIELDS = ['name', 'amount', 'category', 'account_id', 'date', 'is_recurring', 'next_amount'];
+
+  app.put("/api/income_flows/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const flow = await db.get("SELECT * FROM income_flows WHERE id = ?", [req.params.id]);
+      if (!flow) return res.status(404).json({ error: 'Income flow not found.' });
+      const body = { ...req.body };
+      if ('amount' in body && !(Number(body.amount) > 0)) return res.status(400).json({ error: 'The usual amount must be above zero.' });
+      if ('date' in body && !isIsoDate(body.date)) return res.status(400).json({ error: 'Choose a valid date.' });
+      if ('next_amount' in body) body.next_amount = Number(body.next_amount) > 0 ? Number(body.next_amount) : null;
+      if ('is_recurring' in body) body.is_recurring = body.is_recurring ? 1 : 0;
+      if ('account_id' in body) {
+        body.account_id = body.account_id ? Number(body.account_id) : null;
+        if (body.account_id && !(await db.get("SELECT id FROM accounts WHERE id = ?", [body.account_id]))) return res.status(400).json({ error: 'The selected deposit account no longer exists.' });
+      }
+      const fields = INCOME_FLOW_FIELDS.filter(field => Object.prototype.hasOwnProperty.call(body, field));
+      if (fields.length) await db.run(`UPDATE income_flows SET ${fields.map(field => `${field} = ?`).join(', ')} WHERE id = ?`, [...fields.map(field => body[field]), flow.id]);
+      // Linking an account later starts automatic deposits from today, not for past months.
+      if (body.account_id && !flow.auto_post_from) await db.run("UPDATE income_flows SET auto_post_from = ? WHERE id = ?", [today(), flow.id]);
+      if ('category' in body) await upsertPersonalCategory(db, body.category, 'income');
+      recurringCheckedOn = '';
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/income_flows/:id/skip", async (req, res) => {
+    try {
+      const db = await getDb();
+      const flow = await db.get("SELECT * FROM income_flows WHERE id = ?", [req.params.id]);
+      if (!flow || !flow.is_recurring || !isIsoDate(flow.date)) return res.status(400).json({ error: 'Only a recurring income with a next date can be skipped.' });
+      await db.run("UPDATE income_flows SET date = ?, next_amount = NULL WHERE id = ?", [addMonth(flow.date), flow.id]);
+      res.json({ success: true, date: addMonth(flow.date) });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.delete("/api/income_flows/:id", async (req, res) => {
     try {
       const db = await getDb();
@@ -1528,7 +1695,7 @@ To run FinGent as a desktop application:
       res.json(rows.map((row: any) => {
         try {
           const plan = JSON.parse(row.categories || '{}');
-          const currentMonth = new Date().toISOString().slice(0, 7);
+          const currentMonth = localDate().slice(0, 7);
           const periodExpenses = expenses.filter((transaction: any) => plan.type === 'specific'
             ? (!plan.startDate || transaction.date >= plan.startDate) && (!plan.endDate || transaction.date <= plan.endDate)
             : String(transaction.date || '').startsWith(currentMonth));

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { localDate } from '../lib/sharedRules';
 import {
   Activity, ArrowLeft, ArrowRight, BadgeDollarSign, BarChart3, BriefcaseBusiness,
   Building2, CheckCircle2, Clapperboard, CreditCard, DollarSign, Layers3,
@@ -14,7 +15,7 @@ type Item = { id: number; business_id: number; type: string; name: string; statu
 type Transaction = { id: number; business_id: number; type: 'income' | 'expense'; amount: number; date: string; description: string; status?: string; category?: string };
 
 const peso = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', maximumFractionDigits: 0 });
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localDate();
 const money = (value: number) => peso.format(Number(value) || 0);
 const parseExtra = (value?: string | null) => {
   try { return JSON.parse(value || '{}') as Record<string, string>; } catch { return {}; }

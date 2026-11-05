@@ -23,7 +23,7 @@ export default function App() {
     <>
       <Layout currentTab={currentTab} setCurrentTab={setCurrentTab} toggleChat={() => setIsChatOpen(true)}>
         {currentTab === 'home' && <Home onNavigate={setCurrentTab} toggleChat={() => setIsChatOpen(true)} />}
-        {currentTab === 'calendar' && <Calendar />}
+        {currentTab === 'calendar' && <Calendar onNavigate={setCurrentTab} />}
         {currentTab.startsWith('investments') && <Investments category={currentTab.split('-').slice(1).join('-')} onNavigate={setCurrentTab} />}
         {currentTab.startsWith('career') && <Career category={currentTab.split('-').slice(1).join('-')} onNavigate={setCurrentTab} />}
         {currentTab.startsWith('business') && <Business currentTab={currentTab} onNavigate={setCurrentTab} />}

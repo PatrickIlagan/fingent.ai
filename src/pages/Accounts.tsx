@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { localDate } from '../lib/sharedRules';
 import { useStore } from '../store/useStore';
 import { CreditCard, Landmark, Wallet, Banknote, Plus, Minus, X, Edit2, Trash2, History, ArrowUpRight, ArrowDownRight, Calendar, FileText, Check, Download } from 'lucide-react';
 import { exportPdf } from '../lib/export';
@@ -160,7 +161,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
     e.stopPropagation();
     setTxAccount(acc);
     setEditingTransaction(null);
-    setNewTx({ type, title: '', amount: '', date: new Date().toISOString().split('T')[0], notes: '', category: type === 'income' ? 'Income' : 'Expenses', goalId: '' });
+    setNewTx({ type, title: '', amount: '', date: localDate(), notes: '', category: type === 'income' ? 'Income' : 'Expenses', goalId: '' });
     setIsTransactionModalOpen(true);
   };
 
@@ -168,7 +169,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
     if (!selectedAccount) return;
     setTxAccount(selectedAccount);
     setEditingTransaction(transaction);
-    setNewTx({ type: transaction.type, title: transaction.description || transaction.title || '', amount: String(transaction.amount || ''), date: transaction.date || new Date().toISOString().split('T')[0], notes: transaction.notes || '', category: transaction.category || (transaction.type === 'income' ? 'Income' : 'Expenses'), goalId: '' });
+    setNewTx({ type: transaction.type, title: transaction.description || transaction.title || '', amount: String(transaction.amount || ''), date: transaction.date || localDate(), notes: transaction.notes || '', category: transaction.category || (transaction.type === 'income' ? 'Income' : 'Expenses'), goalId: '' });
     setIsTransactionModalOpen(true);
   };
 
@@ -205,41 +206,18 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
           category: newTx.category,
           description: newTx.title,
           notes: newTx.notes,
-          date: newTx.date || new Date().toISOString().split('T')[0]
+          date: newTx.date || localDate()
         })
       });
       if (!response.ok) return;
       
       if (!editingTransaction && newTx.type === 'income' && newTx.goalId) {
-        const goal = goals.find(g => g.id.toString() === newTx.goalId);
-        if (goal) {
-          const newTransaction = {
-            id: Date.now(),
-            amount,
-            date: newTx.date || new Date().toISOString().split('T')[0],
-            account: txAccount.name,
-            type: 'deposit'
-          };
-          
-          let sources = goal.sources || [];
-          const existingSourceIndex = sources.findIndex((s: any) => s.name === txAccount.name);
-          if (existingSourceIndex >= 0) {
-            sources[existingSourceIndex].amount += amount;
-          } else {
-            sources.push({ name: txAccount.name, amount });
-          }
-
-          await fetch(`/api/goals/${goal.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              ...goal,
-              saved: goal.saved + amount,
-              sources,
-              transactions: [newTransaction, ...(goal.transactions || [])]
-            })
-          });
-        }
+        // The income stays in this account and now counts as savings toward the goal.
+        await fetch(`/api/goals/${newTx.goalId}/contribute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount, from_account_id: txAccount.id, date: newTx.date || localDate() })
+        });
       }
 
       triggerRefresh();
@@ -365,7 +343,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
               onClick={() => {
                 setTxAccount(selectedAccount);
                 setEditingTransaction(null);
-                setNewTx({ type: 'expense', title: '', amount: '', date: new Date().toISOString().split('T')[0], notes: '', category: 'Expenses', goalId: '' });
+                setNewTx({ type: 'expense', title: '', amount: '', date: localDate(), notes: '', category: 'Expenses', goalId: '' });
                 setIsTransactionModalOpen(true);
               }}
               className={`px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white'}`}
@@ -495,6 +473,14 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
               <div className="flex flex-col">
                 <p className="text-sm font-semibold text-white/85">{acc.name}</p>
                 {acc.purpose && <p className="text-xs text-white/65">{acc.purpose}</p>}
+                {(acc.goal_savings || []).length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {acc.goal_savings.map((saving: any) => <span key={saving.goal_id} className="rounded-md bg-white/20 px-2 py-0.5 text-[11px] font-bold text-white">{saving.goal_name} ₱{Math.round(saving.amount).toLocaleString('en-PH')}{saving.mode === 'whole' ? ' · whole account' : ''}</span>)}
+                  </div>
+                )}
+                {acc.goal_savings?.some((saving: any) => saving.mode !== 'whole') && acc.goal_savings.filter((saving: any) => saving.mode !== 'whole').reduce((sum: number, saving: any) => sum + saving.amount, 0) > Number(acc.balance) + 0.005 && (
+                  <p className="mt-1 text-[11px] font-bold text-white/85">Balance is below the goal savings counted here.</p>
+                )}
               </div>
               
               <div className="flex items-end justify-between mt-1">

@@ -17,27 +17,40 @@ function Dialog({ advanced, title, onClose, children }: { advanced: boolean; tit
   </div>;
 }
 
+function PesoInput({ advanced, label, value, onChange }: { advanced: boolean; label: string; value: string; onChange: (value: string) => void }) {
+  return <label className="mt-4 block text-sm font-bold">{label}
+    <span className="relative mt-1.5 block"><span className="absolute left-3 top-1/2 -translate-y-1/2 font-black text-slate-400">₱</span>
+      <input autoFocus type="number" min="0" step="0.01" inputMode="decimal" value={value} onChange={event => onChange(event.target.value)} className={`${field(advanced)} pl-7 font-bold`} />
+    </span>
+  </label>;
+}
+
 /**
  * Asks which account money moves through. With `noneLabel`, the user can also
  * choose to record nothing; a `defaultAccountId` of null preselects that choice.
+ * With `amountLabel`, the amount is editable too and passed to `onConfirm`.
  */
-export function AccountChoiceDialog({ advanced, title, message, accounts, defaultAccountId, accountLabel, noneLabel, confirmLabel, onConfirm, onClose }: {
+export function AccountChoiceDialog({ advanced, title, message, accounts, defaultAccountId, accountLabel, noneLabel, confirmLabel, amountLabel, defaultAmount, onConfirm, onClose }: {
   advanced: boolean; title: string; message: ReactNode; accounts: AccountOption[]; defaultAccountId?: number | null;
-  accountLabel: string; noneLabel?: string; confirmLabel: string; onConfirm: (accountId: number | null) => Promise<void>; onClose: () => void;
+  accountLabel: string; noneLabel?: string; confirmLabel: string; amountLabel?: string; defaultAmount?: number;
+  onConfirm: (accountId: number | null, amount?: number) => Promise<void>; onClose: () => void;
 }) {
   const initial = defaultAccountId === null && noneLabel ? ''
     : defaultAccountId && accounts.some(account => account.id === defaultAccountId) ? String(defaultAccountId)
     : accounts[0] ? String(accounts[0].id) : '';
   const [accountId, setAccountId] = useState(initial);
+  const [amount, setAmount] = useState(defaultAmount ? String(defaultAmount) : '');
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
   const confirm = async () => {
+    if (amountLabel && !(Number(amount) > 0)) return setError('Enter an amount above zero.');
     setWorking(true); setError('');
-    try { await onConfirm(accountId ? Number(accountId) : null); }
+    try { await onConfirm(accountId ? Number(accountId) : null, amountLabel ? Number(amount) : undefined); }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not save this change.'); setWorking(false); }
   };
   return <Dialog advanced={advanced} title={title} onClose={onClose}>
     <div className="text-sm text-slate-500 dark:text-slate-400">{message}</div>
+    {amountLabel && <PesoInput advanced={advanced} label={amountLabel} value={amount} onChange={setAmount} />}
     <label className="mt-4 block text-sm font-bold">{accountLabel}
       <select value={accountId} onChange={event => setAccountId(event.target.value)} className={`${field(advanced)} mt-1.5`}>
         {accounts.map(account => <option key={account.id} value={account.id}>{account.name} · {account.type} · ₱{Number(account.balance || 0).toLocaleString()}</option>)}
@@ -47,6 +60,32 @@ export function AccountChoiceDialog({ advanced, title, message, accounts, defaul
     {!accounts.length && !noneLabel && <p className="mt-3 text-sm text-slate-500">Add an account first.</p>}
     {error && <p className="mt-3 text-sm text-rose-500">{error}</p>}
     <div className="mt-6 flex justify-end gap-2"><button onClick={onClose} disabled={working} className={secondary(advanced)}>Cancel</button><button onClick={confirm} disabled={working || (!accountId && !noneLabel)} className={primary(advanced)}>{working ? 'Saving…' : confirmLabel}</button></div>
+  </Dialog>;
+}
+
+/** Edits one amount. With `clearLabel`, the user can also remove a one-time amount (onConfirm receives null). */
+export function AmountDialog({ advanced, title, message, label, defaultAmount, confirmLabel, clearLabel, onConfirm, onClose }: {
+  advanced: boolean; title: string; message?: ReactNode; label: string; defaultAmount?: number | null; confirmLabel: string; clearLabel?: string;
+  onConfirm: (amount: number | null) => Promise<void>; onClose: () => void;
+}) {
+  const [amount, setAmount] = useState(defaultAmount ? String(defaultAmount) : '');
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState('');
+  const save = async (value: number | null) => {
+    if (value !== null && !(value > 0)) return setError('Enter an amount above zero.');
+    setWorking(true); setError('');
+    try { await onConfirm(value); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not save this change.'); setWorking(false); }
+  };
+  return <Dialog advanced={advanced} title={title} onClose={onClose}>
+    {message && <div className="text-sm text-slate-500 dark:text-slate-400">{message}</div>}
+    <PesoInput advanced={advanced} label={label} value={amount} onChange={setAmount} />
+    {error && <p className="mt-3 text-sm text-rose-500">{error}</p>}
+    <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+      {clearLabel && <button onClick={() => save(null)} disabled={working} className={secondary(advanced)}>{clearLabel}</button>}
+      <button onClick={onClose} disabled={working} className={secondary(advanced)}>Cancel</button>
+      <button onClick={() => save(Number(amount))} disabled={working} className={primary(advanced)}>{working ? 'Saving…' : confirmLabel}</button>
+    </div>
   </Dialog>;
 }
 
@@ -74,3 +113,5 @@ export function DeleteRecordDialog({ advanced, title, message, linkedCount, onDe
     </div>
   </Dialog>;
 }
+
+export { Dialog, field as dialogField, primary as dialogPrimary, secondary as dialogSecondary };

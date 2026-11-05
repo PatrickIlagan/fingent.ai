@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { localDate } from '../lib/sharedRules';
 import { useStore } from '../store/useStore';
+import { AddToGoalDialog, GoalBuilder, paceLabel, paceTone, peso } from '../components/GoalBuilder';
+import { AmountDialog, DeleteRecordDialog } from '../components/RecordDialogs';
 import { Target, PieChart, Plus, Plane, Laptop, ShieldAlert, Calendar as CalendarIcon, Home, Car, AlertCircle, CheckCircle2, TrendingUp, X } from 'lucide-react';
 
 export function Plans({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
-  const { themeMode, shouldRefresh, triggerRefresh } = useStore();
+  const { themeMode, shouldRefresh, triggerRefresh, focusGoalId, setFocusGoalId } = useStore();
   const isAdvanced = themeMode === 'advanced';
 
   const isGoals = category === 'goals';
@@ -44,11 +47,14 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
 
   const [goals, setGoals] = useState<any[]>([]);
 
-  const fetchGoals = () => {
-    fetch('/api/goals')
-      .then(res => res.json())
-      .then(data => setGoals(Array.isArray(data) ? data : []))
-      .catch(err => console.error(err));
+  // Reloads goals (with computed progress) and accounts, keeping the open goal in sync.
+  const fetchGoals = async () => {
+    const [goalData, accountData] = await Promise.all([fetch('/api/goals'), fetch('/api/accounts')].map(request => request.then(res => res.json()).catch(() => [])));
+    const list = Array.isArray(goalData) ? goalData : [];
+    setGoals(list);
+    if (Array.isArray(accountData)) setAccounts(accountData);
+    setSelectedGoal((current: any) => current ? list.find((goal: any) => goal.id === current.id) ?? null : current);
+    return list;
   };
 
   useEffect(() => {
@@ -56,11 +62,11 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
   }, [shouldRefresh]);
 
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
-  const [newGoal, setNewGoal] = useState({ name: '', target: '', date: '', color: 'emerald', icon: 'Target' });
-
+  const [editingGoal, setEditingGoal] = useState<any | null>(null);
   const [isAddFundsOpen, setIsAddFundsOpen] = useState(false);
-  const [fundAmount, setFundAmount] = useState('');
-  const [fundAccount, setFundAccount] = useState('Cash');
+  const [takeOutSource, setTakeOutSource] = useState<{ account_id: number | null; name: string; amount: number } | null>(null);
+  const [isDeleteGoalOpen, setIsDeleteGoalOpen] = useState(false);
+  const [isAutosaveNextOpen, setIsAutosaveNextOpen] = useState(false);
 
   const [accounts, setAccounts] = useState<any[]>([]);
 
@@ -70,9 +76,6 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
       .then(data => {
         const _d = Array.isArray(data) ? data : [];
         setAccounts(_d);
-        if (_d.length > 0) {
-          setFundAccount(data[0].name);
-        }
       })
       .catch(err => console.error("Failed to fetch accounts:", err));
   }, [shouldRefresh]);
@@ -101,6 +104,14 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
   const [selectedGoal, setSelectedGoal] = useState<any | null>(null);
   const [selectedBudget, setSelectedBudget] = useState<any | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<any | null>(null);
+
+  // Opens a goal chosen elsewhere (for example from the Calendar) once goals have loaded.
+  useEffect(() => {
+    if (!focusGoalId || !goals.length) return;
+    const goal = goals.find(item => item.id === focusGoalId);
+    if (goal) setSelectedGoal(goal);
+    setFocusGoalId(null);
+  }, [focusGoalId, goals]);
 
   const parsedPresetAllocations = (preset: any) => {
     try {
@@ -189,91 +200,6 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
 
   const [savingViewMode, setSavingViewMode] = useState<'monthly' | 'daily'>('monthly');
 
-  const handleAddGoal = async () => {
-    if (!newGoal.name || !newGoal.target || !newGoal.date) return;
-    const newGoalItem = {
-      name: newGoal.name,
-      target: parseFloat(newGoal.target) || 0,
-      saved: 0,
-      date: newGoal.date,
-      color: newGoal.color,
-      icon: newGoal.icon,
-      sources: [],
-      transactions: []
-    };
-    try {
-      const res = await fetch('/api/goals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newGoalItem)
-      });
-      const data = await res.json();
-      const updatedGoal = { ...newGoalItem, id: data.id };
-      setGoals([...goals, updatedGoal]);
-      setIsGoalModalOpen(false);
-      setSelectedGoal(updatedGoal);
-      setNewGoal({ name: '', target: '', date: '', color: 'emerald', icon: 'Target' });
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleAddFunds = async () => {
-    if (!selectedGoal || !fundAmount) return;
-    const amount = parseFloat(fundAmount);
-    if (amount <= 0) return;
-
-    const selectedAcc = accounts.find(a => a.name === fundAccount);
-    if (selectedAcc) {
-      try {
-        await fetch(`/api/accounts/${selectedAcc.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...selectedAcc, balance: selectedAcc.balance - amount })
-        });
-        setAccounts(accounts.map(a => a.id === selectedAcc.id ? { ...a, balance: a.balance - amount } : a));
-      } catch (err) {
-        console.error("Failed to update account balance:", err);
-      }
-    }
-
-    const newTransaction = {
-      id: Date.now(),
-      amount,
-      date: new Date().toISOString().split('T')[0],
-      account: fundAccount,
-      type: 'deposit'
-    };
-
-    const updatedGoal = {
-      ...selectedGoal,
-      saved: selectedGoal.saved + amount,
-      transactions: [newTransaction, ...(selectedGoal.transactions || [])],
-      sources: [...(selectedGoal.sources || [])]
-    };
-
-    const existingSourceIndex = updatedGoal.sources.findIndex((s: any) => s.name === fundAccount);
-    if (existingSourceIndex >= 0) {
-      updatedGoal.sources[existingSourceIndex].amount += amount;
-    } else {
-      updatedGoal.sources.push({ name: fundAccount, amount });
-    }
-
-    try {
-      await fetch(`/api/goals/${selectedGoal.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedGoal)
-      });
-      setGoals(goals.map(g => g.id === selectedGoal.id ? updatedGoal : g));
-      setSelectedGoal(updatedGoal);
-      setIsAddFundsOpen(false);
-      setFundAmount('');
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
   const handleAddBudget = async () => {
     const allocatedItems = allocations.map(a => ({
       id: Date.now() + a.id,
@@ -316,7 +242,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
           name: budgetPlanName,
           total_amount: newBudgetPlan.totalLimit,
           categories: newBudgetPlan,
-          month: newBudgetPlan.startDate || new Date().toISOString()
+          month: newBudgetPlan.startDate || localDate()
        })
     });
     if (!response.ok) return;
@@ -353,197 +279,181 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
   const daysLeft = Math.max(1, daysInMonth - now.getDate());
 
   if (selectedGoal) {
-    const progress = Math.min((selectedGoal.saved / selectedGoal.target) * 100, 100);
-    const targetDate = new Date(selectedGoal.date);
-    const monthsLeft = getMonthsBetween(now, targetDate);
-    const daysLeft = getDaysBetween(now, targetDate);
-    const amountLeft = Math.max(0, selectedGoal.target - selectedGoal.saved);
-    const monthlyNeeded = amountLeft / monthsLeft;
-    const dailyNeeded = amountLeft / daysLeft;
-    const isCompleted = progress >= 100;
+    const pace = selectedGoal.progress || {};
+    const isCompleted = pace.status === 'complete';
+    const hasDate = /^\d{4}-\d{2}-\d{2}/.test(String(selectedGoal.date || ''));
+    const targetDate = hasDate ? new Date(`${String(selectedGoal.date).slice(0, 10)}T00:00:00`) : null;
+    const accountFor = (id: unknown) => accounts.find(account => account.id === Number(id));
+    const linkedSources = (selectedGoal.sources || []).filter((source: any) => source.account_id != null);
+    const autosaveOn = Number(selectedGoal.autosave_amount) > 0;
+    const autosaveFrom = accountFor(selectedGoal.autosave_from_account_id);
+    const autosaveTo = accountFor(selectedGoal.autosave_account_id);
+    const nextAutosave = Number(selectedGoal.autosave_next_amount) > 0 ? Number(selectedGoal.autosave_next_amount) : Number(selectedGoal.autosave_amount) || 0;
+    const history = selectedGoal.transactions || [];
+    const historyLabel = (entry: any) => entry.type === 'withdrawal' ? 'Taken out' : entry.type === 'autosave' ? 'Auto-saved' : entry.type === 'skipped' ? 'Auto-save skipped' : 'Added';
+    const card = `rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`;
+    const row = `p-4 rounded-2xl flex justify-between items-center gap-3 ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`;
+    const smallButton = `px-3 py-1.5 rounded-lg text-xs font-bold ${isAdvanced ? 'text-violet-300 hover:bg-violet-500/10' : 'text-emerald-700 hover:bg-emerald-100'}`;
+    const shortDate = (date: string) => new Date(`${String(date).slice(0, 10)}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
     return (
       <div className="space-y-6 pb-10">
-        <div className="flex justify-between items-center">
-          <button 
-            onClick={() => setSelectedGoal(null)}
-            className="flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
-          >
+        <div className="flex flex-wrap justify-between items-center gap-3">
+          <button onClick={() => setSelectedGoal(null)} className="flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors">
             <Plane className="w-4 h-4 rotate-[-135deg]" /> Back to Goals
           </button>
-          
-          {!isCompleted && (
-            <div className={`flex rounded-xl p-1 text-sm font-bold ${isAdvanced ? 'bg-slate-900' : 'bg-slate-100'}`}>
-              <button 
-                onClick={() => setSavingViewMode('monthly')}
-                className={`px-4 py-1.5 rounded-lg transition-colors ${savingViewMode === 'monthly' ? (isAdvanced ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}
-              >
-                Monthly
-              </button>
-              <button 
-                onClick={() => setSavingViewMode('daily')}
-                className={`px-4 py-1.5 rounded-lg transition-colors ${savingViewMode === 'daily' ? (isAdvanced ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}
-              >
-                Daily
-              </button>
-            </div>
-          )}
+          <div className="flex gap-2">
+            <button onClick={() => setEditingGoal(selectedGoal)} className={`px-4 py-2 rounded-xl text-sm font-bold border ${isAdvanced ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>Edit</button>
+            <button onClick={() => setIsDeleteGoalOpen(true)} className="px-4 py-2 rounded-xl text-sm font-bold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10">Delete</button>
+          </div>
         </div>
 
-        <div className={`rounded-3xl p-6 sm:p-8 shadow-sm border flex flex-col md:flex-row md:items-center justify-between gap-6 ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+        <div className={`${card} sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6`}>
           <div className="flex items-center gap-6">
             <div className={`w-20 h-20 rounded-3xl flex items-center justify-center text-white shadow-lg shrink-0 ${isCompleted ? 'bg-emerald-500' : isAdvanced ? 'bg-violet-600 shadow-violet-900/30' : 'bg-slate-900 shadow-slate-200'}`}>
               {getIcon(selectedGoal.icon)}
             </div>
             <div>
               <h2 className="text-3xl font-black">{selectedGoal.name}</h2>
-              <div className="flex items-center gap-4 mt-2 text-sm font-medium text-slate-500">
-                <span className="flex items-center gap-1.5"><CalendarIcon className="w-4 h-4" /> Target: {targetDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} ({daysLeft} days left)</span>
-                <span className="px-2.5 py-1 bg-slate-100 dark:bg-slate-700 rounded-lg">{progress.toFixed(1)}% Complete</span>
+              <div className="flex flex-wrap items-center gap-3 mt-2 text-sm font-medium text-slate-500">
+                <span className="flex items-center gap-1.5"><CalendarIcon className="w-4 h-4" /> {targetDate ? `Target: ${shortDate(selectedGoal.date)}${pace.status === 'overdue' ? ' (passed)' : ` (${Math.max(0, pace.daysLeft)} days left)`}` : 'No target date yet'}</span>
+                <span className="px-2.5 py-1 bg-slate-100 dark:bg-slate-700 rounded-lg">{Number(pace.percent || 0).toFixed(1)}% complete</span>
+                <span className={`px-2.5 py-1 rounded-lg font-bold ${paceTone(pace.status)}`}>{paceLabel(pace)}</span>
               </div>
+              {!isCompleted && <p className="mt-2 text-sm text-slate-500">{pace.projectedFinish ? `At your recent pace you'll reach it around ${shortDate(pace.projectedFinish)}.` : 'A forecast appears after a few weeks of adding to this goal.'}</p>}
             </div>
           </div>
           <div className="text-left md:text-right">
-            <p className="text-sm font-medium text-slate-500 mb-1">Total Saved</p>
-            <p className={`text-4xl font-black ${isCompleted ? 'text-emerald-500' : ''}`}>₱{selectedGoal.saved.toLocaleString()}</p>
-            <p className="text-sm font-medium text-slate-500 mt-1">Goal: ₱{selectedGoal.target.toLocaleString()}</p>
+            <p className="text-sm font-medium text-slate-500 mb-1">Total saved</p>
+            <p className={`text-4xl font-black ${isCompleted ? 'text-emerald-500' : ''}`}>{peso(pace.saved)}</p>
+            <p className="text-sm font-medium text-slate-500 mt-1">Goal: {peso(selectedGoal.target)}</p>
           </div>
         </div>
 
         <div className="grid md:grid-cols-3 gap-6">
           <div className="md:col-span-2 space-y-6">
-            <div className={`rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-              <h3 className="font-bold text-lg mb-6 flex items-center">
-                <PieChart className="w-5 h-5 mr-2" /> Fund Sources
-              </h3>
-              
-              <div className="space-y-4">
-                {selectedGoal.sources?.map((source: any, idx: number) => (
-                  <div key={idx} className={`p-4 rounded-2xl flex justify-between items-center ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-                    <span className="font-bold">{source.name}</span>
-                    <span className="font-bold text-lg">₱{source.amount.toLocaleString()}</span>
+            <div className={card}>
+              <h3 className="font-bold text-lg mb-6 flex items-center"><PieChart className="w-5 h-5 mr-2" /> Where it's saved</h3>
+              <div className="space-y-3">
+                {linkedSources.map((source: any) => source.mode === 'whole' ? (
+                  <div key={`whole-${source.account_id}`} className={row}>
+                    <div><p className="font-bold">{accountFor(source.account_id)?.name || source.name}</p><p className="text-xs text-slate-500">Whole account counts toward this goal</p></div>
+                    <span className="font-bold text-lg">{peso(Math.max(0, Number(accountFor(source.account_id)?.balance) || 0))}</span>
+                  </div>
+                ) : (
+                  <div key={`part-${source.account_id}`} className={row}>
+                    <div><p className="font-bold">{accountFor(source.account_id)?.name || source.name}</p><p className="text-xs text-slate-500">Saved in this account</p></div>
+                    <div className="flex items-center gap-2"><span className="font-bold text-lg">{peso(source.amount)}</span><button onClick={() => setTakeOutSource({ account_id: Number(source.account_id), name: accountFor(source.account_id)?.name || source.name, amount: Number(source.amount) })} className={smallButton}>Take out</button></div>
                   </div>
                 ))}
-                {!selectedGoal.sources || selectedGoal.sources.length === 0 && (
-                  <p className="text-center text-slate-500 py-4 text-sm">No sources added yet. Add funds from your accounts.</p>
+                {Number(pace.legacy) > 0 && (
+                  <div className={row}>
+                    <div><p className="font-bold">Saved before accounts were linked</p><p className="text-xs text-slate-500">Recorded earlier without an account</p></div>
+                    <div className="flex items-center gap-2"><span className="font-bold text-lg">{peso(pace.legacy)}</span><button onClick={() => setTakeOutSource({ account_id: null, name: 'savings recorded before accounts were linked', amount: Number(pace.legacy) })} className={smallButton}>Take out</button></div>
+                  </div>
                 )}
+                {!linkedSources.length && !(Number(pace.legacy) > 0) && <p className="text-center text-slate-500 py-4 text-sm">No savings counted yet. Add to this goal from one of your accounts.</p>}
               </div>
-              
-              <button 
-                onClick={() => setIsAddFundsOpen(true)}
-                className={`w-full mt-6 py-3 rounded-xl font-bold text-sm border-2 border-dashed transition-colors ${isAdvanced ? 'border-slate-700 hover:border-violet-500 text-slate-400 hover:text-violet-400' : 'border-slate-200 hover:border-emerald-500 text-slate-500 hover:text-emerald-600'}`}
-              >
-                + Add Funds
+              <button onClick={() => setIsAddFundsOpen(true)} className={`w-full mt-6 py-3 rounded-xl font-bold text-sm border-2 border-dashed transition-colors ${isAdvanced ? 'border-slate-700 hover:border-violet-500 text-slate-400 hover:text-violet-400' : 'border-slate-200 hover:border-emerald-500 text-slate-500 hover:text-emerald-600'}`}>
+                + Add to goal
               </button>
             </div>
 
-            <div className={`rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-              <h3 className="font-bold text-lg mb-6">Transaction History</h3>
+            <div className={card}>
+              <h3 className="font-bold text-lg mb-6">History</h3>
               <div className="space-y-4">
-                {selectedGoal.transactions && selectedGoal.transactions.length > 0 ? (
-                  selectedGoal.transactions.map((tx: any) => (
-                    <div key={tx.id} className="flex justify-between items-center">
-                      <div>
-                        <p className="font-bold text-sm">Added Funds</p>
-                        <p className="text-xs font-medium text-slate-500">{new Date(tx.date).toLocaleDateString()} • {tx.account}</p>
-                      </div>
-                      <div className="font-black text-emerald-500">
-                        +₱{tx.amount.toLocaleString()}
-                      </div>
+                {history.length ? history.map((entry: any) => (
+                  <div key={entry.id} className="flex justify-between items-center gap-3">
+                    <div>
+                      <p className="font-bold text-sm">{historyLabel(entry)}</p>
+                      <p className="text-xs font-medium text-slate-500">{shortDate(entry.date)}{entry.type === 'skipped' ? ` · ${entry.reason}` : entry.to_account && entry.to_account !== entry.account ? ` · ${entry.account} → ${entry.to_account}` : entry.account ? ` · ${entry.account}` : ''}</p>
                     </div>
-                  ))
-                ) : (
-                  <p className="text-sm font-bold text-slate-500 text-center py-4">No transactions yet.</p>
-                )}
+                    <div className={`font-black ${entry.type === 'withdrawal' ? 'text-rose-500' : entry.type === 'skipped' ? 'text-slate-400 line-through' : 'text-emerald-500'}`}>
+                      {entry.type === 'withdrawal' ? '−' : '+'}{peso(entry.amount)}
+                    </div>
+                  </div>
+                )) : <p className="text-sm font-bold text-slate-500 text-center py-4">No activity yet.</p>}
               </div>
             </div>
           </div>
-          
+
           <div className="space-y-6">
-            <div className={`rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-              <h3 className="font-bold text-lg mb-4">Goal Progress</h3>
-              
+            <div className={card}>
+              <h3 className="font-bold text-lg mb-4">Goal progress</h3>
               <div className="h-4 w-full bg-slate-100 dark:bg-slate-700 rounded-full mb-6 overflow-hidden">
-                <div 
-                  className={`h-full rounded-full transition-all duration-1000 ${isCompleted ? 'bg-emerald-500' : isAdvanced ? 'bg-violet-500' : 'bg-slate-900'}`} 
-                  style={{ width: `${progress}%` }} 
-                />
+                <div className={`h-full rounded-full transition-all duration-1000 ${isCompleted ? 'bg-emerald-500' : isAdvanced ? 'bg-violet-500' : 'bg-slate-900'}`} style={{ width: `${Number(pace.percent) || 0}%` }} />
               </div>
-              
               {!isCompleted ? (
                 <div className="space-y-4">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="font-medium text-slate-500">Remaining Amount</span>
-                    <span className="font-bold">₱{amountLeft.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="font-medium text-slate-500">Time Left</span>
-                    <span className="font-bold">{savingViewMode === 'monthly' ? `${monthsLeft} months` : `${daysLeft} days`}</span>
-                  </div>
+                  <div className="flex justify-between items-center text-sm"><span className="font-medium text-slate-500">Remaining</span><span className="font-bold">{peso(pace.remaining)}</span></div>
+                  <div className="flex justify-between items-center text-sm"><span className="font-medium text-slate-500">Expected by now</span><span className="font-bold">{peso(pace.expectedByNow)}</span></div>
+                  <div className="flex justify-between items-center text-sm"><span className="font-medium text-slate-500">Time left</span><span className="font-bold">{pace.status === 'overdue' ? 'Target date passed' : savingViewMode === 'monthly' ? `${Math.max(0, pace.monthsLeft).toFixed(1)} months` : `${Math.max(0, pace.daysLeft)} days`}</span></div>
                   <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
-                    <div className="flex justify-between items-center text-sm mb-1">
-                      <span className="font-bold text-violet-500">Required {savingViewMode === 'monthly' ? 'Monthly' : 'Daily'}</span>
-                      <span className="font-bold text-lg">₱{(savingViewMode === 'monthly' ? monthlyNeeded : dailyNeeded).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                    <div className={`flex rounded-xl p-1 text-xs font-bold mb-3 ${isAdvanced ? 'bg-slate-900' : 'bg-slate-100'}`}>
+                      {(['monthly', 'daily'] as const).map(mode => <button key={mode} onClick={() => setSavingViewMode(mode)} className={`flex-1 px-3 py-1.5 rounded-lg capitalize ${savingViewMode === mode ? (isAdvanced ? 'bg-slate-700 text-white' : 'bg-white shadow-sm') : 'text-slate-500'}`}>{mode}</button>)}
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="font-bold text-violet-500">Needed per {savingViewMode === 'monthly' ? 'month' : 'day'}</span>
+                      <span className="font-bold text-lg">{peso(savingViewMode === 'monthly' ? pace.requiredMonthly : pace.requiredDaily)}</span>
                     </div>
                   </div>
                 </div>
               ) : (
                 <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center gap-2 font-bold text-sm border border-emerald-100 dark:border-emerald-500/20">
-                  <CheckCircle2 className="w-5 h-5" /> Goal Achieved!
+                  <CheckCircle2 className="w-5 h-5" /> Goal reached!
+                </div>
+              )}
+            </div>
+
+            <div className={card}>
+              <h3 className="font-bold text-lg mb-4">Auto-save</h3>
+              {autosaveOn ? (
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-2xl font-black">{peso(nextAutosave)}</p>
+                    <p className="text-sm text-slate-500">Next on {selectedGoal.autosave_date ? shortDate(selectedGoal.autosave_date) : '—'}{autosaveFrom ? ` from ${autosaveFrom.name}` : ''}{autosaveTo && autosaveTo.id !== autosaveFrom?.id ? ` into ${autosaveTo.name}` : ''}</p>
+                    {Number(selectedGoal.autosave_next_amount) > 0 && <p className="text-xs text-slate-500 mt-1">Usually {peso(selectedGoal.autosave_amount)}; changed for this month.</p>}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => setIsAutosaveNextOpen(true)} className={`px-3 py-2 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}>Change next</button>
+                    <button onClick={async () => { const response = await fetch(`/api/goals/${selectedGoal.id}/autosave/skip`, { method: 'POST' }); if (response.ok) await fetchGoals(); }} className={`px-3 py-2 rounded-xl text-sm font-bold border ${isAdvanced ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 hover:bg-slate-50'}`}>Skip next</button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-sm text-slate-500 mb-4">Save a set amount into this goal every month, automatically.</p>
+                  <button onClick={() => setEditingGoal(selectedGoal)} className={`w-full py-3 rounded-xl text-sm font-bold border-2 border-dashed ${isAdvanced ? 'border-slate-700 hover:border-violet-500 text-slate-400' : 'border-slate-200 hover:border-emerald-500 text-slate-500'}`}>Set up auto-save</button>
                 </div>
               )}
             </div>
           </div>
         </div>
 
-        {isAddFundsOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsAddFundsOpen(false)}>
-            <div 
-              className={`w-full max-w-sm rounded-3xl shadow-xl flex flex-col p-6 ${isAdvanced ? 'bg-slate-800 border border-slate-700 text-white' : 'bg-white border border-slate-100'}`}
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-bold">Add Funds to {selectedGoal?.name}</h3>
-                <button onClick={() => setIsAddFundsOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20} /></button>
-              </div>
-              
-              <div className="space-y-4">
-                 <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Amount ($)</label>
-                    <input 
-                      type="number" 
-                      value={fundAmount}
-                      onChange={(e) => setFundAmount(e.target.value)}
-                      className={`w-full px-4 py-3 rounded-xl text-sm outline-none font-medium ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-slate-400'}`} 
-                      placeholder="0" 
-                    />
-                 </div>
-                 <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">From Account</label>
-                    <select 
-                      value={fundAccount}
-                      onChange={(e) => setFundAccount(e.target.value)}
-                      className={`w-full px-4 py-3 rounded-xl text-sm outline-none font-medium appearance-none ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500 text-white' : 'bg-slate-50 border border-slate-200 focus:border-slate-400 text-slate-900'}`}
-                    >
-                      {accounts.length > 0 ? accounts.map(acc => (
-                        <option key={acc.id} value={acc.name}>{acc.name}</option>
-                      )) : (
-                        <option value="Cash">Cash</option>
-                      )}
-                    </select>
-                 </div>
-              </div>
-
-              <button 
-                onClick={handleAddFunds}
-                className={`w-full mt-8 py-4 rounded-xl font-bold transition-all shadow-lg hover:scale-[1.02] active:scale-[0.98] ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-violet-900/20' : 'bg-slate-900 hover:bg-slate-800 text-white shadow-sm'}`}
-              >
-                Add Funds
-              </button>
-            </div>
-          </div>
-        )}
-
+        {isAddFundsOpen && <AddToGoalDialog advanced={isAdvanced} goal={selectedGoal} accounts={accounts} onDone={async () => { setIsAddFundsOpen(false); await fetchGoals(); triggerRefresh(); }} onClose={() => setIsAddFundsOpen(false)} />}
+        {takeOutSource && <AmountDialog advanced={isAdvanced} title="Take out of goal" message={<>Lowers {selectedGoal.name}'s {takeOutSource.account_id === null ? takeOutSource.name : `savings in ${takeOutSource.name}`} (up to {peso(takeOutSource.amount)}). Account balances don't change.</>}
+          label="Amount" defaultAmount={takeOutSource.amount} confirmLabel="Take out"
+          onConfirm={async (amount) => {
+            const response = await fetch(`/api/goals/${selectedGoal.id}/withdraw`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount, account_id: takeOutSource.account_id }) });
+            if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not take money out of this goal.');
+            setTakeOutSource(null); await fetchGoals();
+          }}
+          onClose={() => setTakeOutSource(null)} />}
+        {isAutosaveNextOpen && <AmountDialog advanced={isAdvanced} title="Change next auto-save" message={<>Usually {peso(selectedGoal.autosave_amount)}. This amount is saved on {selectedGoal.autosave_date ? shortDate(selectedGoal.autosave_date) : 'the next date'} only.</>}
+          label="Amount next time" defaultAmount={nextAutosave} confirmLabel="Save" clearLabel={Number(selectedGoal.autosave_next_amount) > 0 ? 'Use usual amount' : undefined}
+          onConfirm={async (amount) => {
+            const response = await fetch(`/api/goals/${selectedGoal.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autosave_next_amount: amount }) });
+            if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not save the amount.');
+            setIsAutosaveNextOpen(false); await fetchGoals();
+          }}
+          onClose={() => setIsAutosaveNextOpen(false)} />}
+        {isDeleteGoalOpen && <DeleteRecordDialog advanced={isAdvanced} title={`Delete ${selectedGoal.name}?`} message="Account balances stay the same; only the goal and its history are removed." linkedCount={0}
+          onDelete={async () => {
+            const response = await fetch(`/api/goals/${selectedGoal.id}`, { method: 'DELETE' });
+            if (!response.ok) throw new Error('Could not delete this goal.');
+            setIsDeleteGoalOpen(false); setSelectedGoal(null); await fetchGoals();
+          }}
+          onClose={() => setIsDeleteGoalOpen(false)} />}
+        {editingGoal && <GoalBuilder advanced={isAdvanced} accounts={accounts} goal={editingGoal} onSaved={async () => { setEditingGoal(null); await fetchGoals(); }} onClose={() => setEditingGoal(null)} />}
       </div>
     );
   }
@@ -1426,14 +1336,14 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                 </button>
               </div>
             ) : goals.map((goal, i) => {
-              const progress = Math.min((goal.saved / goal.target) * 100, 100);
-              const targetDate = new Date(goal.date);
-              const monthsLeft = getMonthsBetween(now, targetDate);
-              const daysLeft = getDaysBetween(now, targetDate);
-              const amountLeft = Math.max(0, goal.target - goal.saved);
-              const monthlyNeeded = amountLeft / monthsLeft;
-              const dailyNeeded = amountLeft / daysLeft;
-              const isCompleted = progress >= 100;
+              const pace = goal.progress || {};
+              const progress = Number(pace.percent) || 0;
+              const targetDate = new Date(`${String(goal.date || '').slice(0, 10)}T00:00:00`);
+              const hasDate = !Number.isNaN(targetDate.getTime());
+              const daysLeft = Math.max(0, Number(pace.daysLeft) || 0);
+              const monthlyNeeded = Number(pace.requiredMonthly) || 0;
+              const dailyNeeded = Number(pace.requiredDaily) || 0;
+              const isCompleted = pace.status === 'complete';
               
               return (
                 <div 
@@ -1455,18 +1365,19 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Target Date</span>
                         <span className="text-xs font-bold px-2.5 py-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg flex items-center gap-1.5">
                           <CalendarIcon className="w-3 h-3" />
-                          {targetDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                          {hasDate ? targetDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'No date'}
                         </span>
-                        <span className="text-[10px] font-bold text-slate-400 block mt-1">{daysLeft} days left</span>
+                        <span className="text-[10px] font-bold text-slate-400 block mt-1">{pace.status === 'overdue' ? 'Date passed' : `${daysLeft} days left`}</span>
                       </div>
                     )}
                   </div>
                   
                   <p className="font-bold text-lg relative z-10">{goal.name}</p>
+                  {!isCompleted && <span className={`relative z-10 mt-1 inline-block text-xs font-bold px-2 py-1 rounded-lg ${paceTone(pace.status)}`}>{paceLabel(pace)}</span>}
                   
                   <div className="flex items-end gap-2 mt-1 mb-4 relative z-10">
-                    <p className={`text-3xl font-black ${isCompleted ? 'text-emerald-500' : ''}`}>₱{goal.saved.toLocaleString()}</p>
-                    <p className="text-sm font-medium text-slate-500 mb-1">/ ₱{goal.target.toLocaleString()}</p>
+                    <p className={`text-3xl font-black ${isCompleted ? 'text-emerald-500' : ''}`}>{peso(pace.saved)}</p>
+                    <p className="text-sm font-medium text-slate-500 mb-1">/ {peso(goal.target)}</p>
                   </div>
                   
                   <div className="h-2.5 w-full bg-slate-100 dark:bg-slate-700 rounded-full mb-2 overflow-hidden relative z-10">
@@ -1496,7 +1407,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                       </div>
                       <div>
                         <p className="text-xs font-bold text-slate-500 mb-0.5">{savingViewMode === 'monthly' ? 'Monthly Target' : 'Daily Target'}</p>
-                        <p className="text-sm font-bold">₱{(savingViewMode === 'monthly' ? monthlyNeeded : dailyNeeded).toLocaleString(undefined, { maximumFractionDigits: 0 })} <span className="text-xs font-medium text-slate-400 ml-1">/ {savingViewMode === 'monthly' ? `mo for ${monthsLeft} mos` : `day for ${daysLeft} days`}</span></p>
+                        <p className="text-sm font-bold">₱{(savingViewMode === 'monthly' ? monthlyNeeded : dailyNeeded).toLocaleString(undefined, { maximumFractionDigits: 0 })} <span className="text-xs font-medium text-slate-400 ml-1">/ {savingViewMode === 'monthly' ? `mo for ${Math.max(1, Math.ceil(Number(pace.monthsLeft) || 0))} mos` : `day for ${daysLeft} days`}</span></p>
                       </div>
                     </div>
                   )}
@@ -1539,97 +1450,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
         </div>
       )}
 
-      {isGoalModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsGoalModalOpen(false)}>
-          <div 
-            className={`w-full max-w-md rounded-3xl shadow-xl flex flex-col p-6 overflow-y-auto max-h-[90vh] custom-scrollbar ${isAdvanced ? 'bg-slate-800 border border-slate-700 text-white' : 'bg-white border border-slate-100'}`}
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold">Create New Goal</h3>
-              <button onClick={() => setIsGoalModalOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20} /></button>
-            </div>
-            
-            <div className="space-y-4">
-               <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Goal Name</label>
-                  <input 
-                    type="text" 
-                    value={newGoal.name}
-                    onChange={(e) => setNewGoal({ ...newGoal, name: e.target.value })}
-                    className={`w-full px-4 py-3 rounded-xl text-sm outline-none font-medium ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-slate-400'}`} 
-                    placeholder="e.g. Dream Car" 
-                  />
-               </div>
-               <div className="grid grid-cols-2 gap-4">
-                 <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Target Amount ($)</label>
-                    <input 
-                      type="number" 
-                      value={newGoal.target}
-                      onChange={(e) => setNewGoal({ ...newGoal, target: e.target.value })}
-                      className={`w-full px-4 py-3 rounded-xl text-sm outline-none font-medium ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-slate-400'}`} 
-                      placeholder="0" 
-                    />
-                 </div>
-                 <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Target Date</label>
-                    <input 
-                      type="date" 
-                      value={newGoal.date}
-                      onChange={(e) => setNewGoal({ ...newGoal, date: e.target.value })}
-                      className={`w-full px-4 py-3 rounded-xl text-sm outline-none font-medium ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-slate-400'}`} 
-                    />
-                 </div>
-               </div>
-               <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Color</label>
-                  <div className="flex gap-2">
-                    {['emerald', 'blue', 'violet', 'amber', 'rose', 'fuchsia'].map(color => (
-                      <button
-                        key={color}
-                        onClick={() => setNewGoal({ ...newGoal, color })}
-                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
-                          color === 'emerald' ? 'bg-emerald-500' :
-                          color === 'blue' ? 'bg-blue-500' :
-                          color === 'violet' ? 'bg-violet-500' :
-                          color === 'amber' ? 'bg-amber-500' :
-                          color === 'rose' ? 'bg-rose-500' : 'bg-fuchsia-500'
-                        } ${newGoal.color === color ? 'ring-2 ring-offset-2 ring-slate-400 dark:ring-slate-500 scale-110' : 'hover:scale-110'}`}
-                      />
-                    ))}
-                  </div>
-               </div>
-               <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Icon</label>
-                  <div className="flex gap-3">
-                    {['Target', 'Plane', 'Laptop', 'ShieldAlert', 'Car', 'Home'].map(icon => (
-                      <button
-                        key={icon}
-                        onClick={() => setNewGoal({ ...newGoal, icon })}
-                        className={`p-3 rounded-xl transition-all ${newGoal.icon === icon ? (isAdvanced ? 'bg-violet-600 text-white' : 'bg-slate-900 text-white') : (isAdvanced ? 'bg-slate-900 text-slate-400 hover:text-white' : 'bg-slate-50 text-slate-500 hover:text-slate-900')}`}
-                      >
-                        {getIcon(icon)}
-                      </button>
-                    ))}
-                  </div>
-               </div>
-            </div>
-
-            <button 
-              onClick={handleAddGoal}
-              disabled={!newGoal.name || !newGoal.target || !newGoal.date}
-              className={`w-full mt-8 py-4 rounded-xl font-bold transition-all shadow-lg ${
-                (!newGoal.name || !newGoal.target || !newGoal.date) 
-                ? 'opacity-50 cursor-not-allowed bg-slate-300 text-slate-500 dark:bg-slate-700 dark:text-slate-400' 
-                : (isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-violet-900/20 hover:scale-105' : 'bg-slate-900 hover:bg-slate-800 text-white shadow-sm hover:scale-105')
-              }`}
-            >
-              Start Saving
-            </button>
-          </div>
-        </div>
-      )}
+      {isGoalModalOpen && <GoalBuilder advanced={isAdvanced} accounts={accounts} onSaved={async (id) => { setIsGoalModalOpen(false); const list = await fetchGoals(); setSelectedGoal(list.find((goal: any) => goal.id === id) ?? null); }} onClose={() => setIsGoalModalOpen(false)} />}
 
     </div>
   );

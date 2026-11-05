@@ -5,7 +5,7 @@ import { Receipt, CreditCard, ShoppingBag, Home, Zap, X, RefreshCw, Landmark, Ar
 import { exportPdf } from '../lib/export';
 import { exportExcel } from '../lib/workbookExport';
 import { isAutopayLiability } from '../lib/sharedRules';
-import { AccountChoiceDialog, DeleteRecordDialog } from '../components/RecordDialogs';
+import { AccountChoiceDialog, AmountDialog, DeleteRecordDialog } from '../components/RecordDialogs';
 
 export function Liabilities({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
   const { themeMode } = useStore();
@@ -92,8 +92,9 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
   const [selectedLiability, setSelectedLiability] = useState<any | null>(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [nextChargeOpen, setNextChargeOpen] = useState(false);
 
-  const payLiability = async (accountId: number | null) => {
+  const payLiability = async (accountId: number | null, amount?: number) => {
     const liability = selectedLiability;
     const headers = { 'Content-Type': 'application/json' };
     if (liability.isCardStatement) {
@@ -103,7 +104,7 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
       setPaymentOpen(false); setSelectedLiability(null); triggerRefresh();
       return;
     }
-    const response = await fetch(`/api/liabilities/${liability.id}/pay`, { method: 'PUT', headers, body: JSON.stringify({ account_id: accountId }) });
+    const response = await fetch(`/api/liabilities/${liability.id}/pay`, { method: 'PUT', headers, body: JSON.stringify({ account_id: accountId, amount }) });
     const saved = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(saved.error || 'Could not mark this as paid.');
     const legs = !accountId ? 0 : liability.type === 'Credits' && liability.account_id && Number(liability.account_id) !== accountId ? 2 : 1;
@@ -338,6 +339,7 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
               >
                 {selectedLiability.isCardStatement ? 'Pay statement' : autopay ? `Auto-paid monthly from ${selectedLiability.linkedAccountName || 'the linked account'}` : selectedLiability.status === 'Paid' ? 'Paid' : 'Mark as Paid'}
               </button>
+              {autopay && <button onClick={() => setNextChargeOpen(true)} className={`w-full rounded-xl py-3 text-sm font-bold ${isAdvanced ? 'text-violet-300 hover:bg-violet-500/10' : 'text-emerald-700 hover:bg-emerald-50'}`}>{Number(selectedLiability.next_amount) > 0 ? `Next charge: ₱${Number(selectedLiability.next_amount).toLocaleString()} (this month only) · Change` : 'Change next charge'}</button>}
               {!selectedLiability.isCardStatement && <button onClick={() => setDeleteOpen(true)} className="w-full rounded-xl py-3 text-sm font-bold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10">Delete</button>}
             </div>
           </div>
@@ -361,7 +363,8 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
 
         {paymentOpen && (selectedLiability.isCardStatement
           ? <AccountChoiceDialog advanced={isAdvanced} title="Pay statement" message={<>Transfer <strong>{amountText}</strong> onto {selectedLiability.cardName} to pay its statement balance.</>} accounts={paymentAccounts} accountLabel="Pay from" confirmLabel="Record payment" onConfirm={payLiability} onClose={() => setPaymentOpen(false)} />
-          : <AccountChoiceDialog advanced={isAdvanced} title="Mark as paid" message={<>Record a payment of <strong>{amountText}</strong> for {selectedLiability.name}.{rollNote}{possiblyDeducted && <> {amountText} was already deducted from {selectedLiability.linkedAccountName} when this was added, so the default is not to record it again.</>}</>} accounts={paymentAccounts} defaultAccountId={possiblyDeducted ? null : selectedLiability.type === 'Credits' ? undefined : Number(selectedLiability.account_id) || undefined} accountLabel="Pay from" noneLabel="Already paid — don't record a transaction" confirmLabel="Mark as paid" onConfirm={payLiability} onClose={() => setPaymentOpen(false)} />)}
+          : <AccountChoiceDialog advanced={isAdvanced} title="Mark as paid" message={<>Record a payment of <strong>{amountText}</strong> for {selectedLiability.name}.{rollNote}{possiblyDeducted && <> {amountText} was already deducted from {selectedLiability.linkedAccountName} when this was added, so the default is not to record it again.</>}</>} accounts={paymentAccounts} defaultAccountId={possiblyDeducted ? null : selectedLiability.type === 'Credits' ? undefined : Number(selectedLiability.account_id) || undefined} amountLabel="Amount paid" defaultAmount={Number(selectedLiability.amount) || undefined} accountLabel="Pay from" noneLabel="Already paid — don't record a transaction" confirmLabel="Mark as paid" onConfirm={payLiability} onClose={() => setPaymentOpen(false)} />)}
+        {nextChargeOpen && <AmountDialog advanced={isAdvanced} title="Change next charge" message={<>Usually ₱{Number(selectedLiability.amount || 0).toLocaleString()}. This amount is charged on {selectedLiability.date} only; later months go back to the usual amount.</>} label="Next charge" defaultAmount={Number(selectedLiability.next_amount) || Number(selectedLiability.amount)} confirmLabel="Save" clearLabel={Number(selectedLiability.next_amount) > 0 ? 'Use usual amount' : undefined} onConfirm={async (amount) => { const response = await fetch(`/api/liabilities/${selectedLiability.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ next_amount: amount }) }); if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not save the amount.'); setSelectedLiability({ ...selectedLiability, next_amount: amount }); setNextChargeOpen(false); triggerRefresh(); }} onClose={() => setNextChargeOpen(false)} />}
         {deleteOpen && <DeleteRecordDialog advanced={isAdvanced} title={`Delete ${selectedLiability.name}?`} message="This removes the record from Liabilities and the calendar." linkedCount={Number(selectedLiability.linked_transaction_count || 0)} onDelete={deleteLiability} onClose={() => setDeleteOpen(false)} />}
       </div>
     );

@@ -5,7 +5,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, 
 import { Plus, X, ArrowUpRight, History, Trash2, Edit2, TrendingUp, TrendingDown, Activity, RefreshCw, Download, FileText } from 'lucide-react';
 import { exportPdf } from '../lib/export';
 import { exportExcel } from '../lib/workbookExport';
-import { FALLBACK_FX_RATES } from '../lib/sharedRules';
+import { FALLBACK_FX_RATES, localDate } from '../lib/sharedRules';
 
 const getSymbol = (currency?: string) => {
   if (currency === 'USD') return '$';
@@ -118,7 +118,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
   const [assetInputMode, setAssetInputMode] = useState<'total'|'shares'>('shares');
   const [fetchedPrice, setFetchedPrice] = useState<number | null>(null);
   const [newTx, setNewTx] = useState({
-    date: new Date().toISOString().split('T')[0], type: 'Buy', amount: '', price: '', totalAmount: ''
+    date: localDate(), type: 'Buy', amount: '', price: '', totalAmount: ''
   });
 
   const [visibleLines, setVisibleLines] = useState({
@@ -344,7 +344,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
 
       setIsTxModalOpen(false);
       setTxAccountId('');
-      setNewTx({ date: new Date().toISOString().split('T')[0], type: 'Buy', amount: '', price: '', totalAmount: '' });
+      setNewTx({ date: localDate(), type: 'Buy', amount: '', price: '', totalAmount: '' });
       
       // Refresh
       const res = await fetch('/api/portfolios');
@@ -386,7 +386,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
             {(selectedHolding.type === 'Stocks' || selectedHolding.type === 'Cryptos') && (
             <button 
               onClick={() => {
-                setNewTx({ date: new Date().toISOString().split('T')[0], type: 'Buy', amount: '', price: '', totalAmount: '' });
+                setNewTx({ date: localDate(), type: 'Buy', amount: '', price: '', totalAmount: '' });
                 setIsTxModalOpen(true);
               }}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-violet-900/20' : 'bg-slate-900 hover:bg-slate-800 text-white shadow-sm'}`}

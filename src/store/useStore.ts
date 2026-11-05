@@ -27,6 +27,9 @@ interface AppState {
   setSelectedBusiness: (b: BusinessData | null) => void;
   selectedFreelance: any | null;
   setSelectedFreelance: (f: any | null) => void;
+  /** Goal to open when Plans is shown next (set from the Calendar). */
+  focusGoalId: number | null;
+  setFocusGoalId: (id: number | null) => void;
 }
 
 export const useStore = create<AppState>()(persist((set) => ({
@@ -42,6 +45,8 @@ export const useStore = create<AppState>()(persist((set) => ({
   setSelectedBusiness: (b) => set({ selectedBusiness: b }),
   selectedFreelance: null,
   setSelectedFreelance: (f) => set({ selectedFreelance: f }),
+  focusGoalId: null,
+  setFocusGoalId: (id) => set({ focusGoalId: id }),
 }), {
   name: 'fingent-preferences',
   storage: createJSONStorage(() => localStorage),

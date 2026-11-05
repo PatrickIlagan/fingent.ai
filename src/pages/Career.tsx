@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { localDate } from '../lib/sharedRules';
 import { useStore } from '../store/useStore';
 import { Briefcase, CheckCircle2, ChevronRight, TrendingUp, Edit2, Check, X, CalendarDays, Plus, Target } from 'lucide-react';
-import { DeleteRecordDialog } from '../components/RecordDialogs';
+import { AmountDialog, DeleteRecordDialog } from '../components/RecordDialogs';
 
 export function Career({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
   const { themeMode, triggerRefresh } = useStore();
@@ -24,13 +25,20 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
   const [incomeViewMode, setIncomeViewMode] = useState<"list" | "add" | "details">("list");
   const [selectedFlowId, setSelectedFlowId] = useState<number | null>(null);
   const [deletingFlow, setDeletingFlow] = useState<any | null>(null);
+  const [editingFlowId, setEditingFlowId] = useState<number | null>(null);
+  const [incomeTransactions, setIncomeTransactions] = useState<any[]>([]);
+  const [amountEdit, setAmountEdit] = useState<{ kind: 'next'; flow: any } | { kind: 'deposit'; transaction: any } | null>(null);
+  useEffect(() => {
+     if (incomeViewMode !== 'details') return;
+     fetch('/api/transactions').then(response => response.json()).then(data => setIncomeTransactions(Array.isArray(data) ? data : [])).catch(() => {});
+  }, [incomeViewMode, selectedFlowId]);
   const [incomeForm, setIncomeForm] = useState({ name: '', amount: '', date: '', category: 'Income', is_recurring: false, budget_preset_id: '', account_id: '' });
   const [calendarEvents, setCalendarEvents] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [isTaskOpen, setIsTaskOpen] = useState(false);
   const [taskForm, setTaskForm] = useState({ title: '', due_date: '', priority: 'Medium', notes: '' });
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
-  const [scheduleForm, setScheduleForm] = useState({ name: '', date: new Date().toISOString().split('T')[0], type: 'Career meeting' });
+  const [scheduleForm, setScheduleForm] = useState({ name: '', date: localDate(), type: 'Career meeting' });
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
 
   useEffect(() => {
@@ -140,7 +148,7 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
     if (!response.ok) return;
     const created = await response.json();
     setCalendarEvents((items) => [...items, { id: created.id, name: scheduleForm.name.trim(), type: 'career', date: scheduleForm.date, color: 'violet', provider: scheduleForm.type, source: 'career' }]);
-    setScheduleForm({ name: '', date: new Date().toISOString().split('T')[0], type: 'Career meeting' });
+    setScheduleForm({ name: '', date: localDate(), type: 'Career meeting' });
     setIsScheduleOpen(false);
   };
 
@@ -168,42 +176,52 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
     if (response.ok) setTasks((items) => items.map((item) => item.id === task.id ? updated : item));
   };
 
+  const reloadIncomeData = async () => {
+     const [flows, accountList, transactions] = await Promise.all([fetch('/api/income_flows'), fetch('/api/accounts'), fetch('/api/transactions')].map(request => request.then(response => response.json()).catch(() => [])));
+     setDbIncomeFlows(Array.isArray(flows) ? flows : []);
+     setAccounts(Array.isArray(accountList) ? accountList : []);
+     setIncomeTransactions(Array.isArray(transactions) ? transactions : []);
+  };
+
+  const startEditingFlow = (flow: any) => {
+     setIncomeForm({ name: flow.name || '', amount: String(flow.amount ?? ''), date: flow.date || '', category: flow.category || 'Income', is_recurring: Boolean(Number(flow.is_recurring) || flow.is_recurring === true), budget_preset_id: '', account_id: flow.account_id ? String(flow.account_id) : '' });
+     setEditingFlowId(flow.id);
+     setIncomeViewMode('add');
+  };
+
+  const closeIncomeBuilder = () => {
+     setIncomeForm({ name: '', amount: '', date: '', category: 'Income', is_recurring: false, budget_preset_id: '', account_id: '' });
+     setIncomeViewMode(editingFlowId ? 'details' : 'list');
+     setEditingFlowId(null);
+  };
+
   const renderIncomeBuilder = () => (
     <div className="max-w-3xl mx-auto space-y-6 pb-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex items-center gap-4 mb-8">
-         <button onClick={() => setIncomeViewMode('list')} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><ChevronRight className="w-5 h-5 rotate-180" /></button>
+         <button onClick={closeIncomeBuilder} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><ChevronRight className="w-5 h-5 rotate-180" /></button>
          <div>
-            <h2 className="text-2xl font-black">Add Income Flow</h2>
-            <p className="text-slate-500 font-medium">Create a new source of income and optionally automate its budgeting.</p>
+            <h2 className="text-2xl font-black">{editingFlowId ? 'Edit Income Flow' : 'Add Income Flow'}</h2>
+            <p className="text-slate-500 font-medium">{editingFlowId ? 'Changes apply to future months. Past deposits keep their amounts.' : 'Create a new source of income and optionally automate its budgeting.'}</p>
          </div>
       </div>
-      
+
       <form onSubmit={async (e) => {
          e.preventDefault();
-         const response = await fetch('/api/income_flows', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-               name: incomeForm.name,
-               amount: parseFloat(incomeForm.amount) || 0,
-               date: incomeForm.date,
-               is_recurring: incomeForm.is_recurring,
-               budget_preset_id: parseInt(incomeForm.budget_preset_id) || null,
-               account_id: parseInt(incomeForm.account_id) || null
-               ,category: incomeForm.category || 'Income'
-            })
+         const details = {
+            name: incomeForm.name,
+            amount: parseFloat(incomeForm.amount) || 0,
+            date: incomeForm.date,
+            is_recurring: incomeForm.is_recurring,
+            account_id: parseInt(incomeForm.account_id) || null,
+            category: incomeForm.category || 'Income'
+         };
+         const response = await fetch(editingFlowId ? `/api/income_flows/${editingFlowId}` : '/api/income_flows', {
+            method: editingFlowId ? 'PUT' : 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(editingFlowId ? details : { ...details, budget_preset_id: parseInt(incomeForm.budget_preset_id) || null })
          });
          if (!response.ok) return;
-         const saved = await response.json();
-         setDbIncomeFlows(current => [...current, {
-            id: saved.id,
-            ...incomeForm,
-            amount: parseFloat(incomeForm.amount) || 0,
-            budget_preset_id: parseInt(incomeForm.budget_preset_id) || null,
-            account_id: parseInt(incomeForm.account_id) || null
-         }]);
-         if (incomeForm.account_id) setAccounts(current => current.map(account => String(account.id) === incomeForm.account_id ? { ...account, balance: Number(account.balance || 0) + (parseFloat(incomeForm.amount) || 0) } : account));
-         setIncomeForm({ name: '', amount: '', date: '', category: 'Income', is_recurring: false, budget_preset_id: '', account_id: '' });
-         setIncomeViewMode('list');
+         await reloadIncomeData();
+         closeIncomeBuilder();
          triggerRefresh();
       }} className={`rounded-3xl p-8 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} space-y-8`}>
          
@@ -215,14 +233,14 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
             
             <div className="grid md:grid-cols-2 gap-6">
                <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Amount</label>
+                  <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">{editingFlowId ? 'Usual amount' : 'Amount'}</label>
                   <div className="relative">
                      <span className="absolute left-5 top-1/2 -translate-y-1/2 font-black text-slate-400">₱</span>
                      <input required type="number" value={incomeForm.amount} onChange={e=>setIncomeForm({...incomeForm, amount: e.target.value})} className={`w-full pl-10 pr-5 py-4 rounded-xl outline-none font-bold text-lg ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} placeholder="0.00" />
                   </div>
                </div>
                <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Date</label>
+                  <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">{editingFlowId ? 'Next date' : 'Date'}</label>
                   <input required type="date" value={incomeForm.date} onChange={e=>setIncomeForm({...incomeForm, date: e.target.value})} className={`w-full px-5 py-4 rounded-xl outline-none font-bold text-lg ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`} />
                </div>
             </div>
@@ -258,19 +276,19 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
                <p className="text-xs text-slate-500 mt-2">Automatically update the balance of this account when the income arrives.</p>
             </div>
             
-            <div>
+            {!editingFlowId && <div>
                <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Auto-Budget Model</label>
                <select value={incomeForm.budget_preset_id} onChange={e=>setIncomeForm({...incomeForm, budget_preset_id: e.target.value})} className={`w-full px-5 py-4 rounded-xl outline-none font-bold ${isAdvanced ? 'bg-slate-900 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`}>
                   <option value="">No Auto-Budgeting</option>
                   {budgetPresets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                </select>
                <p className="text-xs text-slate-500 mt-2">Automatically generate a new Budget Plan using this model when the income arrives.</p>
-            </div>
+            </div>}
          </div>
          
          <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
             <button type="submit" className={`w-full py-5 rounded-2xl font-black text-lg shadow-lg hover:scale-[1.02] active:scale-[0.98] transition-all ${isAdvanced ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/40' : 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-emerald-500/20'}`}>
-               Save Income Flow
+               {editingFlowId ? 'Save changes' : 'Save Income Flow'}
             </button>
          </div>
       </form>
@@ -283,7 +301,13 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
       
       const account = accounts.find(a => a.id === flow.account_id);
       const preset = budgetPresets.find(p => p.id === flow.budget_preset_id);
-      
+      const recurring = Boolean(Number(flow.is_recurring) || flow.is_recurring === true);
+      const nextAmount = Number(flow.next_amount) > 0 ? Number(flow.next_amount) : Number(flow.amount) || 0;
+      const legacyNote = `Auto-deposited from income flow #${flow.id}.`;
+      const deposits = incomeTransactions
+         .filter(transaction => transaction.source ? transaction.source === 'income_flow' && Number(transaction.source_id) === Number(flow.id) : transaction.notes === legacyNote)
+         .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
       return (
          <div className="max-w-3xl mx-auto space-y-6 pb-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
            <div className="flex items-center gap-4 mb-8">
@@ -306,10 +330,31 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
                     </div>
                  </div>
                  
-                 <button onClick={() => setDeletingFlow(flow)} className="p-3 rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 transition-colors">
-                    <X className="w-5 h-5" />
-                 </button>
+                 <div className="flex gap-2">
+                    <button onClick={() => startEditingFlow(flow)} aria-label="Edit income flow" className={`p-3 rounded-xl transition-colors ${isAdvanced ? 'bg-slate-700 text-slate-200 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                       <Edit2 className="w-5 h-5" />
+                    </button>
+                    <button onClick={() => setDeletingFlow(flow)} aria-label="Delete income flow" className="p-3 rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 transition-colors">
+                       <X className="w-5 h-5" />
+                    </button>
+                 </div>
               </div>
+
+              {recurring && (
+                 <div className={`p-5 rounded-2xl border-2 ${isAdvanced ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50'}`}>
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                       <div>
+                          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Next deposit</p>
+                          <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400">₱{nextAmount.toLocaleString()}</p>
+                          <p className="text-sm font-medium text-slate-500 mt-1">{flow.date ? new Date(`${flow.date}T00:00:00`).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : 'No date set'}{account ? ` · into ${account.name}` : ' · not deposited automatically'}{Number(flow.next_amount) > 0 ? ` · changed from ₱${Number(flow.amount).toLocaleString()} for this month` : ''}</p>
+                       </div>
+                       <div className="flex flex-wrap gap-2">
+                          <button onClick={() => setAmountEdit({ kind: 'next', flow })} className={`px-4 py-2.5 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}>Change this month</button>
+                          <button onClick={async () => { const response = await fetch(`/api/income_flows/${flow.id}/skip`, { method: 'POST' }); if (response.ok) await reloadIncomeData(); }} className={`px-4 py-2.5 rounded-xl text-sm font-bold border ${isAdvanced ? 'border-slate-600 hover:bg-slate-700' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>Skip this month</button>
+                       </div>
+                    </div>
+                 </div>
+              )}
               
               <div className="grid md:grid-cols-2 gap-4">
                  <div className={`p-5 rounded-2xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
@@ -357,7 +402,41 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
                     )}
                  </div>
               </div>
+
+              <div className="space-y-3 pt-6 border-t border-slate-100 dark:border-slate-700">
+                 <h4 className="font-bold">Deposit history</h4>
+                 {deposits.length ? deposits.map(transaction => (
+                    <div key={transaction.id} className={`flex items-center justify-between gap-3 p-4 rounded-2xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
+                       <div>
+                          <p className="font-bold">₱{Number(transaction.amount).toLocaleString()}</p>
+                          <p className="text-xs font-medium text-slate-500">{new Date(`${String(transaction.date).slice(0, 10)}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} · {transaction.account_name || 'Account'}</p>
+                       </div>
+                       <button onClick={() => setAmountEdit({ kind: 'deposit', transaction })} className={`px-3 py-2 rounded-xl text-xs font-bold ${isAdvanced ? 'text-violet-300 hover:bg-violet-500/10' : 'text-emerald-700 hover:bg-emerald-100'}`}>Edit amount</button>
+                    </div>
+                 )) : <p className="text-sm text-slate-500">{account ? 'Deposits appear here once they are added.' : 'Choose a deposit account (Edit) to add this income to your balance automatically.'}</p>}
+              </div>
            </div>
+           {amountEdit?.kind === 'next' && (
+              <AmountDialog advanced={isAdvanced} title="Change this month's amount" message={<>Usually ₱{Number(amountEdit.flow.amount).toLocaleString()}. This amount is used for the deposit on {amountEdit.flow.date} only; later months go back to the usual amount.</>}
+                 label="Amount this month" defaultAmount={Number(amountEdit.flow.next_amount) || Number(amountEdit.flow.amount)} confirmLabel="Save"
+                 clearLabel={Number(amountEdit.flow.next_amount) > 0 ? 'Use usual amount' : undefined}
+                 onConfirm={async (amount) => {
+                    const response = await fetch(`/api/income_flows/${amountEdit.flow.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ next_amount: amount }) });
+                    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not save the amount.');
+                    await reloadIncomeData(); setAmountEdit(null);
+                 }}
+                 onClose={() => setAmountEdit(null)} />
+           )}
+           {amountEdit?.kind === 'deposit' && (
+              <AmountDialog advanced={isAdvanced} title="Edit deposit" message={<>Change what actually arrived on {String(amountEdit.transaction.date).slice(0, 10)}. The account balance updates to match.</>}
+                 label="Amount received" defaultAmount={Number(amountEdit.transaction.amount)} confirmLabel="Save"
+                 onConfirm={async (amount) => {
+                    const response = await fetch(`/api/transactions/${amountEdit.transaction.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...amountEdit.transaction, amount }) });
+                    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not update the deposit.');
+                    await reloadIncomeData(); triggerRefresh(); setAmountEdit(null);
+                 }}
+                 onClose={() => setAmountEdit(null)} />
+           )}
          </div>
       );
   }

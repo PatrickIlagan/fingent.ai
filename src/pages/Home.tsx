@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { isCashFlow, localDate as localToday } from '../lib/sharedRules';
+import { paceLabel } from '../components/GoalBuilder';
 import { useStore } from '../store/useStore';
 import { PieChart, Pie, Cell, ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip } from 'recharts';
 import { Sparkles, ArrowDown, ArrowUp, Calendar, Receipt, ChevronRight, ChevronDown, TrendingUp, Bitcoin, FileText, Activity, Wallet, Gauge, CircleAlert } from 'lucide-react';
@@ -37,7 +39,8 @@ function cashflowSeries(range: ChartRange, transactions: any[], liabilities: any
   const bucketFor = (date: Date) => buckets.find(bucket => date >= bucket.start && date <= bucket.end);
   transactions.forEach(transaction => {
     const date = localDate(transaction.date); const bucket = date ? bucketFor(date) : null;
-    if (!bucket) return;
+    // Transfers, balance corrections, investment trades, and goal moves aren't income or spending.
+    if (!bucket || !isCashFlow(transaction)) return;
     if (transaction.type === 'income') bucket.Income += Number(transaction.amount || 0);
     if (transaction.type === 'expense') bucket.Expenses += Number(transaction.amount || 0);
   });
@@ -159,7 +162,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
     id: l.id,
     name: l.name,
     amount: l.amount || l.remaining_amount || 0,
-    date: l.date || new Date().toISOString(),
+    date: l.date || localToday(),
     paid: false
   }));
 
@@ -203,8 +206,9 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
     id: g.id,
     name: g.name,
     target: g.target || 0,
-    current: g.saved || 0,
-    color: g.color || 'emerald'
+    current: g.progress?.saved ?? g.saved ?? 0,
+    color: g.color || 'emerald',
+    progress: g.progress
   }));
 
   const today = new Date();
@@ -213,8 +217,8 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
   const previousMonthEnd = new Date(currentMonthStart.getTime() - 1);
   const previousComparableEnd = new Date(Math.min(previousMonthEnd.getTime(), previousMonthStart.getTime() + (today.getTime() - currentMonthStart.getTime())));
   const inPeriod = (transaction: any, start: Date, end: Date) => { const date = localDate(transaction.date); return Boolean(date && date >= start && date <= end); };
-  const currentTransactions = data.transactions.filter(transaction => inPeriod(transaction, currentMonthStart, today));
-  const previousTransactions = data.transactions.filter(transaction => inPeriod(transaction, previousMonthStart, previousComparableEnd));
+  const currentTransactions = data.transactions.filter(transaction => isCashFlow(transaction) && inPeriod(transaction, currentMonthStart, today));
+  const previousTransactions = data.transactions.filter(transaction => isCashFlow(transaction) && inPeriod(transaction, previousMonthStart, previousComparableEnd));
   const monthlyIncome = currentTransactions.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
   const monthlyExpenses = currentTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0);
   const previousIncome = previousTransactions.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
@@ -333,7 +337,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
              {goalSummaries.length === 0 ? (
                <p className="py-4 text-sm text-slate-500">Create a goal to track progress here.</p>
              ) : goalSummaries.map(goal => {
-               const progress = Math.round((goal.current / goal.target) * 100);
+               const progress = Math.min(100, Math.round(goal.target > 0 ? (goal.current / goal.target) * 100 : 0));
                return (
                  <div key={goal.id} className="w-full">
                    <div className="flex justify-between text-sm mb-2">
@@ -346,8 +350,9 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
                        style={{ width: `${progress}%` }} 
                      />
                    </div>
-                   <p className="text-xs text-slate-500 dark:text-slate-400 text-right">
-                     ₱{goal.current.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / ₱{goal.target.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                   <p className="text-xs text-slate-500 dark:text-slate-400 flex justify-between gap-2">
+                     <span className={goal.progress?.status === 'behind' || goal.progress?.status === 'overdue' ? 'font-bold text-amber-600 dark:text-amber-300' : 'font-bold text-emerald-600 dark:text-emerald-400'}>{goal.progress ? paceLabel(goal.progress) : ''}</span>
+                     <span>₱{goal.current.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / ₱{goal.target.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                    </p>
                  </div>
                );

@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import { ChevronLeft, ChevronRight, Zap, Droplet, ArrowDownToLine, ArrowUpRight, ArrowDownRight, X, Calendar as CalendarIcon, Wallet, Plus, StickyNote, Filter, Pin } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Zap, Droplet, ArrowDownToLine, ArrowUpRight, ArrowDownRight, X, Calendar as CalendarIcon, Wallet, Plus, StickyNote, Filter, Pin, Target, PiggyBank } from 'lucide-react';
+import { GoalBuilder } from '../components/GoalBuilder';
 
-export function Calendar() {
-  const { themeMode } = useStore();
+export function Calendar({ onNavigate }: { onNavigate?: (tab: string) => void }) {
+  const { themeMode, setFocusGoalId } = useStore();
   const isAdvanced = themeMode === 'advanced';
 
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 6, 1)); // Default to July 2026
+  const [currentDate, setCurrentDate] = useState(() => { const today = new Date(); return new Date(today.getFullYear(), today.getMonth(), 1); });
+  const [accountList, setAccountList] = useState<any[]>([]);
+  const [dayMenu, setDayMenu] = useState<string | null>(null);
+  const [goalDate, setGoalDate] = useState<string | null>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [filter, setFilter] = useState<string>('all');
   
@@ -18,18 +22,10 @@ export function Calendar() {
       const year = currentDate.getFullYear();
       const month = (currentDate.getMonth() + 1).toString().padStart(2, '0');
       
-      const [liabilitiesRes, accountsRes, calendarEventsRes, incomeFlowsRes] = await Promise.all([
-        fetch('/api/liabilities'),
-        fetch('/api/accounts'),
-        fetch('/api/calendar_events'),
-        fetch('/api/income_flows')
-      ]);
-      const [liabilities, accounts, calendarEvents, incomeFlows] = await Promise.all([
-        liabilitiesRes.json().catch(() => []),
-        accountsRes.json().catch(() => []),
-        calendarEventsRes.json().catch(() => []),
-        incomeFlowsRes.json().catch(() => [])
-      ]);
+      const [liabilities, accounts, calendarEvents, incomeFlows, transactions, goals] = await Promise.all(
+        ['/api/liabilities', '/api/accounts', '/api/calendar_events', '/api/income_flows', '/api/transactions', '/api/goals'].map(path => fetch(path).then(response => response.json()).catch(() => []))
+      );
+      setAccountList(Array.isArray(accounts) ? accounts : []);
 
       const formattedEvents: any[] = [];
       
@@ -91,24 +87,6 @@ export function Calendar() {
       });
 
       (Array.isArray(accounts) ? accounts : []).forEach((acc: any) => {
-        if (acc.transactions) {
-          try {
-            const txs = typeof acc.transactions === 'string' ? JSON.parse(acc.transactions) : acc.transactions;
-            txs.forEach((tx: any) => {
-               formattedEvents.push({
-                 id: `t-${tx.id}`,
-                 date: tx.date.split('T')[0],
-                 type: tx.type === 'income' ? 'inflow' : 'transaction',
-                 name: tx.title || tx.description || 'Transaction',
-                 amount: tx.amount,
-                 icon: tx.type === 'income' ? ArrowDownRight : ArrowUpRight,
-                 color: tx.type === 'income' ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/20' : 'text-slate-500 bg-slate-50 dark:bg-slate-500/20',
-                 source: acc.name
-               });
-            });
-          } catch(e) {}
-        }
-        
         if (acc.type === 'Card' && acc.statement_date && acc.due_date) {
             let stmtDay = acc.statement_date.toString();
             if (stmtDay.includes('-')) stmtDay = stmtDay.split('-')[2];
@@ -202,6 +180,37 @@ export function Calendar() {
         });
       });
 
+      // Recorded transactions for this month. Ones created by bills, income, or goals
+      // already appear through those schedules, so they aren't shown twice.
+      (Array.isArray(transactions) ? transactions : []).forEach((tx: any) => {
+        const date = String(tx.date || '').slice(0, 10);
+        if (!date.startsWith(`${year}-${month}`) || ['income_flow', 'liability', 'goal'].includes(tx.source)) return;
+        formattedEvents.push({
+          id: `t-${tx.id}`,
+          date,
+          type: tx.type === 'income' ? 'inflow' : 'transaction',
+          name: tx.description || tx.category || 'Transaction',
+          amount: Number(tx.amount) || 0,
+          icon: tx.type === 'income' ? ArrowDownRight : ArrowUpRight,
+          color: tx.type === 'income' ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/20' : 'text-slate-500 bg-slate-50 dark:bg-slate-500/20',
+          source: tx.account_name
+        });
+      });
+
+      // Goal target dates and upcoming auto-save days.
+      (Array.isArray(goals) ? goals : []).forEach((goal: any) => {
+        const target = String(goal.date || '').slice(0, 10);
+        if (target.startsWith(`${year}-${month}`)) formattedEvents.push({ id: `g-${goal.id}`, goalId: goal.id, date: target, type: 'goal', name: `${goal.name} target`, amount: Number(goal.target) || 0, icon: Target, color: 'text-violet-500 bg-violet-50 dark:bg-violet-500/20', provider: 'Goal' });
+        const autosave = String(goal.autosave_date || '');
+        if (Number(goal.autosave_amount) > 0 && /^\d{4}-\d{2}-\d{2}$/.test(autosave) && `${year}-${month}` >= autosave.slice(0, 7)) {
+          const lastDay = new Date(year, Number(month), 0).getDate();
+          const day = String(Math.min(Number(autosave.slice(8, 10)), lastDay)).padStart(2, '0');
+          const isNext = autosave.slice(0, 7) === `${year}-${month}`;
+          const amount = isNext && Number(goal.autosave_next_amount) > 0 ? Number(goal.autosave_next_amount) : Number(goal.autosave_amount);
+          formattedEvents.push({ id: `ga-${goal.id}`, goalId: goal.id, date: `${year}-${month}-${day}`, type: 'goal', name: `Auto-save · ${goal.name}`, amount, icon: PiggyBank, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-500/20', provider: 'Goal auto-save' });
+        }
+      });
+
       setEvents(formattedEvents);
     } catch(err) {
       console.error(err);
@@ -264,6 +273,7 @@ export function Calendar() {
       if (filter === 'transactions') dayEvents = dayEvents.filter(e => e.type === 'transaction' || e.type === 'inflow');
       else if (filter === 'bills') dayEvents = dayEvents.filter(e => e.type === 'bill');
       else if (filter === 'notes') dayEvents = dayEvents.filter(e => e.type === 'note' || e.type === 'pin');
+      else if (filter === 'goals') dayEvents = dayEvents.filter(e => e.type === 'goal');
     }
     return dayEvents;
   };
@@ -277,6 +287,7 @@ export function Calendar() {
      if (filter === 'transactions') filteredUpcoming = filteredUpcoming.filter(e => e.type === 'transaction' || e.type === 'inflow');
      else if (filter === 'bills') filteredUpcoming = filteredUpcoming.filter(e => e.type === 'bill');
      else if (filter === 'notes') filteredUpcoming = filteredUpcoming.filter(e => e.type === 'note' || e.type === 'pin');
+     else if (filter === 'goals') filteredUpcoming = filteredUpcoming.filter(e => e.type === 'goal');
   }
 
   return (
@@ -288,7 +299,7 @@ export function Calendar() {
         
         <div className="flex gap-2 flex-wrap">
           <div className={`flex rounded-xl p-1 text-sm font-bold ${isAdvanced ? 'bg-slate-900' : 'bg-slate-100'}`}>
-             {['all', 'bills', 'transactions', 'notes'].map(f => (
+             {['all', 'bills', 'transactions', 'goals', 'notes'].map(f => (
                <button 
                  key={f}
                  onClick={() => setFilter(f)}
@@ -351,12 +362,18 @@ export function Calendar() {
             }
 
             const dayEvents = getEventsForDay(day);
+            const dayDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
             const isToday = day === new Date().getDate() && month === new Date().getMonth() && year === new Date().getFullYear();
 
             return (
-              <div 
-                key={day} 
-                className={`min-h-[80px] p-2 md:p-3 rounded-xl border flex flex-col transition-colors ${
+              <div
+                key={day}
+                role="button"
+                tabIndex={0}
+                aria-label={`Add something on ${dayDate}`}
+                onClick={() => setDayMenu(dayDate)}
+                onKeyDown={(event) => { if (event.key === 'Enter') setDayMenu(dayDate); }}
+                className={`min-h-[80px] p-2 md:p-3 rounded-xl border flex flex-col cursor-pointer transition-colors ${
                   isToday 
                     ? (isAdvanced ? 'border-violet-500 bg-violet-500/10' : 'border-emerald-500 bg-emerald-50') 
                     : (isAdvanced ? 'border-slate-700 hover:bg-slate-700/50' : 'border-slate-100 hover:bg-slate-50')
@@ -370,7 +387,7 @@ export function Calendar() {
                   {dayEvents.map(ev => (
                     <div 
                       key={ev.id} 
-                      onClick={() => setSelectedEvent(ev)}
+                      onClick={(event) => { event.stopPropagation(); setSelectedEvent(ev); }}
                       className={`text-[10px] sm:text-xs px-1.5 py-1 rounded-md cursor-pointer truncate font-medium flex items-center gap-1 ${ev.color}`}
                     >
                       <ev.icon size={10} className="shrink-0" />
@@ -541,7 +558,13 @@ export function Calendar() {
               )}
             </div>
 
-            <button 
+            {selectedEvent.goalId && (
+              <button onClick={() => { setFocusGoalId(selectedEvent.goalId); setSelectedEvent(null); onNavigate?.('plans-goals'); }} className={`w-full mb-3 py-3 rounded-xl font-bold transition-colors ${isAdvanced ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white'}`}>Open goal</button>
+            )}
+            {String(selectedEvent.id).startsWith('c-') && ['note', 'pin'].includes(selectedEvent.type) && (
+              <button onClick={async () => { const response = await fetch(`/api/calendar_events/${String(selectedEvent.id).slice(2)}`, { method: 'DELETE' }); if (response.ok) { setSelectedEvent(null); fetchEvents(); } }} className="w-full mb-3 py-3 rounded-xl font-bold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10">Delete {selectedEvent.type}</button>
+            )}
+            <button
               onClick={() => setSelectedEvent(null)}
               className={`w-full py-4 rounded-xl font-bold transition-colors ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}
             >
@@ -550,6 +573,31 @@ export function Calendar() {
           </div>
         </div>
       )}
+
+      {dayMenu && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm" onClick={() => setDayMenu(null)}>
+          <div role="dialog" aria-modal="true" aria-label={`Add on ${dayMenu}`} onClick={event => event.stopPropagation()} className={`w-full max-w-sm rounded-3xl p-6 shadow-xl ${isAdvanced ? 'bg-slate-800 border border-slate-700 text-white' : 'bg-white border border-slate-100'}`}>
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-xl font-bold">Add on {new Date(`${dayMenu}T00:00:00`).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</h3>
+              <button onClick={() => setDayMenu(null)} aria-label="Close" className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20} /></button>
+            </div>
+            <div className="space-y-2">
+              {([
+                ['goal', Target, 'Goal target', 'Set a savings goal due on this day'],
+                ['note', StickyNote, 'Note', 'A reminder on the calendar'],
+                ['pin', Pin, 'Pin', 'Mark an important date'],
+              ] as const).map(([kind, Icon, title, text]) => (
+                <button key={kind} onClick={() => { if (kind === 'goal') setGoalDate(dayMenu); else { setNewNote({ name: '', date: dayMenu, type: kind, amount: '' }); setIsAddNoteOpen(true); } setDayMenu(null); }}
+                  className={`w-full flex items-center gap-4 p-4 rounded-2xl text-left transition-colors ${isAdvanced ? 'bg-slate-900/60 hover:bg-slate-700' : 'bg-slate-50 hover:bg-slate-100'}`}>
+                  <span className={`w-10 h-10 rounded-xl flex items-center justify-center ${kind === 'note' ? 'text-blue-500 bg-blue-50 dark:bg-blue-500/20' : 'text-violet-500 bg-violet-50 dark:bg-violet-500/20'}`}><Icon size={18} /></span>
+                  <span><span className="block font-bold">{title}</span><span className="block text-xs text-slate-500">{text}</span></span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {goalDate && <GoalBuilder advanced={isAdvanced} accounts={accountList} defaultDate={goalDate} onSaved={() => { setGoalDate(null); fetchEvents(); }} onClose={() => setGoalDate(null)} />}
     </div>
   );
 }

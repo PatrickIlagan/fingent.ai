@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { localDate } from "../lib/sharedRules";
 import {
   Briefcase,
   FileText,
@@ -486,7 +487,7 @@ function ContractsTab({
       const response = await fetch("/api/freelancing/time_logs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ business_id: businessId, service_id: service.id, date: new Date().toISOString().split("T")[0], seconds: Math.round(hours * 3600), description }),
+        body: JSON.stringify({ business_id: businessId, service_id: service.id, date: localDate(), seconds: Math.round(hours * 3600), description }),
       });
       if (response.ok) fetchAll();
     } catch (e) {}
@@ -723,7 +724,7 @@ function InvoicesTab({
     service_id: "",
     invoice_number: `INV-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000)}`,
     amount: "",
-    issue_date: new Date().toISOString().split("T")[0],
+    issue_date: localDate(),
     due_date: "",
     client_name: "",
   });
@@ -1103,7 +1104,7 @@ function TimeLogsTab({
   const [logMessage, setLogMessage] = useState("");
   const [isManualLogOpen, setIsManualLogOpen] = useState(false);
   const [editingLog, setEditingLog] = useState<any | null>(null);
-  const [manualLog, setManualLog] = useState({ service_id: "", date: new Date().toISOString().split("T")[0], hours: "", description: "" });
+  const [manualLog, setManualLog] = useState({ service_id: "", date: localDate(), hours: "", description: "" });
 
   useEffect(() => {
     let interval: any;
@@ -1149,7 +1150,7 @@ function TimeLogsTab({
         body: JSON.stringify({
           business_id: businessId,
           service_id: activeTimer.service_id,
-          date: new Date().toISOString().split("T")[0],
+          date: localDate(),
           seconds,
           description: logMessage || "Session",
         }),
@@ -1183,7 +1184,7 @@ function TimeLogsTab({
       if (!response.ok) return;
       setIsManualLogOpen(false);
       setEditingLog(null);
-      setManualLog({ service_id: "", date: new Date().toISOString().split("T")[0], hours: "", description: "" });
+      setManualLog({ service_id: "", date: localDate(), hours: "", description: "" });
       fetchAll();
     } catch (e) {}
   };
