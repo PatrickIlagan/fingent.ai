@@ -4,6 +4,7 @@ import { useStore } from '../store/useStore';
 import { Briefcase, CheckCircle2, ChevronRight, TrendingUp, Edit2, Check, X, CalendarDays, Plus, Target } from 'lucide-react';
 import { AmountDialog, DeleteRecordDialog } from '../components/RecordDialogs';
 import { celebrate } from '../components/Celebrations';
+import { Suggestions } from '../components/Suggestions';
 
 export function Career({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
   const { themeMode, triggerRefresh } = useStore();
@@ -480,32 +481,33 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
 
   return (
     <div className="space-y-6 pb-10">
-      <div className="flex justify-between items-end">
-        <div>
-          <h2 className="text-3xl font-black">Career Command Center</h2>
-          <p className="text-slate-500 dark:text-slate-400 mt-1">A practical view of your next role, skills, income, and important career dates.</p>
+      <div className="flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-2xl sm:text-3xl font-black">Career</h2>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">Your next role, skills, income, and career dates.</p>
         </div>
-        <div className="hidden sm:flex items-center gap-2"><button onClick={() => setIsEditing(true)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold border ${isAdvanced ? 'border-slate-700 hover:bg-slate-800 text-slate-200' : 'border-slate-200 hover:bg-slate-50 text-slate-700'}`}><Edit2 size={16} /> Profile</button><button onClick={() => setIsScheduleOpen(true)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}><CalendarDays size={16} /> Schedule</button></div>
+        <div className="flex shrink-0 items-center gap-2"><button onClick={() => setIsEditing(true)} aria-label="Edit career profile" className={`flex items-center gap-2 p-2.5 sm:px-4 rounded-xl text-sm font-bold border ${isAdvanced ? 'border-slate-700 hover:bg-slate-800 text-slate-200' : 'border-slate-200 hover:bg-slate-50 text-slate-700'}`}><Edit2 size={16} /><span className="hidden sm:inline">Profile</span></button><button onClick={() => setIsScheduleOpen(true)} aria-label="Schedule a career date" className={`flex items-center gap-2 p-2.5 sm:px-4 rounded-xl text-sm font-bold ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}><CalendarDays size={16} /><span className="hidden sm:inline">Schedule</span></button></div>
       </div>
 
-      <div className={`relative overflow-hidden rounded-[2rem] p-6 md:p-7 border shadow-sm ${isAdvanced ? 'bg-gradient-to-br from-violet-950 via-slate-800 to-slate-900 border-violet-500/30' : 'bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 border-emerald-400 text-white'}`}>
-        <div className="relative z-10 grid lg:grid-cols-[1.3fr_.7fr] gap-8">
+      <div className={`relative overflow-hidden rounded-3xl p-5 md:p-6 border shadow-sm ${isAdvanced ? 'bg-gradient-to-br from-violet-950 via-slate-800 to-slate-900 border-violet-500/30' : 'bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 border-emerald-400 text-white'}`}>
+        <div className="relative z-10 space-y-4">
           <div>
-            <p className={`text-xs font-black uppercase tracking-[0.2em] ${isAdvanced ? 'text-violet-300' : 'text-emerald-50'}`}>Professional trajectory</p>
-            <div className="mt-3 flex flex-wrap items-center gap-3"><h3 className="text-2xl md:text-3xl font-black">{career.current_role || 'Set your current role'}</h3><ChevronRight className={isAdvanced ? 'text-violet-300' : 'text-emerald-50'} /><h3 className="text-2xl md:text-3xl font-black">{career.target_role || 'Choose a target role'}</h3></div>
-            <p className={`mt-4 max-w-2xl text-sm md:text-base ${isAdvanced ? 'text-slate-300' : 'text-emerald-50'}`}>Focus on the skills and meetings that move you toward your next meaningful career step—not a generic checklist.</p>
-            <div className={`mt-7 h-3 overflow-hidden rounded-full ${isAdvanced ? 'bg-slate-700' : 'bg-white/25'}`}><div className={`h-full rounded-full ${isAdvanced ? 'bg-violet-400' : 'bg-white'}`} style={{ width: `${progress}%` }} /></div>
-            <div className="mt-2 flex justify-between text-xs font-bold"><span>{progress}% salary trajectory</span><span>{completedSkills}/{skills.length} skills mastered</span></div>
+            <p className={`text-[11px] font-black uppercase tracking-[0.18em] ${isAdvanced ? 'text-violet-300' : 'text-emerald-50'}`}>Next role</p>
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 text-lg md:text-2xl font-black leading-tight"><span>{career.current_role || 'Set your current role'}</span><ChevronRight size={18} className={isAdvanced ? 'text-violet-300' : 'text-emerald-50'} /><span>{career.target_role || 'Choose a target role'}</span></p>
           </div>
-          <div className={`rounded-3xl p-5 backdrop-blur-sm ${isAdvanced ? 'bg-slate-950/35 border border-slate-700' : 'bg-white/15 border border-white/20'}`}>
-            <p className={`text-xs font-bold uppercase tracking-wider ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Income runway</p>
-            <p className="mt-2 text-3xl font-black">₱{currentSal.toLocaleString()}</p>
-            <p className={`text-sm ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Current monthly compensation</p>
-            <div className={`mt-5 pt-5 border-t ${isAdvanced ? 'border-slate-700' : 'border-white/20'}`}><p className={`text-xs font-bold ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Target monthly compensation</p><p className="mt-1 text-xl font-black">₱{targetSal.toLocaleString()}</p></div>
+          <div>
+            <div className={`h-2 overflow-hidden rounded-full ${isAdvanced ? 'bg-slate-700' : 'bg-white/25'}`}><div className={`h-full rounded-full ${isAdvanced ? 'bg-violet-400' : 'bg-white'}`} style={{ width: `${progress}%` }} /></div>
+            <div className="mt-1.5 flex justify-between text-xs font-bold"><span>{progress}% of target salary</span><span>{completedSkills}/{skills.length} skills</span></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className={`rounded-2xl px-4 py-3 ${isAdvanced ? 'bg-slate-950/35 border border-slate-700' : 'bg-white/15 border border-white/20'}`}><p className={`text-[11px] font-bold uppercase tracking-wider ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Monthly now</p><p className="mt-0.5 text-lg md:text-2xl font-black">₱{currentSal.toLocaleString()}</p></div>
+            <div className={`rounded-2xl px-4 py-3 ${isAdvanced ? 'bg-slate-950/35 border border-slate-700' : 'bg-white/15 border border-white/20'}`}><p className={`text-[11px] font-bold uppercase tracking-wider ${isAdvanced ? 'text-slate-400' : 'text-emerald-50'}`}>Target</p><p className="mt-0.5 text-lg md:text-2xl font-black">₱{targetSal.toLocaleString()}</p></div>
           </div>
         </div>
-        <Target className={`absolute -right-6 -bottom-8 h-32 w-32 opacity-15 ${isAdvanced ? 'text-violet-300' : 'text-white'}`} />
+        <Target className={`absolute -right-6 -bottom-8 h-28 w-28 opacity-15 ${isAdvanced ? 'text-violet-300' : 'text-white'}`} />
       </div>
+
+      <Suggestions page="career" onNavigate={onNavigate} />
       
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">

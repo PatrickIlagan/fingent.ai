@@ -140,6 +140,10 @@ async function initDb(db: any) {
     await db.exec(`ALTER TABLE goals ADD COLUMN ${column};`).catch(() => {});
   }
   await db.exec(`ALTER TABLE liabilities ADD COLUMN account_id INTEGER;`).catch(() => {});
+  // Interest settings (see `dueInterest` in sharedRules).
+  for (const column of 'interest_tiers TEXT, interest_min_balance REAL, interest_boost_pa REAL, interest_boost_until TEXT, interest_cap REAL, interest_frequency TEXT, interest_day INTEGER, interest_mode TEXT, interest_fixed_amount REAL, interest_tax_rate REAL, interest_last_date TEXT'.split(', ')) {
+    await db.exec(`ALTER TABLE accounts ADD COLUMN ${column};`).catch(() => {});
+  }
   await db.exec(`ALTER TABLE categories ADD COLUMN keywords TEXT DEFAULT '';`).catch(() => {});
 
   
@@ -156,7 +160,18 @@ async function initDb(db: any) {
       purpose TEXT,
       credit_limit REAL,
       statement_date INTEGER,
-      due_date INTEGER
+      due_date INTEGER,
+      interest_tiers TEXT,
+      interest_min_balance REAL,
+      interest_boost_pa REAL,
+      interest_boost_until TEXT,
+      interest_cap REAL,
+      interest_frequency TEXT,
+      interest_day INTEGER,
+      interest_mode TEXT,
+      interest_fixed_amount REAL,
+      interest_tax_rate REAL,
+      interest_last_date TEXT
     );
 
     CREATE TABLE IF NOT EXISTS transactions (
@@ -409,6 +424,12 @@ async function initDb(db: any) {
       description TEXT,
       FOREIGN KEY(service_id) REFERENCES freelancing_services(id)
     );
+    -- Device-only settings (sync state, Google sign-in). Never part of a sync snapshot.
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS budgets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       business_id INTEGER,

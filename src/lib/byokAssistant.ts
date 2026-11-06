@@ -77,8 +77,36 @@ export async function testByokKey(apiKey: string) {
   await callGemini(apiKey, 'Reply with exactly: FinGent BYOK connected. Do not use or request any client information.');
 }
 
+// The AI master switch in Settings; when off, nothing is ever sent to Gemini.
+let aiAllowed = true;
+export function setAiAllowed(allowed: boolean) { aiAllowed = allowed; }
+
 export async function getByokGuidance(reply: CopilotReply) {
   const settings = getByokSettings();
-  if (!settings.enabled || !settings.apiKey) return null;
+  if (!aiAllowed || !settings.enabled || !settings.apiKey) return null;
   return callGemini(settings.apiKey, createByokPrompt(reply));
+}
+
+const tipCache = new Map<string, Promise<string | null>>();
+
+/**
+ * One extra tip for a page's suggestions. Gemini receives only the page name and
+ * fixed, generic facts chosen on-device (for example "A savings goal is behind
+ * pace."): never names, amounts, balances, accounts, notes, or transactions.
+ */
+export function getGeminiTip(page: string, facts: string[]) {
+  const settings = getByokSettings();
+  if (!aiAllowed || !settings.enabled || !settings.apiKey || !facts.length) return Promise.resolve(null);
+  const key = page + '|' + facts.join('|');
+  if (!tipCache.has(key)) {
+    const prompt = [
+      'You help users of FinGent, a personal finance app in the Philippines.',
+      'Privacy boundary: you receive only a page name and generic facts produced on the device. You never receive names, amounts, balances, accounts, dates, notes, or records. Do not ask for or guess them.',
+      'Reply with one practical tip of at most 25 words. No numbers, no product endorsements, no personalised investment advice.',
+      'Page: ' + page + '.',
+      'Facts: ' + facts.join(' '),
+    ].join('\n');
+    tipCache.set(key, callGemini(settings.apiKey, prompt).catch(() => null));
+  }
+  return tipCache.get(key)!;
 }

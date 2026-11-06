@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { localDate } from '../lib/sharedRules';
+import { dueInterest, interestMode, interestRates, localDate } from '../lib/sharedRules';
+import { accountFormFromPreset, CATALOG_AS_OF, findProduct } from '../lib/institutions';
+import { InstitutionPicker, InstitutionBadge } from '../components/InstitutionPicker';
+import { AddInterestDialog, blankInterestForm, InterestCard, InterestFields, interestFormFromAccount, interestPayload } from '../components/AccountInterest';
 import { useStore } from '../store/useStore';
 import { CreditCard, Landmark, Wallet, Banknote, Plus, Minus, X, Edit2, Trash2, History, ArrowUpRight, ArrowDownRight, Calendar, FileText, Check, Download } from 'lucide-react';
 import { exportPdf } from '../lib/export';
 import { exportExcel } from '../lib/workbookExport';
 import { celebrate } from '../components/Celebrations';
 import { CountUp } from '../components/CountUp';
+import { Suggestions } from '../components/Suggestions';
 
 const getIconForType = (type: string) => {
   if (type.toLowerCase() === 'card' || type.toLowerCase() === 'credit') return CreditCard;
@@ -13,6 +17,8 @@ const getIconForType = (type: string) => {
   if (type.toLowerCase() === 'cash') return Banknote;
   return Landmark;
 };
+
+const blankAccount = (type = 'Bank'): any => ({ name: '', type, balance: '', color: '', purpose: '', credit_limit: '', statement_date: '', due_date: '', ...blankInterestForm() });
 
 const getColorForType = (type: string) => {
   if (type.toLowerCase() === 'card' || type.toLowerCase() === 'credit') return 'from-slate-700 to-slate-800';
@@ -36,7 +42,9 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
   const [newTx, setNewTx] = useState({ type: 'expense', title: '', amount: '', date: '', notes: '', category: 'Expenses', goalId: '' });
   const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
-  const [newAccount, setNewAccount] = useState<any>({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '' });
+  const [newAccount, setNewAccount] = useState<any>(blankAccount());
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [interestDialog, setInterestDialog] = useState<null | { title: string; amount?: number; gross?: number; date?: string; coversUntil?: string }>(null);
   
   const colorOptions = [
     { value: 'from-blue-400 to-blue-500', name: 'Blue' },
@@ -57,18 +65,23 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
 
   const openAddAccountModal = () => {
     setEditingAccount(null);
-    setNewAccount({ name: '', type: defaultAccountType, balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '', statement_date: '', due_date: '' });
+    setIsPickerOpen(true);
+  };
+
+  const startAccountForm = (values: any) => {
+    setNewAccount(values);
+    setIsPickerOpen(false);
     setIsAddAccountModalOpen(true);
   };
 
-  
-  const handleAccrueInterest = async () => {
-    try {
-      await fetch('/api/accounts/accrue-interest', { method: 'POST' });
-      triggerRefresh();
-    } catch (e) {
-      console.error(e);
-    }
+  const saveInterest = async (values: { amount: number; gross?: number; date: string }) => {
+    if (!selectedAccount || !interestDialog) return;
+    const response = await fetch(`/api/accounts/${selectedAccount.id}/interest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...values, covers_until: interestDialog.coversUntil }) });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Could not add interest.');
+    celebrate({ kind: 'success', title: 'Interest added', message: `₱${values.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} · ${selectedAccount.name}` });
+    setInterestDialog(null);
+    triggerRefresh();
   };
 
   
@@ -83,7 +96,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
             name: newAccount.name,
             type: newAccount.type,
             balance: parseFloat(newAccount.balance),
-            interest_rate_pa: newAccount.interest_rate_pa ? parseFloat(newAccount.interest_rate_pa) / 100 : 0,
+            ...interestPayload(newAccount, newAccount.type),
             color: newAccount.color,
             purpose: newAccount.purpose,
             credit_limit: newAccount.credit_limit || null,
@@ -99,7 +112,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
             name: newAccount.name,
             type: newAccount.type,
             balance: parseFloat(newAccount.balance),
-            interest_rate_pa: newAccount.interest_rate_pa ? parseFloat(newAccount.interest_rate_pa) / 100 : 0,
+            ...interestPayload(newAccount, newAccount.type),
             image_logo_name: 'bank',
             color: newAccount.color,
             purpose: newAccount.purpose,
@@ -112,7 +125,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
       celebrate({ kind: 'success', title: editingAccount ? 'Account updated' : 'Account added', message: newAccount.name });
       triggerRefresh();
       setIsAddAccountModalOpen(false);
-      setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '', statement_date: '', due_date: '' }); setEditingAccount(null);
+      setNewAccount(blankAccount()); setEditingAccount(null);
     } catch (err) {
       console.error(err);
     }
@@ -285,7 +298,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
                 color: selectedAccount.color || '',
                 purpose: selectedAccount.purpose || '',
                 credit_limit: selectedAccount.credit_limit ? selectedAccount.credit_limit.toString() : '',
-                interest_rate_pa: selectedAccount.interest_rate_pa ? (selectedAccount.interest_rate_pa * 100).toString() : '',
+                ...interestFormFromAccount(selectedAccount),
                 statement_date: selectedAccount.statement_date ? selectedAccount.statement_date.toString() : '',
                 due_date: selectedAccount.due_date ? selectedAccount.due_date.toString() : ''
               });
@@ -337,6 +350,18 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
              </div>
           </div>
         )}
+
+        <InterestCard
+          advanced={isAdvanced}
+          account={selectedAccount}
+          onAdd={(defaults) => setInterestDialog(defaults)}
+          onEditTransaction={handleEditTransaction}
+          onSetUp={() => {
+            setEditingAccount(selectedAccount);
+            setNewAccount({ ...blankAccount(selectedAccount.type), name: selectedAccount.name, type: selectedAccount.type, balance: selectedAccount.balance.toString(), color: selectedAccount.color || '', purpose: selectedAccount.purpose || '', ...interestFormFromAccount(selectedAccount), interest_mode: 'auto' });
+            setIsAddAccountModalOpen(true);
+          }}
+        />
 
         {/* Transactions */}
         <div className={`rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
@@ -424,14 +449,13 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
         <div className="flex flex-wrap gap-2">
         <button onClick={() => exportExcel('accounts-and-transactions', [{ name: 'Accounts & Transactions', rows: accountExportRows }])} className={`px-3 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 border transition-colors ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'}`}><Download size={15} /> Excel</button>
         <button onClick={() => exportPdf('Accounts and Transactions', accountExportRows, 'FinGent account balances and transaction history')} className={`px-3 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 border transition-colors ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'}`}><FileText size={15} /> PDF</button>
-        <button onClick={handleAccrueInterest} className={`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 border transition-colors ${isAdvanced ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'}`}>
-             <span className="sm:hidden">Accrue interest</span><span className="hidden sm:inline">Simulate Next Day (Accrue Interest)</span>
-        </button>
         <button onClick={openAddAccountModal} className={`px-4 py-2.5 rounded-xl font-bold text-sm ${isAdvanced ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}>
           + Add Account
         </button>
         </div>
       </div>
+
+      {!category && <Suggestions page="accounts" onNavigate={onNavigate} />}
 
       <div className={`rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
         <div className="flex flex-col sm:flex-row justify-between gap-6 sm:gap-4">
@@ -489,11 +513,13 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
               <div className="flex items-end justify-between mt-1">
                 <div className="flex flex-col">
                   <p className="text-2xl font-bold tracking-tight">₱{Math.abs(acc.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                  {acc.interest_rate_pa > 0 && (
-                    <p className="mt-1 text-xs font-bold text-white/75">
-                      {(acc.interest_rate_pa * 100).toFixed(2)}% p.a.
-                    </p>
-                  )}
+                  {(() => {
+                    const mode = interestMode(acc);
+                    if (mode === 'off' || acc.type === 'Card') return null;
+                    const due = mode === 'remind' ? dueInterest(acc, acc.transactions || []).reminder : null;
+                    const rate = interestRates(acc, Number(acc.balance) || 0, localDate()).effective;
+                    return <p className="mt-1 text-xs font-bold text-white/75">{mode === 'fixed' ? `₱${Number(acc.interest_fixed_amount || 0).toLocaleString()} interest / month` : `${(rate * 100).toFixed(2)}% p.a.`}{due && due.net >= 0.01 ? <span className="ml-1.5 rounded-md bg-white/25 px-1.5 py-0.5 text-white">Interest due</span> : null}</p>;
+                  })()}
                 </div>
                 
                   <div className="flex gap-1.5">
@@ -563,19 +589,30 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
     
       {/* Add Account Modal */}
       {isAddAccountModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => { setIsAddAccountModalOpen(false); setEditingAccount(null); setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '', statement_date: '', due_date: '' }); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => { setIsAddAccountModalOpen(false); setEditingAccount(null); setNewAccount(blankAccount()); }}>
           <div 
-            className={`w-full max-w-md rounded-3xl shadow-xl flex flex-col p-6 ${isAdvanced ? 'bg-slate-800 border border-slate-700 text-white' : 'bg-white border border-slate-100'}`}
+            className={`w-full max-w-md max-h-[92dvh] overflow-y-auto rounded-3xl shadow-xl flex flex-col p-5 sm:p-6 ${isAdvanced ? 'bg-slate-800 border border-slate-700 text-white' : 'bg-white border border-slate-100'}`}
             onClick={e => e.stopPropagation()}
           >
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">{editingAccount ? 'Edit Account' : 'Add Account'}</h3>
-              <button onClick={() => { setIsAddAccountModalOpen(false); setEditingAccount(null); setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '', statement_date: '', due_date: '' }); }} className={`p-2 rounded-full ${isAdvanced ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}>
+              <button onClick={() => { setIsAddAccountModalOpen(false); setEditingAccount(null); setNewAccount(blankAccount()); }} className={`p-2 rounded-full ${isAdvanced ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}>
                 <X size={20} />
               </button>
             </div>
             
             <div className="space-y-4">
+              {!editingAccount && (() => {
+                const preset = newAccount.preset_id ? findProduct(newAccount.preset_id) : null;
+                return <div className={`flex items-center gap-3 rounded-2xl p-3 ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
+                  {preset ? <InstitutionBadge institution={preset.institution} size="sm" /> : null}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold">{preset ? `${preset.institution.name} · ${preset.product.name}` : 'Your own account'}</p>
+                    <p className="text-[11px] text-slate-500">{preset ? (preset.product.note ? `${preset.product.note} ` : '') + `Rates as of ${CATALOG_AS_OF}; edit anything that's changed.` : 'Fill in the details below.'}</p>
+                  </div>
+                  <button onClick={() => { setIsAddAccountModalOpen(false); setIsPickerOpen(true); }} className={`shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-bold ${isAdvanced ? 'text-violet-300 hover:bg-slate-800' : 'text-emerald-700 hover:bg-emerald-50'}`}>Change</button>
+                </div>;
+              })()}
               <div>
                 <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Account Name</label>
                 <input 
@@ -659,17 +696,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
               )}
               
               {(newAccount.type === 'Bank' || newAccount.type === 'Digital') && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Interest Rate (PA %)</label>
-                  <input 
-                    type="number"
-                    step="0.01"
-                    value={newAccount.interest_rate_pa}
-                    onChange={(e) => setNewAccount(prev => ({ ...prev, interest_rate_pa: e.target.value }))}
-                    className={`w-full px-4 py-3 rounded-xl text-sm outline-none transition-colors ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
-                    placeholder="e.g. 4.5 for 4.5% PA"
-                  />
-                </div>
+                <InterestFields advanced={isAdvanced} form={newAccount} onChange={(patch) => setNewAccount((prev: any) => ({ ...prev, ...patch }))} />
               )}
 
               <div>
@@ -697,6 +724,20 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
             </div>
           </div>
         </div>
+      )}
+
+      {isPickerOpen && (
+        <InstitutionPicker
+          advanced={isAdvanced}
+          defaultKind={category?.toLowerCase() === 'card' ? 'card' : category?.toLowerCase() === 'digital' ? 'wallet' : 'all'}
+          onClose={() => setIsPickerOpen(false)}
+          onPick={(institution, product) => startAccountForm({ ...blankAccount(product.type), ...accountFormFromPreset(institution, product) })}
+          onOther={(type) => startAccountForm({ ...blankAccount(type || defaultAccountType), name: type === 'Cash' ? 'Cash on hand' : '' })}
+        />
+      )}
+
+      {interestDialog && selectedAccount && (
+        <AddInterestDialog advanced={isAdvanced} title={interestDialog.title} defaults={interestDialog} onSave={saveInterest} onClose={() => setInterestDialog(null)} />
       )}
 
       {/* Transaction Modal */}

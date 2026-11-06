@@ -1,22 +1,19 @@
 import React, { useState, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { useStore } from '../store/useStore';
-import { Settings as SettingsIcon, Bot, CheckCircle2, Download, Upload, Shield, KeyRound, LockKeyhole, Moon, Sun, RefreshCw, CloudUpload, CloudDownload, AlertTriangle, Monitor, Save, FileSpreadsheet, FileText, Palette, PanelsTopLeft, Eye, EyeOff } from 'lucide-react';
-import { isFirebaseConfigured } from '../lib/firebase';
+import { Settings as SettingsIcon, Bot, CheckCircle2, Download, Upload, Shield, KeyRound, LockKeyhole, Moon, Sun, RefreshCw, CloudUpload, CloudDownload, AlertTriangle, Monitor, Save, FileSpreadsheet, FileText, Palette, PanelsTopLeft, Eye, EyeOff, Sparkles } from 'lucide-react';
 import { getByokSettings, saveByokSettings, testByokKey } from '../lib/byokAssistant';
 import { exportEverythingWorkbook } from '../lib/workbookExport';
 import { exportEverythingPdfStatement } from '../lib/export';
-import { restoreFromDrive, syncToDrive } from '../lib/driveSync';
+import { GoogleSyncCard } from '../components/GoogleSyncCard';
 
 export function Settings() {
-  const { themeMode, setThemeMode, accentColor, setAccentColor, hiddenTabs, toggleTabVisibility, triggerRefresh } = useStore();
+  const { themeMode, setThemeMode, accentColor, setAccentColor, hiddenTabs, toggleTabVisibility, triggerRefresh, aiEnabled, setAiEnabled, suggestionsEnabled, setSuggestionsEnabled, geminiSuggestions, setGeminiSuggestions, dismissedSuggestions, restoreSuggestions } = useStore();
   const isAdvanced = themeMode === 'advanced';
   // The mobile apps keep records in their own encrypted store, so the desktop .db file cannot be exported or imported there.
   const isNative = Capacitor.isNativePlatform();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
-  const [encPassword, setEncPassword] = useState('');
-  const [driveSyncing, setDriveSyncing] = useState(false);
   const [byok, setByok] = useState(getByokSettings);
   const [byokStatus, setByokStatus] = useState<'idle' | 'testing' | 'connected' | 'error'>('idle');
   const [byokError, setByokError] = useState('');
@@ -66,32 +63,6 @@ export function Settings() {
     }
   };
 
-  const handleDriveUpload = async () => {
-    try {
-      setDriveSyncing(true);
-      await syncToDrive(encPassword);
-      alert('Encrypted cross-device backup synced to Google Drive.');
-    } catch(err: any) {
-      alert("Drive sync failed: " + err.message);
-    } finally {
-      setDriveSyncing(false);
-      setEncPassword('');
-    }
-  };
-
-  const handleDriveDownload = async () => {
-    try {
-      setDriveSyncing(true);
-      await restoreFromDrive(encPassword);
-      alert('Cross-device backup restored from Google Drive.');
-      triggerRefresh(); window.location.reload();
-    } catch(err: any) {
-      alert("Drive restore failed: " + err.message);
-    } finally {
-      setDriveSyncing(false);
-      setEncPassword('');
-    }
-  };
 
   const saveByok = () => {
     saveByokSettings({ enabled: byok.enabled, apiKey: byok.apiKey.trim() });
@@ -153,6 +124,18 @@ export function Settings() {
             <p className="mt-2 text-xs text-slate-500">Home and Settings always remain available.</p>
           </div>
 
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
+            <div className="flex items-start justify-between gap-4">
+              <div><p className="font-bold flex items-center gap-2"><Sparkles size={18} /> AI features</p><p className="mt-1 max-w-2xl text-sm text-slate-500">Suggestions and Home insights are worked out on this device from your own records. Turning this off hides them and stops every Gemini request. The Copilot keeps working for commands.</p></div>
+              <Switch advanced={isAdvanced} label="AI features" checked={aiEnabled} onChange={setAiEnabled} />
+            </div>
+            {aiEnabled && <div className={`mt-4 space-y-3 rounded-2xl p-4 ${isAdvanced ? 'bg-slate-900/40' : 'bg-slate-50'}`}>
+              <div className="flex items-start justify-between gap-4"><div><p className="text-sm font-bold">Suggestions on pages</p><p className="mt-0.5 text-xs text-slate-500">Up to three tips per page. Tips you dismiss stay hidden on this device.</p></div><Switch advanced={isAdvanced} label="Suggestions on pages" checked={suggestionsEnabled} onChange={setSuggestionsEnabled} /></div>
+              <div className="flex items-start justify-between gap-4"><div><p className="text-sm font-bold">Let Gemini add a tip</p><p className="mt-0.5 text-xs text-slate-500">Off by default. Uses your own Gemini key below. Gemini receives only the page name and fixed, generic facts such as “a savings goal is behind pace”, never names, amounts, accounts, notes, or transactions.</p></div><Switch advanced={isAdvanced} label="Let Gemini add a tip" checked={geminiSuggestions && suggestionsEnabled} disabled={!suggestionsEnabled} onChange={setGeminiSuggestions} /></div>
+              {dismissedSuggestions.length > 0 && <button onClick={restoreSuggestions} className={`text-xs font-bold ${isAdvanced ? 'text-violet-300' : 'text-emerald-700'}`}>Show {dismissedSuggestions.length} dismissed tip{dismissedSuggestions.length === 1 ? '' : 's'} again</button>}
+            </div>}
+          </div>
+
           <div className="flex items-start gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">
             <div className={`mt-0.5 rounded-xl p-2 ${isAdvanced ? 'bg-emerald-500/10 text-emerald-300' : 'bg-emerald-50 text-emerald-600'}`}><LockKeyhole size={18} /></div>
             <div>
@@ -160,56 +143,18 @@ export function Settings() {
               <p className="mt-1 max-w-2xl text-sm text-slate-500">The local copilot prepares actions from your commands and saves only after you confirm. Account matching, financial details, and chat history stay inside FinGent. It has no API key and does not send records or chats to an external AI service.</p>
             </div>
           </div>
-          <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
+          {aiEnabled && <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
             <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="font-bold flex items-center gap-2"><Bot size={18} /> Optional Gemini BYOK</p><p className="mt-1 max-w-2xl text-sm text-slate-500">BYOK never receives your chat text or history. When enabled, FinGent sends Gemini only one fixed generic intent class (for example, <code>TRANSACTION_RECORDING</code>) for workflow guidance—never names, amounts, balances, categories, records, or account details. Your key is held only for this browser session and is cleared when the session ends.</p></div><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={byok.enabled} onChange={event => setByok(value => ({ ...value, enabled: event.target.checked }))} className="h-4 w-4 accent-emerald-600" /> Enable no-chat BYOK guidance</label></div>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row"><input type="password" value={byok.apiKey} onChange={event => setByok(value => ({ ...value, apiKey: event.target.value }))} placeholder="Gemini API key" autoComplete="off" className={`min-w-0 flex-1 rounded-xl px-4 py-2.5 text-sm outline-none ${isAdvanced ? 'border border-slate-700 bg-slate-900 text-white focus:border-violet-500' : 'border border-slate-200 bg-slate-50 focus:border-emerald-500'}`} /><button onClick={saveByok} className={`rounded-xl px-4 py-2.5 text-sm font-bold ${isAdvanced ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-900 text-white hover:bg-slate-800'}`}><Save size={16} className="mr-1 inline" /> Save key</button><button onClick={verifyByok} disabled={byokStatus === 'testing'} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">{byokStatus === 'testing' ? <RefreshCw size={16} className="mr-1 inline animate-spin" /> : <KeyRound size={16} className="mr-1 inline" />} Test key</button></div>
             {byokStatus === 'connected' && <p className="mt-3 flex items-center gap-1 text-sm text-emerald-600"><CheckCircle2 size={16} /> Key verified and stored locally.</p>}{byokError && <p className="mt-3 text-sm text-rose-600">{byokError}</p>}
-          </div>
+          </div>}
         </div>
       </div>
 
       <div className={`rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
         <h3 className="text-lg font-bold flex items-center gap-2 mb-6"><Shield size={20} /> Data Management</h3>
-        <p className="text-sm text-slate-500 mb-6">FinGent stores data locally. Google Drive backups are encrypted locally with AES-256-GCM before upload, so Drive only receives encrypted backup bytes.</p>
-        
-        <div className="mb-6">
-          <label className="block text-sm font-bold mb-1">Database Encryption Password</label>
-          <p className="text-xs text-slate-500 mb-2">Required for Google Drive Cloud Sync. Your data will be encrypted with this key before uploading. If you forget this password, your cloud backup cannot be recovered!</p>
-          <input 
-            type="password" 
-            value={encPassword}
-            onChange={(e) => setEncPassword(e.target.value)}
-            placeholder="Enter a strong password..." 
-            className={`w-full max-w-md px-4 py-2 rounded-xl text-sm outline-none transition-colors ${isAdvanced ? 'bg-slate-900 border border-slate-700 focus:border-violet-500 text-white' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
-          />
-        </div>
-
-        <div className="grid md:grid-cols-2 gap-4 mb-6">
-          <div className={`p-5 rounded-2xl border ${isAdvanced ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50'}`}>
-            <h4 className="font-bold flex items-center gap-2 mb-2"><CloudUpload size={18} /> Cloud Backup</h4>
-            <p className="text-sm text-slate-500 mb-4">Encrypt and save your database to your personal Google Drive.</p>
-            <button 
-              onClick={handleDriveUpload}
-              disabled={driveSyncing}
-              className={`w-full py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 transition-colors disabled:opacity-50 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
-            >
-              {driveSyncing ? <RefreshCw className="animate-spin" size={16} /> : 'Sync to Drive'}
-            </button>
-          </div>
-          
-          <div className={`p-5 rounded-2xl border ${isAdvanced ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50'}`}>
-            <h4 className="font-bold flex items-center gap-2 mb-2"><CloudDownload size={18} /> Cloud Restore</h4>
-            <p className="text-sm text-slate-500 mb-4">Download and decrypt your database from Google Drive.</p>
-            <button 
-              onClick={handleDriveDownload}
-              disabled={driveSyncing}
-              className={`w-full py-2.5 rounded-xl text-sm font-bold flex justify-center items-center gap-2 transition-colors disabled:opacity-50 ${isAdvanced ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'}`}
-            >
-              {driveSyncing ? <RefreshCw className="animate-spin" size={16} /> : 'Restore from Drive'}
-            </button>
-          </div>
-        </div>
-        {!isFirebaseConfigured && <div className={`mb-6 rounded-2xl border p-4 text-sm ${isAdvanced ? 'border-amber-500/30 bg-amber-500/10 text-amber-100' : 'border-amber-200 bg-amber-50 text-amber-900'}`}><p className="font-bold">Google Drive needs one-time project setup</p><p className="mt-1">Add the <code>VITE_FIREBASE_*</code> values from <code>.env.example</code> to <code>.env.local</code>, enable Google sign-in in Firebase Authentication, enable the Google Drive API for that Google Cloud project, and add this app URL to Firebase’s authorized domains.</p></div>}
+        <p className="text-sm text-slate-500 mb-4">FinGent keeps your data on this device. Sync and backups are encrypted here before anything leaves it.</p>
+        <div className="mb-6"><GoogleSyncCard /></div>
 
 
         <div className="pt-6 border-t border-slate-100 dark:border-slate-700 grid md:grid-cols-2 gap-4">
@@ -238,11 +183,17 @@ export function Settings() {
       <div className={`rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
         <h3 className="text-lg font-bold flex items-center gap-2 mb-4 text-rose-500"><AlertTriangle size={20} /> Disclaimers & Liability</h3>
         <div className={`p-4 rounded-xl text-sm space-y-3 ${isAdvanced ? 'bg-slate-900/50 text-slate-400' : 'bg-slate-50 text-slate-600'}`}>
-          <p><strong>1. Data Privacy & Security:</strong> FinGent is designed to operate primarily via local/containerized storage to ensure the highest level of privacy. If you choose Google Drive sync, the backup is encrypted locally with AES-256-GCM before transmission. We do not store, access, or intercept your encryption password. You are responsible for storing it safely; a lost password cannot be recovered.</p>
-          <p><strong>2. Local Copilot:</strong> FinGent’s copilot can prepare and, after an explicit confirmation, save records locally. It does not send financial details to an external AI service and does not provide personalised financial advice.</p>
+          <p><strong>1. Data Privacy & Security:</strong> FinGent is designed to operate primarily via local/containerized storage to ensure the highest level of privacy. If you connect Google sync, your data is encrypted on your device with your app password (AES-256-GCM) before it is uploaded to a private Google Drive app folder. We never receive your password or your data. A lost app password cannot be recovered.</p>
+          <p><strong>2. Local Copilot and suggestions:</strong> FinGent’s copilot can prepare and, after an explicit confirmation, save records locally. Page suggestions and insights are calculated on your device. Neither sends financial details to an external AI service, and neither provides personalised financial advice. If you turn on the optional Gemini features with your own key, Gemini receives only generic facts or a fixed intent class, never your records. You can turn all AI features off in Settings.</p>
           <p><strong>3. Limitation of Liability:</strong> By using FinGent, you agree that the developers shall not be held liable for any data loss, financial losses, miscalculations, or any direct/indirect damages arising from the use of this application. Always verify critical financial information independently.</p>
         </div>
       </div>
     </div>
   );
+}
+
+function Switch({ advanced, label, checked, disabled = false, onChange }: { advanced: boolean; label: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) {
+  return <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} onClick={() => onChange(!checked)} className={`relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-40 ${checked ? (advanced ? 'bg-violet-600' : 'bg-emerald-500') : (advanced ? 'bg-slate-600' : 'bg-slate-300')}`}>
+    <span className={`absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : ''}`} />
+  </button>;
 }

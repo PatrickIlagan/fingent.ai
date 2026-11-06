@@ -131,7 +131,7 @@ export function liabilityAfterPayment(liability: LiabilityRecord) {
 // `saved` stores the fixed amounts plus anything recorded before accounts
 // could be linked; whole-account balances are added when progress is read.
 export type GoalSource = { account_id: number | null; name: string; amount: number; mode?: 'part' | 'whole' };
-export type GoalEntry = { id: number; date: string; amount: number; type: 'contribution' | 'withdrawal' | 'autosave' | 'skipped'; account_id?: number | null; account?: string; to_account_id?: number; to_account?: string; reason?: string };
+export type GoalEntry = { id: number; date: string; amount: number; type: 'contribution' | 'withdrawal' | 'autosave' | 'skipped' | 'interest'; account_id?: number | null; account?: string; to_account_id?: number; to_account?: string; reason?: string };
 type GoalRecord = { id?: unknown; name?: unknown; target?: unknown; saved?: unknown; date?: unknown; created_at?: unknown; sources?: unknown; transactions?: unknown };
 type AccountRecord = { id?: unknown; name?: unknown; type?: unknown; balance?: unknown };
 
@@ -280,6 +280,234 @@ export function withWholeAccounts(goal: GoalRecord, goals: GoalRecord[], account
     linked.push({ account_id: id, name: String(account.name), amount: 0, mode: 'whole' });
   }
   return { sources: [...parseList<GoalSource>(goal.sources).filter(source => source.mode !== 'whole'), ...linked] };
+}
+
+// ---------------------------------------------------------------------------
+// Interest. An account earns its base rate (or a higher rate once the balance
+// reaches a tier), plus any promo or mission boost on the first `interest_cap`
+// pesos until `interest_boost_until`. Banks withhold a 20% final tax by
+// default. Daily credits post one entry per day, like Maya; monthly credits
+// post on `interest_day` from the daily balances since the last credit.
+// `interest_last_date` is the last day whose interest has been accounted for.
+// ---------------------------------------------------------------------------
+export type InterestMode = 'auto' | 'remind' | 'fixed' | 'off';
+export type InterestTier = { from: number; rate_pa: number };
+export type InterestPosting = { date: string; gross: number; tax: number; net: number; balanceBefore: number; description: string; notes: string };
+type InterestAccount = AccountRecord & Record<string, unknown>;
+type BalanceEntry = { account_id?: unknown; date?: unknown; type?: unknown; amount?: unknown };
+
+export const DEFAULT_INTEREST_TAX = 0.2;
+const INTEREST_MODES: InterestMode[] = ['auto', 'remind', 'fixed', 'off'];
+const MAX_INTEREST_CATCH_UP_DAYS = 400;
+const toNumber = (value: unknown) => { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; };
+const round2 = (value: number) => Math.round(value * 100) / 100;
+const pesos2 = (value: number) => '₱' + value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** The date `days` days after (or before, if negative) a YYYY-MM-DD date. */
+export function shiftDate(date: string, days: number) {
+  const [year, month, day] = date.slice(0, 10).split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+export function interestMode(account: InterestAccount): InterestMode {
+  const mode = String(account.interest_mode ?? '') as InterestMode;
+  if (INTEREST_MODES.includes(mode)) return mode;
+  return toNumber(account.interest_rate_pa) > 0 ? 'auto' : 'off';
+}
+export const interestFrequency = (account: InterestAccount) => account.interest_frequency === 'monthly' ? 'monthly' as const : 'daily' as const;
+export const interestTaxRate = (account: InterestAccount) => account.interest_tax_rate == null || account.interest_tax_rate === '' ? DEFAULT_INTEREST_TAX : Math.min(1, Math.max(0, toNumber(account.interest_tax_rate)));
+/** Day of the month monthly interest is credited; 31 means the last day of each month. */
+export const interestDay = (account: InterestAccount) => { const day = Math.round(toNumber(account.interest_day)); return day >= 1 && day <= 31 ? day : 31; };
+export const interestTiers = (account: InterestAccount) => parseList<InterestTier>(account.interest_tiers)
+  .map(tier => ({ from: toNumber(tier.from), rate_pa: toNumber(tier.rate_pa) }))
+  .filter(tier => tier.from > 0 && tier.rate_pa >= 0)
+  .sort((a, b) => a.from - b.from);
+
+/** Annual rates that apply to a balance on a date; `effective` blends the base and the boosted part. */
+export function interestRates(account: InterestAccount, balance: number, date: string) {
+  const amount = Math.max(0, balance);
+  if (isCardAccount(account) || amount <= 0 || amount < toNumber(account.interest_min_balance)) return { base: 0, boost: 0, boosted: 0, effective: 0 };
+  const tier = interestTiers(account).filter(item => amount >= item.from).pop();
+  const base = tier ? tier.rate_pa : Math.max(0, toNumber(account.interest_rate_pa));
+  const until = String(account.interest_boost_until || '');
+  const boost = toNumber(account.interest_boost_pa) > 0 && (!isIsoDate(until) || date <= until) ? toNumber(account.interest_boost_pa) : 0;
+  const cap = toNumber(account.interest_cap);
+  const boosted = boost ? (cap > 0 ? Math.min(amount, cap) : amount) : 0;
+  return { base, boost, boosted, effective: (amount * base + boosted * boost) / amount };
+}
+
+/** Gross, tax, and net interest (unrounded) for some days on a balance. */
+export function interestOn(account: InterestAccount, balance: number, date: string, days = 1) {
+  const gross = Math.max(0, balance) * interestRates(account, balance, date).effective * days / 365;
+  const tax = gross * interestTaxRate(account);
+  return { gross, tax, net: gross - tax };
+}
+
+/** Rough net interest over the next month at today's balance. */
+export function monthlyInterestEstimate(account: InterestAccount, today = localDate()) {
+  const mode = interestMode(account);
+  if (mode === 'off' || isCardAccount(account)) return 0;
+  if (mode === 'fixed') return toNumber(account.interest_fixed_amount);
+  return interestOn(account, toNumber(account.balance), today, 30.44).net;
+}
+
+/** Balance at the end of each day from `from` to `to`, worked back from today's balance using later transactions. */
+export function endOfDayBalances(currentBalance: number, transactions: BalanceEntry[], from: string, to: string) {
+  const changes = new Map<string, number>();
+  let afterTo = 0;
+  for (const transaction of transactions) {
+    const date = String(transaction.date || '').slice(0, 10);
+    const signed = (transaction.type === 'income' ? 1 : -1) * toNumber(transaction.amount);
+    if (date > to) afterTo += signed;
+    else changes.set(date, (changes.get(date) || 0) + signed);
+  }
+  const balances = new Map<string, number>();
+  let balance = currentBalance - afterTo;
+  for (let day = to; day >= from; day = shiftDate(day, -1)) {
+    balances.set(day, balance);
+    balance -= changes.get(day) || 0;
+  }
+  return balances;
+}
+
+/** Monthly credit dates after `after`, up to and including `until` (the day is clamped to each month's length). */
+export function interestCreditDates(day: number, after: string, until: string) {
+  const dates: string[] = [];
+  let [year, month] = after.split('-').map(Number);
+  for (let guard = 0; guard < 400; guard += 1) {
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const date = `${year}-${String(month).padStart(2, '0')}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
+    if (date > until) break;
+    if (date > after) dates.push(date);
+    month += 1;
+    if (month > 12) { month = 1; year += 1; }
+  }
+  return dates;
+}
+
+/**
+ * Interest owed to an account since `interest_last_date`: entries to post
+ * (automatic or fixed), or a reminder with the estimate (remind mode).
+ * `lastDate` is what `interest_last_date` should become.
+ */
+export function dueInterest(account: InterestAccount, transactions: BalanceEntry[], today = localDate()) {
+  const mode = interestMode(account);
+  const yesterday = shiftDate(today, -1);
+  const storedLast = String(account.interest_last_date || '').slice(0, 10);
+  const last = isIsoDate(storedLast) ? storedLast : null;
+  const result = { postings: [] as InterestPosting[], lastDate: last ?? yesterday, reminder: null as null | { date: string; from: string; gross: number; tax: number; net: number } };
+  if (mode === 'off' || !last || isCardAccount(account)) return result;
+  const earliest = shiftDate(today, -MAX_INTEREST_CATCH_UP_DAYS);
+  const start = last < earliest ? earliest : last;
+  if (start >= today) return result;
+  const own = transactions.filter(transaction => transaction.account_id == null || Number(transaction.account_id) === Number(account.id));
+  const balances = endOfDayBalances(toNumber(account.balance), own, shiftDate(start, 1), today);
+  const taxRate = interestTaxRate(account);
+  let added = 0;
+  const balanceOn = (date: string) => (balances.get(date) ?? toNumber(account.balance)) + added;
+  const entry = (date: string, gross: number, label: string): InterestPosting => {
+    const grossAmount = round2(gross);
+    const tax = round2(grossAmount * taxRate);
+    return { date, gross: grossAmount, tax, net: round2(grossAmount - tax), balanceBefore: balanceOn(date), description: 'Interest', notes: tax > 0 ? `${label} · gross ${pesos2(grossAmount)} · tax ${pesos2(tax)}` : label };
+  };
+
+  if (mode === 'auto' && interestFrequency(account) === 'daily') {
+    // Each finished day is credited the next morning.
+    for (let day = shiftDate(start, 1); day <= yesterday; day = shiftDate(day, 1)) {
+      const posting = entry(shiftDate(day, 1), interestOn(account, balanceOn(day), day).gross, 'Daily interest');
+      if (posting.net >= 0.01) { result.postings.push(posting); added += posting.net; }
+    }
+    result.lastDate = yesterday > last ? yesterday : last;
+    return result;
+  }
+
+  const credits = interestCreditDates(interestDay(account), start, today);
+  let from = shiftDate(start, 1);
+  let reminder = { gross: 0, tax: 0, net: 0 };
+  for (const date of credits) {
+    if (mode === 'fixed') {
+      const net = round2(toNumber(account.interest_fixed_amount));
+      if (net >= 0.01) { result.postings.push({ date, gross: net, tax: 0, net, balanceBefore: balanceOn(date), description: 'Interest', notes: 'Fixed monthly interest' }); added += net; }
+    } else {
+      let gross = 0;
+      for (let day = from; day <= date; day = shiftDate(day, 1)) gross += interestOn(account, balanceOn(day), day).gross;
+      const posting = entry(date, gross, 'Monthly interest');
+      if (mode === 'auto') { if (posting.net >= 0.01) { result.postings.push(posting); added += posting.net; } }
+      else reminder = { gross: round2(reminder.gross + posting.gross), tax: round2(reminder.tax + posting.tax), net: round2(reminder.net + posting.net) };
+    }
+    from = shiftDate(date, 1);
+  }
+  if (mode === 'remind') {
+    if (credits.length) result.reminder = { date: credits[credits.length - 1], from: shiftDate(start, 1), ...reminder };
+    return result;
+  }
+  if (credits.length) result.lastDate = credits[credits.length - 1];
+  return result;
+}
+
+type GoalState = GoalRecord & { sources?: unknown; transactions?: unknown };
+
+/**
+ * Grows each goal's fixed savings in an account by its share of newly credited
+ * interest (whole-account goals already follow the balance). Daily credits add
+ * to one "Interest" history line per goal, account, and month.
+ */
+export function shareInterestWithGoals(goals: GoalState[], account: AccountRecord, postings: { date: string; net: number; balanceBefore: number }[]) {
+  const changed = new Map<number, { id: number; saved: number; sources: GoalSource[]; transactions: GoalEntry[] }>();
+  for (const posting of postings) {
+    if (!(posting.balanceBefore > 0) || !(posting.net > 0)) continue;
+    for (const goal of goals) {
+      const state = changed.get(Number(goal.id)) ?? { id: Number(goal.id), saved: toNumber(goal.saved), sources: parseList<GoalSource>(goal.sources), transactions: parseList<GoalEntry>(goal.transactions) };
+      const part = state.sources.find(source => source.mode !== 'whole' && Number(source.account_id) === Number(account.id));
+      if (!part || !(toNumber(part.amount) > 0)) continue;
+      const share = round2(posting.net * Math.min(1, toNumber(part.amount) / posting.balanceBefore));
+      if (share < 0.01) continue;
+      state.sources = state.sources.map(source => source === part ? { ...source, amount: round2(toNumber(source.amount) + share) } : source);
+      state.saved = round2(state.saved + share);
+      const month = posting.date.slice(0, 7);
+      const line = state.transactions.find(item => item.type === 'interest' && Number(item.account_id) === Number(account.id) && String(item.date).slice(0, 7) === month);
+      state.transactions = line
+        ? state.transactions.map(item => item === line ? { ...item, amount: round2(toNumber(item.amount) + share), date: posting.date > item.date ? posting.date : item.date } : item)
+        : [{ id: entryId(), date: posting.date, amount: share, type: 'interest', account_id: Number(account.id), account: String(account.name) }, ...state.transactions];
+      changed.set(state.id, state);
+    }
+  }
+  return [...changed.values()];
+}
+
+export const INTEREST_FIELDS = ['interest_rate_pa', 'interest_tiers', 'interest_min_balance', 'interest_boost_pa', 'interest_boost_until', 'interest_cap', 'interest_frequency', 'interest_day', 'interest_mode', 'interest_fixed_amount', 'interest_tax_rate', 'interest_last_date'] as const;
+
+/**
+ * Cleans interest settings from the account form, keeping stored values for
+ * fields not sent. Interest restarts from today when it's switched on or its
+ * mode or frequency changes, so nothing is back-dated.
+ */
+export function interestSettings(input: Record<string, unknown>, existing: Record<string, unknown> | null, today = localDate()) {
+  const pick = (key: string) => input[key] !== undefined ? input[key] : existing?.[key];
+  const optional = (key: string) => { const value = pick(key); return value === '' || value == null ? null : Math.max(0, toNumber(value)); };
+  const rate = Math.max(0, toNumber(pick('interest_rate_pa')));
+  const modeValue = String(pick('interest_mode') ?? '') as InterestMode;
+  const mode: InterestMode = INTEREST_MODES.includes(modeValue) ? modeValue : rate > 0 ? 'auto' : 'off';
+  const until = String(pick('interest_boost_until') ?? '');
+  const day = Math.round(toNumber(pick('interest_day')));
+  const tax = pick('interest_tax_rate');
+  const settings = {
+    interest_rate_pa: rate,
+    interest_tiers: JSON.stringify(interestTiers({ interest_tiers: pick('interest_tiers') })),
+    interest_min_balance: optional('interest_min_balance'),
+    interest_boost_pa: optional('interest_boost_pa'),
+    interest_boost_until: isIsoDate(until) ? until : null,
+    interest_cap: optional('interest_cap'),
+    interest_frequency: pick('interest_frequency') === 'monthly' ? 'monthly' : 'daily',
+    interest_day: day >= 1 && day <= 31 ? day : null,
+    interest_mode: mode,
+    interest_fixed_amount: optional('interest_fixed_amount'),
+    interest_tax_rate: tax === '' || tax == null ? DEFAULT_INTEREST_TAX : Math.min(1, Math.max(0, toNumber(tax))),
+    interest_last_date: isIsoDate(String(existing?.interest_last_date || '')) ? String(existing?.interest_last_date) : null as string | null,
+  };
+  const restarted = !existing || mode !== interestMode(existing) || settings.interest_frequency !== interestFrequency(existing) || !settings.interest_last_date;
+  if (restarted) settings.interest_last_date = shiftDate(today, -1);
+  return settings;
 }
 
 type BusinessRecord = { type?: unknown; status?: unknown; value?: unknown; amount?: unknown; date?: unknown; description?: unknown };

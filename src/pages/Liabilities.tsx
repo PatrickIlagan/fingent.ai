@@ -8,6 +8,7 @@ import { isAutopayLiability } from '../lib/sharedRules';
 import { AccountChoiceDialog, AmountDialog, DeleteRecordDialog } from '../components/RecordDialogs';
 import { celebrate } from '../components/Celebrations';
 import { CountUp } from '../components/CountUp';
+import { Suggestions } from '../components/Suggestions';
 
 export function Liabilities({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
   const { themeMode } = useStore();
@@ -401,6 +402,8 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
           </button>
         </div>
       </div>
+
+      {isAll && <Suggestions page="liabilities" onNavigate={onNavigate} />}
 
       <div className={`rounded-3xl p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-gradient-to-r from-rose-50 to-orange-50 border-rose-100'}`}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">

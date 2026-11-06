@@ -6,6 +6,7 @@ import { AddToGoalDialog, GoalBuilder, paceLabel, paceTone, peso } from '../comp
 import { AmountDialog, DeleteRecordDialog } from '../components/RecordDialogs';
 import { Target, PieChart, Plus, Plane, Laptop, ShieldAlert, Calendar as CalendarIcon, Home, Car, AlertCircle, CheckCircle2, TrendingUp, X } from 'lucide-react';
 import { celebrate, celebrateCompletedGoals } from '../components/Celebrations';
+import { Suggestions } from '../components/Suggestions';
 
 export function Plans({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
   const { themeMode, shouldRefresh, triggerRefresh, focusGoalId, setFocusGoalId } = useStore();
@@ -312,13 +313,13 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
           </div>
         </div>
 
-        <div className={`${card} sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6`}>
-          <div className="flex items-center gap-6">
-            <div className={`w-20 h-20 rounded-3xl flex items-center justify-center text-white shadow-lg shrink-0 ${isCompleted ? 'bg-emerald-500' : isAdvanced ? 'bg-violet-600 shadow-violet-900/30' : 'bg-slate-900 shadow-slate-200'}`}>
+        <div className={`${card} !p-5 sm:!p-8 flex flex-col md:flex-row md:items-center justify-between gap-5 sm:gap-6`}>
+          <div className="flex items-start sm:items-center gap-4 sm:gap-6">
+            <div className={`w-14 h-14 sm:w-20 sm:h-20 rounded-2xl sm:rounded-3xl flex items-center justify-center text-white shadow-lg shrink-0 ${isCompleted ? 'bg-emerald-500' : isAdvanced ? 'bg-violet-600 shadow-violet-900/30' : 'bg-slate-900 shadow-slate-200'}`}>
               {getIcon(selectedGoal.icon)}
             </div>
-            <div>
-              <h2 className="text-3xl font-black">{selectedGoal.name}</h2>
+            <div className="min-w-0">
+              <h2 className="text-2xl sm:text-3xl font-black">{selectedGoal.name}</h2>
               <div className="flex flex-wrap items-center gap-3 mt-2 text-sm font-medium text-slate-500">
                 <span className="flex items-center gap-1.5"><CalendarIcon className="w-4 h-4" /> {targetDate ? `Target: ${shortDate(selectedGoal.date)}${pace.status === 'overdue' ? ' (passed)' : ` (${Math.max(0, pace.daysLeft)} days left)`}` : 'No target date yet'}</span>
                 <span className="px-2.5 py-1 bg-slate-100 dark:bg-slate-700 rounded-lg">{Number(pace.percent || 0).toFixed(1)}% complete</span>
@@ -1028,6 +1029,8 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
           )}
         </div>
       </div>
+
+      {showAll && <Suggestions page="plans" onNavigate={onNavigate} />}
 
             {(showAll || isBudget) && (
         <div className="space-y-8">

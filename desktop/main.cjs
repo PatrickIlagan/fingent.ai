@@ -61,6 +61,7 @@ function createWindow(port) {
     minWidth: 1024,
     minHeight: 700,
     autoHideMenuBar: true,
+    icon: path.join(__dirname, 'icon.ico'),
     backgroundColor: '#f8fffc',
     webPreferences: {
       contextIsolation: true,

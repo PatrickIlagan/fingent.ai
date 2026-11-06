@@ -3,8 +3,9 @@ import multer from "multer";
 import fsModule from "fs";
 import crypto from "crypto";
 import path from "path";
+import os from "os";
 import { closeDb, getDataDir, getDb, lockDatabase, unlockDatabase, validateDatabaseFile } from "./server/db";
-import { accountGoalSavings, addMonth, isGoalError, businessMetrics, categoryAliasGroup, dueOccurrences, entryId, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, goalProgress, localDate, parseList, planGoalContribution, planGoalWithdrawal, ratesFromFrankfurter, withWholeAccounts, isAutopayLiability, isIsoDate, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, resolveCategoryAlias as resolveCategoryLabel } from "./src/lib/sharedRules";
+import { accountGoalSavings, addMonth, isGoalError, businessMetrics, categoryAliasGroup, dueOccurrences, entryId, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, goalProgress, localDate, parseList, planGoalContribution, planGoalWithdrawal, ratesFromFrankfurter, withWholeAccounts, isAutopayLiability, isIsoDate, dueInterest, interestMode, interestSettings, isCardAccount, shareInterestWithGoals, INTEREST_FIELDS, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, resolveCategoryAlias as resolveCategoryLabel } from "./src/lib/sharedRules";
 // yahoo-finance2 exposes its constructor as CommonJS's `.default`. Using an
 // explicit require keeps the production CJS bundle compatible with Electron.
 const YahooFinance = require('yahoo-finance2').default;
@@ -135,6 +136,28 @@ async function postDueRecurring(db: any) {
     }
     await db.run("UPDATE goals SET autosave_date = ?, autosave_next_amount = NULL WHERE id = ?", [next, row.id]);
   }
+
+  await postDueInterest(db);
+}
+
+/** Credits interest that's due (automatic and fixed modes) and grows goal savings held in those accounts. */
+async function postDueInterest(db: any) {
+  const now = today();
+  for (const account of await db.all("SELECT * FROM accounts")) {
+    if (interestMode(account) === 'off' || isCardAccount(account)) continue;
+    const since = isIsoDate(account.interest_last_date) ? account.interest_last_date : now;
+    const transactions = await db.all("SELECT account_id, date, type, amount FROM transactions WHERE account_id = ? AND date > ?", [account.id, since]);
+    const { postings, lastDate } = dueInterest(account, transactions, now);
+    await applyInterest(db, account, postings);
+    if (lastDate !== account.interest_last_date) await db.run("UPDATE accounts SET interest_last_date = ? WHERE id = ?", [lastDate, account.id]);
+  }
+}
+
+async function applyInterest(db: any, account: any, postings: { date: string; net: number; balanceBefore: number; description: string; notes: string }[]) {
+  if (!postings.length) return;
+  for (const posting of postings) await recordAccountTransaction(db, { account_id: account.id, type: 'income', amount: posting.net, category: 'Interest', description: posting.description, notes: posting.notes, date: posting.date, source: 'interest', source_id: account.id });
+  const { goals } = await goalContext(db);
+  for (const goal of shareInterestWithGoals(goals, account, postings)) await saveGoalState(db, goal.id, goal.saved, goal.sources, goal.transactions);
 }
 
 let recurringCheckedOn = '';
@@ -223,8 +246,10 @@ function saveAppLock(password: string) {
 // requires it. Local programs and other web pages therefore cannot read data
 // from the loopback server without the app password.
 const SESSION_COOKIE = 'fingent_session';
-const PUBLIC_API_PATHS = new Set(['/api/health', '/api/system/lock/status', '/api/system/lock/setup', '/api/system/lock/unlock']);
+// The Google callback is opened by the system browser, which has no session; it's checked with a one-time state value instead.
+const PUBLIC_API_PATHS = new Set(['/api/health', '/api/system/lock/status', '/api/system/lock/setup', '/api/system/lock/unlock', '/api/system/google/callback']);
 const activeSessions = new Set<string>();
+let googleAccess: { token: string; expires: number } | null = null;
 
 function sessionToken(req: express.Request) {
   const cookie = String(req.headers.cookie || '').split(';').map(part => part.trim()).find(part => part.startsWith(`${SESSION_COOKIE}=`));
@@ -271,6 +296,16 @@ async function startServer() {
     res.setHeader('X-FinGent-Locked', '1');
     res.status(401).json({ error: 'FinGent is locked. Unlock the app to continue.' });
   });
+  app.use((req, res, next) => {
+    // Every successful change bumps the data version, so sync can tell whether this device has unsynced changes.
+    // Entries posted automatically (recurring, interest) aren't counted: every device works them out the same way.
+    const pathname = req.path.toLowerCase();
+    if (req.method === 'GET' || !pathname.startsWith('/api/') || pathname.startsWith('/api/system/')) return next();
+    res.on('finish', () => {
+      if (res.statusCode < 400) void getDb().then(db => db.run("INSERT INTO app_settings (key, value) VALUES ('data_version', '1') ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1")).catch(() => {});
+    });
+    next();
+  });
   app.use(async (req, _res, next) => {
     // Unlocked reads first post any recurring entries that have come due.
     const pathname = req.path.toLowerCase();
@@ -314,6 +349,7 @@ async function startServer() {
   });
 
   app.post('/api/system/lock', async (_req, res) => {
+    googleAccess = null;
     try {
       await lockDatabase();
       endSessions(res);
@@ -512,6 +548,128 @@ To run FinGent as a desktop application:
     } finally {
       if (req.file && fsModule.existsSync(req.file.path)) fsModule.unlinkSync(req.file.path);
     }
+  });
+
+  // ---- Google sign-in for the desktop app -------------------------------------
+  // Google's installed-app flow: the system browser signs in and returns to this
+  // loopback server with a one-time code, exchanged using PKCE. The refresh
+  // token is kept in the encrypted database (app_settings), never synced.
+  // From the environment, or the 'Desktop app' client JSON downloaded from Google Cloud saved as desktop/google-oauth.json (packaged with the app).
+  const googleClient = (() => {
+    if (process.env.GOOGLE_DESKTOP_CLIENT_ID) return { id: process.env.GOOGLE_DESKTOP_CLIENT_ID, secret: process.env.GOOGLE_DESKTOP_CLIENT_SECRET || '' };
+    try { const raw = JSON.parse(fsModule.readFileSync(path.join(appRoot, 'desktop', 'google-oauth.json'), 'utf8')); const client = raw.installed || raw; return { id: String(client.client_id || ''), secret: String(client.client_secret || '') }; } catch { return { id: '', secret: '' }; }
+  })();
+  const googleClientId = googleClient.id;
+  const googleClientSecret = googleClient.secret;
+  const googleAuthUrl = process.env.GOOGLE_OAUTH_AUTH_URL || 'https://accounts.google.com/o/oauth2/v2/auth';
+  const googleTokenUrl = process.env.GOOGLE_OAUTH_TOKEN_URL || 'https://oauth2.googleapis.com/token';
+  const pendingGoogleLogins = new Map<string, { verifier: string; redirect: string; expires: number }>();
+  const escapeHtml = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] as string));
+  const resultPage = (title: string, message: string) => '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FinGent</title></head><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#ecfdf5;font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#0f172a"><main style="max-width:420px;margin:24px;padding:32px;background:#fff;border-radius:24px;box-shadow:0 12px 40px rgba(15,23,42,.08);text-align:center"><h1 style="margin:0 0 8px;font-size:22px">' + escapeHtml(title) + '</h1><p style="margin:0;color:#475569;line-height:1.5">' + escapeHtml(message) + '</p></main></body></html>';
+  const getSetting = async (db: any, key: string) => (await db.get("SELECT value FROM app_settings WHERE key = ?", [key]))?.value ?? null;
+  const setSetting = async (db: any, key: string, value: unknown) => {
+    if (value === null || value === undefined) await db.run("DELETE FROM app_settings WHERE key = ?", [key]);
+    else await db.run("INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [key, String(value)]);
+  };
+
+  async function googleAccessToken(db: any) {
+    if (googleAccess && googleAccess.expires > Date.now()) return googleAccess.token;
+    const refreshToken = await getSetting(db, 'google_refresh_token');
+    if (!refreshToken) return null;
+    const response = await fetch(googleTokenUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: googleClientId, client_secret: googleClientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' }) });
+    const body: any = await response.json().catch(() => ({}));
+    if (!response.ok || !body.access_token) {
+      if (body.error === 'invalid_grant') await setSetting(db, 'google_refresh_token', null);
+      throw Object.assign(new Error('Your Google sign-in expired. Connect Google again in Settings.'), { status: 409 });
+    }
+    googleAccess = { token: body.access_token, expires: Date.now() + (Number(body.expires_in) || 3600) * 1000 - 60_000 };
+    return googleAccess.token;
+  }
+
+  app.get('/api/system/google/start', (_req, res) => {
+    if (!googleClientId) return res.status(400).json({ error: 'Google sign-in for the desktop app is not set up yet. Add GOOGLE_DESKTOP_CLIENT_ID and GOOGLE_DESKTOP_CLIENT_SECRET (see README).' });
+    for (const [key, login] of pendingGoogleLogins) if (login.expires < Date.now()) pendingGoogleLogins.delete(key);
+    const state = crypto.randomBytes(24).toString('base64url');
+    const verifier = crypto.randomBytes(48).toString('base64url');
+    const redirect = 'http://127.0.0.1:' + PORT + '/api/system/google/callback';
+    pendingGoogleLogins.set(state, { verifier, redirect, expires: Date.now() + 10 * 60_000 });
+    const query = new URLSearchParams({ client_id: googleClientId, redirect_uri: redirect, response_type: 'code', scope: 'https://www.googleapis.com/auth/drive.appdata', code_challenge: crypto.createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', state, access_type: 'offline', prompt: 'consent' });
+    res.json({ url: googleAuthUrl + '?' + query.toString() });
+  });
+
+  app.get('/api/system/google/callback', async (req, res) => {
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
+    res.setHeader('Cache-Control', 'no-store');
+    const state = String(req.query.state || '');
+    const pending = pendingGoogleLogins.get(state);
+    pendingGoogleLogins.delete(state);
+    if (!pending || pending.expires < Date.now()) return res.status(400).send(resultPage('This sign-in link expired', 'Start again from Settings in FinGent.'));
+    if (req.query.error || !req.query.code) return res.status(400).send(resultPage('Google sign-in was cancelled', 'You can close this tab and try again from FinGent.'));
+    try {
+      const response = await fetch(googleTokenUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ code: String(req.query.code), client_id: googleClientId, client_secret: googleClientSecret, redirect_uri: pending.redirect, grant_type: 'authorization_code', code_verifier: pending.verifier }) });
+      const body: any = await response.json().catch(() => ({}));
+      if (!response.ok || !body.access_token) throw new Error(body.error_description || body.error || 'Google did not return a sign-in token.');
+      const db = await getDb();
+      if (body.refresh_token) await setSetting(db, 'google_refresh_token', body.refresh_token);
+      else if (!(await getSetting(db, 'google_refresh_token'))) throw new Error('Google did not allow offline access.');
+      googleAccess = { token: body.access_token, expires: Date.now() + (Number(body.expires_in) || 3600) * 1000 - 60_000 };
+      res.send(resultPage("You're connected", 'FinGent can now sync through your Google account. Go back to the app; you can close this tab.'));
+    } catch (error: any) {
+      res.status(500).send(resultPage('Could not connect to Google', (error?.message || 'Something went wrong.') + ' Make sure FinGent is unlocked, then try again.'));
+    }
+  });
+
+  app.get('/api/system/google/token', async (_req, res) => {
+    try {
+      const token = await googleAccessToken(await getDb());
+      if (!token) return res.status(409).json({ error: 'Google is not connected.' });
+      res.json({ access_token: token });
+    } catch (error: any) { res.status(error.status || 500).json({ error: error.message }); }
+  });
+
+  app.post('/api/system/google/disconnect', async (_req, res) => {
+    try {
+      const db = await getDb();
+      const refreshToken = await getSetting(db, 'google_refresh_token');
+      if (refreshToken) void fetch('https://oauth2.googleapis.com/revoke', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: refreshToken }) }).catch(() => {});
+      await setSetting(db, 'google_refresh_token', null);
+      googleAccess = null;
+      res.json({ success: true });
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
+  });
+
+  // ---- Sync state --------------------------------------------------------------
+  const SYNC_STATE_KEYS = ['synced_version', 'remote_modified', 'sync_auto', 'last_synced_at', 'last_synced_device', 'device_name'];
+  async function syncState(db: any) {
+    let deviceId = await getSetting(db, 'device_id');
+    if (!deviceId) { deviceId = crypto.randomUUID(); await setSetting(db, 'device_id', deviceId); }
+    return {
+      data_version: Number(await getSetting(db, 'data_version')) || 0,
+      synced_version: Number(await getSetting(db, 'synced_version')) || 0,
+      remote_modified: await getSetting(db, 'remote_modified'),
+      auto: (await getSetting(db, 'sync_auto')) !== '0',
+      google_connected: Boolean(await getSetting(db, 'google_refresh_token')),
+      google_provider: googleClientId ? 'desktop' : 'none',
+      last_synced_at: await getSetting(db, 'last_synced_at'),
+      last_synced_device: await getSetting(db, 'last_synced_device'),
+      device_id: deviceId,
+      device_name: (await getSetting(db, 'device_name')) || os.hostname() || 'This computer',
+    };
+  }
+  app.get('/api/system/sync/state', async (_req, res) => {
+    try { res.json(await syncState(await getDb())); } catch (error: any) { res.status(500).json({ error: error.message }); }
+  });
+  app.post('/api/system/sync/state', async (req, res) => {
+    try {
+      const db = await getDb();
+      const current = await syncState(db);
+      for (const key of SYNC_STATE_KEYS) {
+        const incoming = key === 'sync_auto' ? (req.body.auto === undefined ? undefined : (req.body.auto ? '1' : '0')) : req.body[key];
+        if (incoming === undefined) continue;
+        await setSetting(db, key, key === 'synced_version' && incoming === 'current' ? current.data_version : incoming);
+      }
+      res.json(await syncState(db));
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
   });
 
   // Platform-neutral snapshot used by the desktop and Android Google Drive sync.
@@ -947,10 +1105,11 @@ To run FinGent as a desktop application:
   app.post("/api/accounts", async (req, res) => {
     try {
       const db = await getDb();
-      const { name, type, balance, interest_rate_pa = 0, image_logo_name = 'bank', color = '', purpose = '', credit_limit = null, statement_date = null, due_date = null } = req.body;
+      const { name, type, balance, image_logo_name = 'bank', color = '', purpose = '', credit_limit = null, statement_date = null, due_date = null } = req.body;
+      const interest = interestSettings(req.body, null, today());
       const result = await db.run(
-        "INSERT INTO accounts (name, type, balance, interest_rate_pa, image_logo_name, color, purpose, credit_limit, statement_date, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [name, type, balance, interest_rate_pa, image_logo_name, color, purpose, credit_limit, statement_date, due_date]
+        `INSERT INTO accounts (name, type, balance, image_logo_name, color, purpose, credit_limit, statement_date, due_date, ${INTEREST_FIELDS.join(', ')}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ${INTEREST_FIELDS.map(() => '?').join(', ')})`,
+        [name, type, balance, image_logo_name, color, purpose, credit_limit, statement_date, due_date, ...INTEREST_FIELDS.map(field => interest[field])]
       );
       res.json({ id: result.lastInsertRowid });
     } catch (error: any) {
@@ -1113,42 +1272,34 @@ To run FinGent as a desktop application:
   });
 
   
-  app.post("/api/accounts/accrue-interest", async (req, res) => {
-    try {
-      const db = await getDb();
-      const accounts = await db.all("SELECT * FROM accounts WHERE interest_rate_pa > 0");
-      let accruedCount = 0;
-      
-      for (const account of accounts) {
-        // Daily interest = (balance * interest_rate_pa) / 365
-        const dailyInterest = (account.balance * account.interest_rate_pa) / 365;
-        if (dailyInterest > 0) {
-          const newBalance = account.balance + dailyInterest;
-          await db.run("UPDATE accounts SET balance = ? WHERE id = ?", [newBalance, account.id]);
-          await db.run(
-            "INSERT INTO transactions (account_id, type, amount, category, description, date) VALUES (?, ?, ?, ?, ?, ?)",
-            [account.id, 'income', dailyInterest, 'Interest', 'Daily Interest Payout', localDate()]
-          );
-          accruedCount++;
-        }
-      }
-      res.json({ success: true, accruedCount });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
+  // Records interest the bank credited (remind mode, or a correction). The amount is what arrived after tax.
+  app.post("/api/accounts/:id/interest", (req, res) => respondInTransaction(res, async (db) => {
+    const account = await db.get("SELECT * FROM accounts WHERE id = ?", [req.params.id]);
+    if (!account) throw Object.assign(new Error('Account not found.'), { status: 404 });
+    const net = Math.round(Number(req.body.amount) * 100) / 100;
+    if (!(net > 0)) throw Object.assign(new Error('Enter the interest amount you received.'), { status: 400 });
+    const date = isIsoDate(req.body.date) ? req.body.date : today();
+    const gross = Number(req.body.gross) > net ? Math.round(Number(req.body.gross) * 100) / 100 : net;
+    const tax = Math.round((gross - net) * 100) / 100;
+    const notes = tax > 0 ? 'Added manually · gross ₱' + gross.toFixed(2) + ' · tax ₱' + tax.toFixed(2) : 'Added manually';
+    await applyInterest(db, account, [{ date, net, balanceBefore: Number(account.balance) || 0, description: 'Interest', notes }]);
+    if (isIsoDate(req.body.covers_until) && (!isIsoDate(account.interest_last_date) || req.body.covers_until > account.interest_last_date)) await db.run("UPDATE accounts SET interest_last_date = ? WHERE id = ?", [req.body.covers_until, account.id]);
+    return { success: true };
+  }));
 
   app.put("/api/accounts/:id", async (req, res) => {
     try {
       const db = await getDb();
       const { id } = req.params;
-      const { name, type, balance, color, purpose, credit_limit, interest_rate_pa, statement_date = null, due_date = null } = req.body;
+      const { name, type, balance, color, purpose, credit_limit, statement_date = null, due_date = null } = req.body;
       
-      const oldAccount = await db.get("SELECT balance FROM accounts WHERE id = ?", [id]);
+      const oldAccount = await db.get("SELECT * FROM accounts WHERE id = ?", [id]);
+      if (!oldAccount) return res.status(404).json({ error: 'Account not found.' });
+      const interest = interestSettings(req.body, oldAccount, today());
       
       await db.run(
-        "UPDATE accounts SET name = ?, type = ?, balance = ?, color = ?, purpose = ?, credit_limit = ?, interest_rate_pa = ?, statement_date = ?, due_date = ? WHERE id = ?",
-        [name, type, balance, color, purpose, credit_limit, interest_rate_pa, statement_date, due_date, id]
+        `UPDATE accounts SET name = ?, type = ?, balance = ?, color = ?, purpose = ?, credit_limit = ?, statement_date = ?, due_date = ?, ${INTEREST_FIELDS.map(field => `${field} = ?`).join(', ')} WHERE id = ?`,
+        [name, type, balance, color, purpose, credit_limit, statement_date, due_date, ...INTEREST_FIELDS.map(field => interest[field]), id]
       );
       
       if (oldAccount && parseFloat(oldAccount.balance) !== parseFloat(balance)) {

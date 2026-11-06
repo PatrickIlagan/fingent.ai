@@ -16,8 +16,13 @@ import { Categories } from './pages/Categories';
 import { Personal } from './pages/Personal';
 import { ChatSheet } from './components/ChatSheet';
 import { Celebrations } from './components/Celebrations';
+import { SyncStatus } from './components/SyncStatus';
+import { setAiAllowed } from './lib/byokAssistant';
+import { useStore } from './store/useStore';
 
 export default function App() {
+  const aiEnabled = useStore(state => state.aiEnabled);
+  useEffect(() => setAiAllowed(aiEnabled), [aiEnabled]);
   const [currentTab, setCurrentTab] = useState('home');
   const [isChatOpen, setIsChatOpen] = useState(false);
   // Sub-tabs (e.g. accounts-bank) stay on the same page, so only a page change animates.
@@ -48,6 +53,7 @@ export default function App() {
       </Layout>
       <ChatSheet isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} onNavigate={setCurrentTab} />
       <Celebrations />
+      <SyncStatus />
     </MotionConfig>
   );
 }

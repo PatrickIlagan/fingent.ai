@@ -30,6 +30,17 @@ interface AppState {
   /** Goal to open when Plans is shown next (set from the Calendar). */
   focusGoalId: number | null;
   setFocusGoalId: (id: number | null) => void;
+  /** Master switch for suggestions, insights, and optional Gemini help. */
+  aiEnabled: boolean;
+  setAiEnabled: (enabled: boolean) => void;
+  suggestionsEnabled: boolean;
+  setSuggestionsEnabled: (enabled: boolean) => void;
+  /** Opt-in: send generic, anonymous facts to Gemini (with the user's own key) for one extra tip. */
+  geminiSuggestions: boolean;
+  setGeminiSuggestions: (enabled: boolean) => void;
+  dismissedSuggestions: string[];
+  dismissSuggestion: (id: string) => void;
+  restoreSuggestions: () => void;
 }
 
 export const useStore = create<AppState>()(persist((set) => ({
@@ -47,8 +58,17 @@ export const useStore = create<AppState>()(persist((set) => ({
   setSelectedFreelance: (f) => set({ selectedFreelance: f }),
   focusGoalId: null,
   setFocusGoalId: (id) => set({ focusGoalId: id }),
+  aiEnabled: true,
+  setAiEnabled: (enabled) => set({ aiEnabled: enabled }),
+  suggestionsEnabled: true,
+  setSuggestionsEnabled: (enabled) => set({ suggestionsEnabled: enabled }),
+  geminiSuggestions: false,
+  setGeminiSuggestions: (enabled) => set({ geminiSuggestions: enabled }),
+  dismissedSuggestions: [],
+  restoreSuggestions: () => set({ dismissedSuggestions: [] }),
+  dismissSuggestion: (id) => set((state) => ({ dismissedSuggestions: [...state.dismissedSuggestions.filter(item => item !== id), id].slice(-200) })),
 }), {
   name: 'fingent-preferences',
   storage: createJSONStorage(() => localStorage),
-  partialize: (state) => ({ themeMode: state.themeMode, accentColor: state.accentColor, hiddenTabs: state.hiddenTabs })
+  partialize: (state) => ({ themeMode: state.themeMode, accentColor: state.accentColor, hiddenTabs: state.hiddenTabs, aiEnabled: state.aiEnabled, suggestionsEnabled: state.suggestionsEnabled, geminiSuggestions: state.geminiSuggestions, dismissedSuggestions: state.dismissedSuggestions })
 }));

@@ -6,6 +6,7 @@ import { installNativeApi } from './lib/mobileApi.ts';
 import { installLockedResponseGuard } from './lib/appLock.ts';
 import { AppLock } from './components/AppLock.tsx';
 import { Capacitor } from '@capacitor/core';
+import { startSyncSession } from './lib/driveSync.ts';
 
 async function bootstrap() {
   if (!Capacitor.isNativePlatform()) installLockedResponseGuard();
@@ -14,6 +15,7 @@ async function bootstrap() {
     <AppLock onUnlock={async (password) => {
       // On desktop, verifying the password already unlocked the local server.
       if (Capacitor.isNativePlatform()) await installNativeApi(password);
+      startSyncSession(password);
     }}><App /></AppLock>
     </StrictMode>,
   );

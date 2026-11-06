@@ -81,6 +81,7 @@
       "output": "release"
     },
     "win": {
+      "icon": "desktop/icon.ico",
       "target": [
         "nsis"
       ]

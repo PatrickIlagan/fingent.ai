@@ -7,6 +7,7 @@ import { Sparkles, ArrowDown, ArrowUp, Calendar, Receipt, ChevronRight, ChevronD
 import { format } from 'date-fns';
 import { celebrateCompletedGoals } from '../components/Celebrations';
 import { CountUp } from '../components/CountUp';
+import { Suggestions } from '../components/Suggestions';
 
 type ChartRange = '1w' | '1m' | '6m' | '1y';
 
@@ -57,6 +58,7 @@ function cashflowSeries(range: ChartRange, transactions: any[], liabilities: any
 }
 
 export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) => void, toggleChat?: () => void }) {
+  const aiEnabled = useStore(state => state.aiEnabled);
   const { shouldRefresh, themeMode, accentColor } = useStore();
   const isAdvanced = themeMode === 'advanced';
   const [data, setData] = useState<{ accounts: any[], transactions: any[], wealth: any, liabilities: any[], goals: any[], portfolios: any[], budgets: any[] } | null>(null);
@@ -330,6 +332,8 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
           )}
         </div>
 
+        <Suggestions page="home" onNavigate={onNavigate} />
+
         {/* Financial Goals Overview */}
         <div onClick={() => onNavigate?.('plans-goals')} className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 cursor-pointer hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between mb-4">
@@ -516,7 +520,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
       <div className="lg:col-span-1 xl:col-span-1 space-y-6">
         
         {/* Local data insights */}
-        <div className={`bg-gradient-to-br ${isAdvanced ? 'from-slate-800 to-slate-800/80 border-slate-700' : accent.soft} rounded-3xl p-6 shadow-sm border`}>
+        <div className={`bg-gradient-to-br ${isAdvanced ? 'from-slate-800 to-slate-800/80 border-slate-700' : accent.soft} rounded-3xl p-6 shadow-sm border ${aiEnabled ? '' : 'hidden'}`}>
           <h3 className={`text-sm font-bold mb-3 flex items-center ${isAdvanced ? 'text-violet-400' : accent.label}`}>
             <Sparkles className="w-4 h-4 mr-2" />
             FinGent Insights

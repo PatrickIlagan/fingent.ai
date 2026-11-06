@@ -11,3 +11,4 @@ data/
 assets/.aistudio/
 android/app/google-services.json
 ios/App/App/GoogleService-Info.plist
+desktop/google-oauth.json

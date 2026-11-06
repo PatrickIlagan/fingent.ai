@@ -10,6 +10,7 @@ import { CountUp } from '../components/CountUp';
 
 const compactNumber = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 import { celebrate } from '../components/Celebrations';
+import { Suggestions } from '../components/Suggestions';
 
 const getSymbol = (currency?: string) => {
   if (currency === 'USD') return '$';
@@ -647,6 +648,8 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
           </button>
         </div>
       </div>
+
+      {activeCategory === 'All' && <Suggestions page="investments" onNavigate={onNavigate} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className={`lg:col-span-2 rounded-3xl p-1 sm:p-6 shadow-sm border flex flex-col ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>

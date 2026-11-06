@@ -4,6 +4,7 @@ import { useStore } from '../store/useStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { exportEverythingWorkbook } from '../lib/workbookExport';
 import { exportEverythingPdfStatement } from '../lib/export';
+import { Logo } from './Logo';
 
 const accentStyles = {
   emerald: { gradient: 'from-emerald-400 to-teal-500', solid: 'bg-emerald-500 hover:bg-emerald-600', soft: 'bg-emerald-100 text-emerald-800', darkSoft: 'bg-emerald-500/20 text-emerald-300', text: 'text-emerald-600', darkText: 'text-emerald-400', shadow: 'shadow-emerald-500/40', page: 'from-emerald-50 via-white to-teal-50', border: 'border-emerald-100' },
@@ -116,9 +117,7 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
       {/* Top Header (Mobile & Desktop) */}
       <header className={`fixed top-0 left-0 right-0 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] z-30 flex items-center justify-between px-4 md:px-8 border-b shadow-sm backdrop-blur-md ${isAdvanced ? 'bg-slate-900/80 border-slate-700' : 'bg-gradient-to-r from-emerald-50/80 to-teal-50/80 border-emerald-100'}`}>
         <div className="flex items-center gap-2">
-          <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-white font-bold bg-gradient-to-br ${accent.gradient} shadow-sm`}>
-            F
-          </div>
+          <Logo accent={accentColor} size={32} className="drop-shadow-sm" />
           <h1 className="font-extrabold text-lg tracking-tight">FinGent</h1>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
@@ -260,7 +259,7 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
           <>
             <motion.button aria-label="Close navigation" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsMobileMenuOpen(false)} className="fixed inset-0 z-50 bg-slate-950/45 backdrop-blur-sm md:hidden" />
             <motion.aside initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }} transition={{ type: 'spring', damping: 28, stiffness: 280 }} className={`fixed inset-y-0 left-0 z-[60] flex w-[min(20rem,88vw)] flex-col border-r pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl md:hidden ${isAdvanced ? 'bg-slate-900 border-slate-700' : 'bg-white border-emerald-100'}`}>
-              <div className={`flex h-16 shrink-0 items-center justify-between border-b px-4 ${isAdvanced ? 'border-slate-700' : accent.border}`}><div className="flex items-center gap-2 font-black"><div className={`flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br text-sm text-white ${accent.gradient}`}>F</div>FinGent</div><button onClick={() => setIsMobileMenuOpen(false)} aria-label="Close navigation" className="rounded-xl p-2 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={20} /></button></div>
+              <div className={`flex h-16 shrink-0 items-center justify-between border-b px-4 ${isAdvanced ? 'border-slate-700' : accent.border}`}><div className="flex items-center gap-2 font-black"><Logo accent={accentColor} size={32} />FinGent</div><button onClick={() => setIsMobileMenuOpen(false)} aria-label="Close navigation" className="rounded-xl p-2 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={20} /></button></div>
               <nav className="flex-1 overflow-y-auto p-3 pb-6">
                 {selectedBusiness && <button onClick={() => { setSelectedBusiness(null); setCurrentTab('business'); setIsMobileMenuOpen(false); }} className={`mb-3 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold ${isAdvanced ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-emerald-50'}`}><ArrowLeft size={16} /> Back to Portfolio</button>}
                 {selectedFreelance && <button onClick={() => { setSelectedFreelance(null); setCurrentTab('freelancing'); setIsMobileMenuOpen(false); }} className={`mb-3 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold ${isAdvanced ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-emerald-50'}`}><ArrowLeft size={16} /> Back to Services</button>}

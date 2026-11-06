@@ -21,6 +21,7 @@ import { motion } from "framer-motion";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { celebrate } from "../components/Celebrations";
+import { Suggestions } from '../components/Suggestions';
 
 export function Freelancing({ currentTab, onNavigate }: any) {
   const { themeMode, selectedFreelance, setSelectedFreelance } = useStore();
@@ -127,7 +128,7 @@ export function Freelancing({ currentTab, onNavigate }: any) {
       <div className="space-y-6 pb-10 animate-in fade-in duration-300">
         <div className="flex justify-between items-end">
           <div>
-            <h1 className="text-3xl font-black">Freelance Services</h1>
+            <h1 className="text-2xl sm:text-3xl font-black">Freelance Services</h1>
             <p className="text-slate-500 mt-2">
               Manage your different freelance offerings and businesses.
             </p>
@@ -140,16 +141,18 @@ export function Freelancing({ currentTab, onNavigate }: any) {
           </button>
         </div>
 
-        <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <Suggestions page="freelancing" onNavigate={onNavigate} />
+
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
           {[
             { label: "Paid income", value: `₱${paidTotal.toLocaleString()}`, accent: "text-emerald-500" },
             { label: "Outstanding invoices", value: `₱${outstandingTotal.toLocaleString()}`, accent: "text-amber-500" },
             { label: "Active contracts", value: activeContracts.toString(), accent: "text-blue-500" },
             { label: "Hours logged", value: `${hoursLogged.toFixed(1)}h`, accent: "text-violet-500" },
           ].map((metric) => (
-            <div key={metric.label} className={`p-5 rounded-3xl border shadow-sm ${isAdvanced ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}>
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{metric.label}</p>
-              <p className={`mt-2 text-2xl font-black ${metric.accent}`}>{metric.value}</p>
+            <div key={metric.label} className={`min-w-0 p-3.5 sm:p-5 rounded-2xl sm:rounded-3xl border shadow-sm ${isAdvanced ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}>
+              <p className="text-[11px] sm:text-xs font-bold uppercase leading-tight tracking-wider text-slate-500">{metric.label}</p>
+              <p className={`mt-1.5 sm:mt-2 truncate text-lg sm:text-2xl font-black ${metric.accent}`}>{metric.value}</p>
             </div>
           ))}
         </div>
@@ -334,51 +337,51 @@ function FreelanceDashboard({
       <div className="space-y-6 pb-10 animate-in fade-in duration-300">
         <div className="flex justify-between items-end">
           <div>
-            <h1 className="text-3xl font-black">{selectedFreelance.name}</h1>
+            <h1 className="text-2xl sm:text-3xl font-black">{selectedFreelance.name}</h1>
             <p className="text-slate-500 mt-2">
               {selectedFreelance.type} • {selectedFreelance.description}
             </p>
           </div>
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <div
-            className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}
+            className={`min-w-0 p-3.5 sm:p-6 rounded-2xl sm:rounded-3xl border shadow-sm ${isAdvanced ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}
           >
-            <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">
+            <p className="text-[11px] sm:text-sm font-bold text-slate-500 mb-1.5 sm:mb-2 uppercase leading-tight tracking-wider">
               Total Billed
             </p>
-            <p className="text-3xl font-black text-emerald-500">
+            <p className="truncate text-lg sm:text-3xl font-black text-emerald-500">
               ₱{totalBilled.toLocaleString()}
             </p>
           </div>
           <div
-            className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}
+            className={`min-w-0 p-3.5 sm:p-6 rounded-2xl sm:rounded-3xl border shadow-sm ${isAdvanced ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}
           >
-            <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">
+            <p className="text-[11px] sm:text-sm font-bold text-slate-500 mb-1.5 sm:mb-2 uppercase leading-tight tracking-wider">
               Outstanding
             </p>
-            <p className="text-3xl font-black text-amber-500">
+            <p className="truncate text-lg sm:text-3xl font-black text-amber-500">
               ₱{totalOutstanding.toLocaleString()}
             </p>
           </div>
           <div
-            className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}
+            className={`min-w-0 p-3.5 sm:p-6 rounded-2xl sm:rounded-3xl border shadow-sm ${isAdvanced ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}
           >
-            <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">
+            <p className="text-[11px] sm:text-sm font-bold text-slate-500 mb-1.5 sm:mb-2 uppercase leading-tight tracking-wider">
               Active Contracts
             </p>
-            <p className="text-3xl font-black text-blue-500">
+            <p className="truncate text-lg sm:text-3xl font-black text-blue-500">
               {services.filter((s: any) => s.status === "Active").length}
             </p>
           </div>
           <div
-            className={`p-6 rounded-3xl border shadow-sm ${isAdvanced ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}
+            className={`min-w-0 p-3.5 sm:p-6 rounded-2xl sm:rounded-3xl border shadow-sm ${isAdvanced ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"}`}
           >
-            <p className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">
+            <p className="text-[11px] sm:text-sm font-bold text-slate-500 mb-1.5 sm:mb-2 uppercase leading-tight tracking-wider">
               Hours Logged
             </p>
-            <p className="text-3xl font-black text-violet-500">
+            <p className="truncate text-lg sm:text-3xl font-black text-violet-500">
               {totalHours.toFixed(1)}h
             </p>
           </div>
@@ -533,7 +536,7 @@ function ContractsTab({
     <div className="space-y-6 pb-10 animate-in fade-in duration-300">
       <div className="flex justify-between items-end">
         <div>
-          <h1 className="text-3xl font-black">Contracts</h1>
+          <h1 className="text-2xl sm:text-3xl font-black">Contracts</h1>
         </div>
         <button
           onClick={() => setIsAddOpen(true)}
@@ -816,7 +819,7 @@ function InvoicesTab({
     <div className="space-y-6 pb-10 animate-in fade-in duration-300">
       <div className="flex justify-between items-end">
         <div>
-          <h1 className="text-3xl font-black">Invoices</h1>
+          <h1 className="text-2xl sm:text-3xl font-black">Invoices</h1>
         </div>
         <button
           onClick={() => setIsAddOpen(true)}
@@ -1202,7 +1205,7 @@ function TimeLogsTab({
   return (
     <div className="space-y-6 pb-10 animate-in fade-in duration-300">
       <div className="flex justify-between items-end gap-4">
-        <div><h1 className="text-3xl font-black">Time Logs</h1><p className="text-sm text-slate-500 mt-1">Record billable work with a timer or a manual entry.</p></div>
+        <div><h1 className="text-2xl sm:text-3xl font-black">Time Logs</h1><p className="text-sm text-slate-500 mt-1">Record billable work with a timer or a manual entry.</p></div>
         <button onClick={() => setIsManualLogOpen(true)} className={`px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 ${isAdvanced ? "bg-violet-600 text-white hover:bg-violet-700" : "bg-slate-900 text-white hover:bg-slate-800"}`}><Plus size={16} /> Add time</button>
       </div>
 

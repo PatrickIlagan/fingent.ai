@@ -1,6 +1,6 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection } from '@capacitor-community/sqlite';
-import { accountGoalSavings, addMonth, businessMetrics, entryId, goalProgress, isGoalError, localDate, parseList, planGoalContribution, planGoalWithdrawal, withWholeAccounts, categoryAliasGroup, dueOccurrences, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, isAutopayLiability, isIsoDate, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, ratesFromFrankfurter, resolveCategoryAlias } from './sharedRules';
+import { accountGoalSavings, addMonth, businessMetrics, entryId, goalProgress, isGoalError, localDate, parseList, planGoalContribution, planGoalWithdrawal, withWholeAccounts, categoryAliasGroup, dueOccurrences, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, isAutopayLiability, isIsoDate, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, ratesFromFrankfurter, resolveCategoryAlias, dueInterest, interestMode, interestSettings, isCardAccount, shareInterestWithGoals } from './sharedRules';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -296,6 +296,31 @@ async function postDueRecurring() {
     const latest = await find('goals', row.id as number);
     if (latest) await replace('goals', row.id as number, { ...latest, autosave_date: next, autosave_next_amount: null });
   }
+
+  await postDueInterest();
+}
+
+/** Credits interest that's due (automatic and fixed modes) and grows goal savings held in those accounts. */
+async function postDueInterest() {
+  const now = today();
+  const transactions = await list('transactions');
+  for (const account of await list('accounts')) {
+    if (interestMode(account) === 'off' || isCardAccount(account)) continue;
+    const { postings, lastDate } = dueInterest(account, transactions, now);
+    await applyInterest(account, postings);
+    const latest = await find('accounts', account.id as number);
+    if (latest && lastDate !== latest.interest_last_date) await replace('accounts', account.id as number, { ...latest, interest_last_date: lastDate });
+  }
+}
+
+async function applyInterest(account: JsonRecord, postings: { date: string; net: number; balanceBefore: number; description: string; notes: string }[]) {
+  if (!postings.length) return;
+  for (const posting of postings) await recordAccountTransaction({ account_id: account.id, type: 'income', amount: posting.net, category: 'Interest', description: posting.description, notes: posting.notes, date: posting.date, source: 'interest', source_id: Number(account.id) });
+  const { goals } = await goalContext();
+  for (const change of shareInterestWithGoals(goals, account, postings)) {
+    const goal = goals.find((item) => Number(item.id) === change.id);
+    if (goal) await saveGoalState(goal, change.saved, change.sources, change.transactions);
+  }
 }
 
 let recurringCheckedOn = '';
@@ -404,10 +429,38 @@ async function portfolioTransaction(portfolioId: string, body: JsonRecord) {
   return json({ success: true });
 }
 
+// Device-only sync bookkeeping, kept outside the synced collections.
+const SYNC_STATE_KEYS = ['synced_version', 'remote_modified', 'auto', 'last_synced_at', 'last_synced_device', 'device_name', 'google_connected'];
+async function syncState() {
+  const stored = await find('app_settings', 1);
+  if (stored) return stored;
+  const fresh: JsonRecord = { data_version: 0, synced_version: 0, auto: true, google_connected: false, device_id: globalThis.crypto?.randomUUID?.() ?? String(Date.now()) };
+  await insert('app_settings', fresh);
+  return { ...fresh, id: 1 };
+}
+const publicSyncState = (state: JsonRecord) => ({
+  data_version: number(state.data_version), synced_version: number(state.synced_version), remote_modified: state.remote_modified ?? null,
+  auto: state.auto !== false, google_connected: state.google_connected === true, google_provider: 'native',
+  last_synced_at: state.last_synced_at ?? null, last_synced_device: state.last_synced_device ?? null, device_id: state.device_id,
+  device_name: state.device_name || (/iphone|ipad/i.test(globalThis.navigator?.userAgent ?? '') ? 'iPhone' : 'Android phone'),
+});
+async function bumpDataVersion() {
+  const state = await syncState();
+  await replace('app_settings', 1, { ...state, data_version: number(state.data_version) + 1 });
+}
+
 async function route(pathname: string, search: URLSearchParams, method: string, body: JsonRecord) {
   if (pathname === '/api/health') return json({ status: 'ok', platform: `${Capacitor.getPlatform()}-native` });
   if (method === 'GET') await ensureRecurringPosted().catch((error) => console.error('Recurring entries could not be posted.', error));
   if (pathname === '/api/system/sync/export' && method === 'GET') return json(await exportSyncSnapshot());
+  if (pathname === '/api/system/sync/state') {
+    const state = await syncState();
+    if (method !== 'POST') return json(publicSyncState(state));
+    const next: JsonRecord = { ...state };
+    for (const key of SYNC_STATE_KEYS) if (body[key] !== undefined) next[key] = key === 'synced_version' && body[key] === 'current' ? state.data_version : body[key];
+    await replace('app_settings', 1, next);
+    return json(publicSyncState(next));
+  }
   if (pathname === '/api/system/sync/import' && method === 'POST') {
     await importSyncSnapshot(body);
     recurringCheckedOn = '';
@@ -504,17 +557,23 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
   const portfolioMatch = pathname.match(/^\/api\/portfolios\/(\d+)\/transactions$/);
   if (portfolioMatch && method === 'POST') return portfolioTransaction(portfolioMatch[1], body);
 
-  if (pathname === '/api/accounts/accrue-interest' && method === 'POST') {
-    const accounts = await list('accounts');
-    let accruedCount = 0;
-    for (const account of accounts) {
-      const interest = (number(account.balance) * number(account.interest_rate_pa)) / 365;
-      if (interest <= 0) continue;
-      await adjustBalance(account.id, interest, 'income');
-      await insert('transactions', { account_id: account.id, type: 'income', amount: interest, category: 'Interest', description: 'Daily Interest Payout', notes: '', date: today() });
-      accruedCount += 1;
+  const interestMatch = pathname.match(/^\/api\/accounts\/(\d+)\/interest$/);
+  if (interestMatch && method === 'POST') {
+    const account = await find('accounts', Number(interestMatch[1]));
+    if (!account) return json({ error: 'Account not found.' }, 404);
+    const net = Math.round(number(body.amount) * 100) / 100;
+    if (!(net > 0)) return json({ error: 'Enter the interest amount you received.' }, 400);
+    const date = isIsoDate(body.date) ? String(body.date) : today();
+    const gross = number(body.gross) > net ? Math.round(number(body.gross) * 100) / 100 : net;
+    const tax = Math.round((gross - net) * 100) / 100;
+    const notes = tax > 0 ? 'Added manually · gross ₱' + gross.toFixed(2) + ' · tax ₱' + tax.toFixed(2) : 'Added manually';
+    await applyInterest(account, [{ date, net, balanceBefore: number(account.balance), description: 'Interest', notes }]);
+    const coversUntil = String(body.covers_until || '');
+    if (isIsoDate(coversUntil) && (!isIsoDate(account.interest_last_date) || coversUntil > String(account.interest_last_date))) {
+      const latest = await find('accounts', Number(account.id));
+      if (latest) await replace('accounts', Number(account.id), { ...latest, interest_last_date: coversUntil });
     }
-    return json({ success: true, accruedCount });
+    return json({ success: true });
   }
 
   const liabilityPayment = pathname.match(/^\/api\/liabilities\/(\d+)\/pay$/);
@@ -886,6 +945,7 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
       if (body.is_recurring) recurringCheckedOn = '';
       return json({ id, account: linkedAccount?.name || null, deducted: Boolean(linkedAccount && body.type !== 'Credits') });
     }
+    if (collection === 'accounts') return json({ id: await insert('accounts', { ...body, ...interestSettings(body, null, today()) }) });
     const insertedId = await insert(collection, { ...body, active: collection === 'categories' ? 1 : body.active });
     return json({ id: insertedId });
   }
@@ -898,7 +958,8 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
       const nextName = String(body.name ?? oldName).trim();
       for (const tx of await list('transactions')) if (String(tx.category).toLowerCase() === oldName.toLowerCase()) await replace('transactions', tx.id as number, { ...tx, category: nextName });
       await replace(collection, id, { ...existing, ...body, name: nextName, active: 1 });
-    } else await replace(collection, id, { ...existing, ...body });
+    } else if (collection === 'accounts') await replace(collection, id, { ...existing, ...body, ...interestSettings(body, existing, today()) });
+    else await replace(collection, id, { ...existing, ...body });
     // Like the server, a manual balance change is recorded so account history still adds up.
     if (collection === 'accounts' && body.balance !== undefined && number(body.balance) !== number(existing.balance)) {
       const difference = number(body.balance) - number(existing.balance);
@@ -951,7 +1012,10 @@ export async function installNativeApi(passphrase: string) {
     if (!url.pathname.startsWith('/api/')) return originalFetch(input, init);
     try {
       const requestMethod = (init?.method ?? (typeof input === 'object' && 'method' in input ? input.method : 'GET')).toUpperCase();
-      return await route(url.pathname, url.searchParams, requestMethod, await readBody(init));
+      const response = await route(url.pathname, url.searchParams, requestMethod, await readBody(init));
+      // Like the server: successful changes mark this device as having unsynced data.
+      if (requestMethod !== 'GET' && !url.pathname.startsWith('/api/system/') && response.status < 400) await bumpDataVersion().catch(() => undefined);
+      return response;
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : 'The local mobile database could not complete this request.' }, 500);
     }

@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import { ChevronLeft, ChevronRight, Zap, Droplet, ArrowDownToLine, ArrowUpRight, ArrowDownRight, X, Calendar as CalendarIcon, Wallet, Plus, StickyNote, Filter, Pin, Target, PiggyBank } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Zap, Droplet, ArrowDownToLine, ArrowUpRight, ArrowDownRight, X, Calendar as CalendarIcon, Wallet, Plus, StickyNote, Filter, Pin, Target, PiggyBank, BadgePercent } from 'lucide-react';
 import { GoalBuilder } from '../components/GoalBuilder';
 import { celebrate } from '../components/Celebrations';
+import { interestDay, interestFrequency, interestMode, localDate, monthlyInterestEstimate } from '../lib/sharedRules';
+import { Suggestions } from '../components/Suggestions';
 
 export function Calendar({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const { themeMode, setFocusGoalId } = useStore();
@@ -212,6 +214,17 @@ export function Calendar({ onNavigate }: { onNavigate?: (tab: string) => void })
         }
       });
 
+      // Monthly interest days (daily credits would crowd every day, so they're left out). Only upcoming ones are estimates.
+      const today = localDate();
+      (Array.isArray(accounts) ? accounts : []).forEach((account: any) => {
+        const mode = interestMode(account);
+        if (mode === 'off' || account.type === 'Card' || (mode === 'auto' && interestFrequency(account) === 'daily')) return;
+        const lastDay = new Date(year, Number(month), 0).getDate();
+        const date = `${year}-${month}-${String(Math.min(interestDay(account), lastDay)).padStart(2, '0')}`;
+        if (date < today) return;
+        formattedEvents.push({ id: `ai-${account.id}`, date, type: 'inflow', name: mode === 'remind' ? `Check interest · ${account.name}` : `Interest · ${account.name}`, amount: Math.round(monthlyInterestEstimate(account) * 100) / 100, icon: BadgePercent, color: 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/20', provider: mode === 'remind' ? 'Interest reminder (estimate)' : 'Interest (estimate)', source: account.name });
+      });
+
       setEvents(formattedEvents);
     } catch(err) {
       console.error(err);
@@ -319,6 +332,8 @@ export function Calendar({ onNavigate }: { onNavigate?: (tab: string) => void })
           </button>
         </div>
       </div>
+
+      <Suggestions page="calendar" onNavigate={onNavigate} />
 
       <div className={`rounded-3xl p-4 sm:p-6 shadow-sm border ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
         <div className="flex justify-between items-center mb-6">
