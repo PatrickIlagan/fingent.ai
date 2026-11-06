@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Check, ClipboardList, Edit3, FileText, Plus, Trash2, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { celebrate } from '../components/Celebrations';
 
 type Note = { id: number; title: string; body: string; updated_at: string };
 type Routine = { id: number; name: string; frequency: string; completed_today: number; completed_this_week: number };
@@ -17,7 +18,12 @@ export function Personal({ category }: { category?: string }) {
   const deleteNote = async (note: Note) => { if (!window.confirm(`Delete ${note.title}?`)) return; if ((await fetch(`/api/personal/notes/${note.id}`, { method: 'DELETE' })).ok) await load(); };
   const saveRoutine = async (values: Pick<Routine, 'name' | 'frequency'>) => { const editing = routineEditor && routineEditor !== 'new' ? routineEditor : null; const response = await fetch(editing ? `/api/personal/routines/${editing.id}` : '/api/personal/routines', { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) }); if (response.ok) { setRoutineEditor(null); await load(); } };
   const deleteRoutine = async (routine: Routine) => { if (!window.confirm(`Delete ${routine.name}?`)) return; if ((await fetch(`/api/personal/routines/${routine.id}`, { method: 'DELETE' })).ok) await load(); };
-  const checkIn = async (routine: Routine) => { if ((await fetch(`/api/personal/routines/${routine.id}/check-in`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })).ok) await load(); };
+  const checkIn = async (routine: Routine) => {
+    const response = await fetch(`/api/personal/routines/${routine.id}/check-in`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    if (!response.ok) return;
+    if ((await response.json().catch(() => ({}))).completed) celebrate({ kind: 'success', title: 'Routine done', message: routine.name });
+    await load();
+  };
   const completed = routines.filter(routine => Boolean(routine.completed_today)).length;
   const view = category || 'overview';
 

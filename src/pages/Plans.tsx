@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { localDate } from '../lib/sharedRules';
 import { useStore } from '../store/useStore';
+import { CountUp } from '../components/CountUp';
 import { AddToGoalDialog, GoalBuilder, paceLabel, paceTone, peso } from '../components/GoalBuilder';
 import { AmountDialog, DeleteRecordDialog } from '../components/RecordDialogs';
 import { Target, PieChart, Plus, Plane, Laptop, ShieldAlert, Calendar as CalendarIcon, Home, Car, AlertCircle, CheckCircle2, TrendingUp, X } from 'lucide-react';
+import { celebrate, celebrateCompletedGoals } from '../components/Celebrations';
 
 export function Plans({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
   const { themeMode, shouldRefresh, triggerRefresh, focusGoalId, setFocusGoalId } = useStore();
@@ -54,6 +56,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
     setGoals(list);
     if (Array.isArray(accountData)) setAccounts(accountData);
     setSelectedGoal((current: any) => current ? list.find((goal: any) => goal.id === current.id) ?? null : current);
+    celebrateCompletedGoals(list);
     return list;
   };
 
@@ -249,6 +252,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
     const saved = await response.json();
     if (saveBudgetAsModel && budgetModelName.trim()) await saveBudgetModel(budgetModelName, allocations);
     setBudgetPlans((plans) => [...plans, { ...newBudgetPlan, id: saved.id }]);
+    celebrate({ kind: 'success', title: 'Budget created', message: budgetPlanName });
     setIsBudgetBuilderOpen(false);
     setBudgetStep(1);
     setTotalBudgetLimit('');
@@ -325,7 +329,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
           </div>
           <div className="text-left md:text-right">
             <p className="text-sm font-medium text-slate-500 mb-1">Total saved</p>
-            <p className={`text-4xl font-black ${isCompleted ? 'text-emerald-500' : ''}`}>{peso(pace.saved)}</p>
+            <p className={`text-4xl font-black ${isCompleted ? 'text-emerald-500' : ''}`}><CountUp value={pace.saved} format={peso} /></p>
             <p className="text-sm font-medium text-slate-500 mt-1">Goal: {peso(selectedGoal.target)}</p>
           </div>
         </div>
@@ -1035,7 +1039,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                <button onClick={() => setIsBudgetBuilderOpen(true)} className="px-5 py-2.5 rounded-xl font-bold text-sm bg-slate-900 text-white hover:bg-slate-800">Create one</button>
              </div>
           ) : (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="fg-stagger grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {budgetPlans.map(plan => {
                  const totalSpent = plan.isGrouped 
                     ? (plan.groups || []).reduce((sum: number, g: any) => sum + (g.spent || 0), 0)
@@ -1320,7 +1324,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
           <h3 className="font-bold text-lg flex items-center">
             <Target className="w-5 h-5 mr-2" /> Financial Goals
           </h3>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="fg-stagger grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {goals.length === 0 ? (
               <div className={`col-span-full flex flex-col items-center justify-center p-12 text-center rounded-3xl border-2 border-dashed ${isAdvanced ? 'border-slate-700 bg-slate-900/30' : 'border-slate-200 bg-slate-50'}`}>
                 <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${isAdvanced ? 'bg-slate-800 text-slate-400' : 'bg-white text-slate-400 shadow-sm'}`}>
@@ -1376,7 +1380,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                   {!isCompleted && <span className={`relative z-10 mt-1 inline-block text-xs font-bold px-2 py-1 rounded-lg ${paceTone(pace.status)}`}>{paceLabel(pace)}</span>}
                   
                   <div className="flex items-end gap-2 mt-1 mb-4 relative z-10">
-                    <p className={`text-3xl font-black ${isCompleted ? 'text-emerald-500' : ''}`}>{peso(pace.saved)}</p>
+                    <p className={`text-3xl font-black ${isCompleted ? 'text-emerald-500' : ''}`}><CountUp value={pace.saved} format={peso} /></p>
                     <p className="text-sm font-medium text-slate-500 mb-1">/ {peso(goal.target)}</p>
                   </div>
                   

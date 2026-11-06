@@ -6,6 +6,8 @@ import { exportPdf } from '../lib/export';
 import { exportExcel } from '../lib/workbookExport';
 import { isAutopayLiability } from '../lib/sharedRules';
 import { AccountChoiceDialog, AmountDialog, DeleteRecordDialog } from '../components/RecordDialogs';
+import { celebrate } from '../components/Celebrations';
+import { CountUp } from '../components/CountUp';
 
 export function Liabilities({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
   const { themeMode } = useStore();
@@ -101,6 +103,7 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
       // A statement balance is owed on the card account, so paying it is a transfer onto the card.
       const response = await fetch('/api/transfers', { method: 'POST', headers, body: JSON.stringify({ from_account_id: accountId, to_account_id: Number(liability.accountId), amount: liability.amount, notes: `${liability.title} payment.` }) });
       if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not record the payment.');
+      celebrate({ kind: 'success', title: 'Statement paid', message: liability.cardName });
       setPaymentOpen(false); setSelectedLiability(null); triggerRefresh();
       return;
     }
@@ -109,6 +112,7 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
     if (!response.ok) throw new Error(saved.error || 'Could not mark this as paid.');
     const legs = !accountId ? 0 : liability.type === 'Credits' && liability.account_id && Number(liability.account_id) !== accountId ? 2 : 1;
     setSelectedLiability({ ...liability, status: saved.status, date: saved.date, current_month: saved.current_month, currentMonth: saved.current_month, remaining_amount: saved.remaining_amount, remainingAmount: saved.remaining_amount, linked_transaction_count: Number(liability.linked_transaction_count || 0) + legs });
+    celebrate({ kind: 'success', title: saved.status === 'Paid' ? 'Marked as paid' : 'Payment recorded', message: saved.status === 'Paid' ? liability.name : `${liability.name} · next due ${saved.date}` });
     setPaymentOpen(false); triggerRefresh();
   };
 
@@ -172,6 +176,7 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newItem)
       });
+      celebrate({ kind: 'success', title: 'Added to Liabilities', message: newItem.name });
       triggerRefresh();
     } catch (e) {
       console.error(e);
@@ -401,7 +406,7 @@ export function Liabilities({ category, onNavigate }: { category?: string, onNav
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Total {isAll ? 'Due' : activeCategoryName}</p>
-            <h1 className="text-4xl font-extrabold tracking-tight text-rose-500">₱{totalAmount.toLocaleString()}</h1>
+            <h1 className="text-4xl font-extrabold tracking-tight text-rose-500"><CountUp value={totalAmount} format={(value) => '₱' + Math.round(value).toLocaleString()} /></h1>
           </div>
           {isAll && (
             <div className="flex flex-wrap gap-2 sm:justify-end max-w-lg">

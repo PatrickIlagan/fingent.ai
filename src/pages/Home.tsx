@@ -5,6 +5,8 @@ import { useStore } from '../store/useStore';
 import { PieChart, Pie, Cell, ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip } from 'recharts';
 import { Sparkles, ArrowDown, ArrowUp, Calendar, Receipt, ChevronRight, ChevronDown, TrendingUp, Bitcoin, FileText, Activity, Wallet, Gauge, CircleAlert } from 'lucide-react';
 import { format } from 'date-fns';
+import { celebrateCompletedGoals } from '../components/Celebrations';
+import { CountUp } from '../components/CountUp';
 
 type ChartRange = '1w' | '1m' | '6m' | '1y';
 
@@ -97,6 +99,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
         portfolios: Array.isArray(portRes) ? portRes : [],
         budgets: Array.isArray(budgetRes) ? budgetRes : []
       });
+      if (Array.isArray(goalsRes)) celebrateCompletedGoals(goalsRes);
     }
     fetchData();
   }, [shouldRefresh]);
@@ -294,7 +297,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
                 </div>
               )}
             </div>
-            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight truncate">₱{totalCash.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h1>
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight truncate"><CountUp value={totalCash} format={(value) => '₱' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} /></h1>
           </div>
           
           <div className="relative z-10 flex flex-col gap-3 w-full md:w-auto">
@@ -381,7 +384,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
               <LineChart data={cashFlowData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isAdvanced ? '#334155' : '#e2e8f0'} />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: isAdvanced ? '#94a3b8' : '#64748b', fontSize: 12 }} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: isAdvanced ? '#94a3b8' : '#64748b', fontSize: 12 }} dx={-10} tickFormatter={(value) => `₱${value}`} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: isAdvanced ? '#94a3b8' : '#64748b', fontSize: 12 }} dx={-6} width={52} tickFormatter={(value) => '₱' + new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value)} />
                 <RechartsTooltip 
                   contentStyle={{ 
                     backgroundColor: isAdvanced ? '#1e293b' : '#ffffff', 
@@ -441,7 +444,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
                 <h3 className="font-bold text-lg">Your Accounts</h3>
                 <button onClick={() => onNavigate?.('accounts')} className="text-sm font-medium text-emerald-500 dark:text-violet-400 hover:underline">View All</button>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="fg-stagger grid grid-cols-2 gap-4">
                 {data.accounts.map(acc => (
                   <div key={acc.id} onClick={() => onNavigate?.('accounts')} className={`cursor-pointer rounded-3xl bg-gradient-to-br ${accountColor(acc)} p-5 text-white shadow-sm ring-1 ring-black/5 transition-transform hover:-translate-y-1 hover:shadow-lg`}>
                     <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/20 bg-white/15 shadow-sm backdrop-blur-sm">
@@ -487,17 +490,17 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
               </div>
               <div onClick={() => onNavigate?.('accounts')} className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden cursor-pointer hover:shadow-md transition-shadow">
                 {data.transactions.slice(0, 5).map((tx, idx) => (
-                  <div key={tx.id} className={`p-4 px-6 flex items-center justify-between ${idx !== 4 && idx !== data.transactions.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''} hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors`}>
-                    <div className="flex items-center">
-                      <div className={`w-12 h-12 rounded-full flex items-center justify-center mr-4 ${tx.type === 'income' ? 'bg-emerald-100 text-emerald-500 dark:bg-emerald-500/20' : 'bg-rose-100 text-rose-500 dark:bg-rose-500/20'}`}>
+                  <div key={tx.id} className={`p-4 px-4 sm:px-6 flex items-center justify-between gap-3 ${idx !== 4 && idx !== data.transactions.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''} hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors`}>
+                    <div className="flex min-w-0 items-center">
+                      <div className={`w-10 h-10 sm:w-12 sm:h-12 shrink-0 rounded-full flex items-center justify-center mr-3 sm:mr-4 ${tx.type === 'income' ? 'bg-emerald-100 text-emerald-500 dark:bg-emerald-500/20' : 'bg-rose-100 text-rose-500 dark:bg-rose-500/20'}`}>
                         {tx.type === 'income' ? <ArrowDown className="w-5 h-5" /> : <ArrowUp className="w-5 h-5" />}
                       </div>
-                      <div>
-                        <p className="font-medium capitalize text-base">{tx.description || tx.category}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{tx.account_name} • {format(new Date(tx.date), 'MMM d, yyyy')}</p>
+                      <div className="min-w-0">
+                        <p className="truncate font-medium capitalize text-base">{tx.description || tx.category}</p>
+                        <p className="truncate text-xs text-slate-500 dark:text-slate-400 mt-0.5">{tx.account_name} • {format(new Date(tx.date), 'MMM d, yyyy')}</p>
                       </div>
                     </div>
-                    <span className={`font-bold text-lg ${tx.type === 'income' ? 'text-emerald-500' : ''}`}>
+                    <span className={`shrink-0 whitespace-nowrap font-bold text-base sm:text-lg ${tx.type === 'income' ? 'text-emerald-500' : ''}`}>
                       {tx.type === 'income' ? '+' : '-'}₱{tx.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>

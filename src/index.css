@@ -37,6 +37,71 @@ textarea {
   touch-action: manipulation;
 }
 
+/* Motion. Everything below is skipped when the device asks for reduced motion. */
+@keyframes fg-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fg-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes fg-sheet {
+  from { opacity: 0; transform: translateY(28px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fg-fill {
+  from { width: 0; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Page sections cascade in after a page change. */
+  .fg-page > * > * {
+    animation: fg-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .fg-page > * > :nth-child(2) { animation-delay: 50ms; }
+  .fg-page > * > :nth-child(3) { animation-delay: 100ms; }
+  .fg-page > * > :nth-child(4) { animation-delay: 150ms; }
+  .fg-page > * > :nth-child(5) { animation-delay: 200ms; }
+  .fg-page > * > :nth-child(n + 6) { animation-delay: 250ms; }
+
+  /* Card grids deal their cards in one after another. */
+  .fg-stagger > * {
+    animation: fg-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .fg-stagger > :nth-child(2) { animation-delay: 60ms; }
+  .fg-stagger > :nth-child(3) { animation-delay: 120ms; }
+  .fg-stagger > :nth-child(4) { animation-delay: 180ms; }
+  .fg-stagger > :nth-child(5) { animation-delay: 240ms; }
+  .fg-stagger > :nth-child(n + 6) { animation-delay: 300ms; }
+
+  /* Every full-screen overlay fades in and its dialog rises into place. */
+  .fixed.inset-0.z-50 {
+    animation: fg-fade 0.2s ease-out both;
+  }
+  .fixed.inset-0.z-50 > div,
+  .fixed.inset-0.z-50 > [role="dialog"] {
+    animation: fg-sheet 0.42s cubic-bezier(0.22, 1.25, 0.36, 1) both;
+  }
+
+  /* Progress bars fill from empty when they appear. */
+  .overflow-hidden > .h-full[style*="width"] {
+    animation: fg-fill 1s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+@layer base {
+  @media (prefers-reduced-motion: no-preference) {
+    /* A light press on every button; utility classes with their own transitions still win. */
+    button {
+      transition: transform 140ms ease;
+    }
+    button:not(:disabled):active {
+      transform: scale(0.97);
+    }
+  }
+}
+
 @media (max-width: 767px) {
   /* Prevent iOS from zooming into form fields and keep long dashboard content contained. */
   input,

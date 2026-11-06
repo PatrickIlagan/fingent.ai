@@ -6,6 +6,10 @@ import { Plus, X, ArrowUpRight, History, Trash2, Edit2, TrendingUp, TrendingDown
 import { exportPdf } from '../lib/export';
 import { exportExcel } from '../lib/workbookExport';
 import { FALLBACK_FX_RATES, localDate } from '../lib/sharedRules';
+import { CountUp } from '../components/CountUp';
+
+const compactNumber = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+import { celebrate } from '../components/Celebrations';
 
 const getSymbol = (currency?: string) => {
   if (currency === 'USD') return '$';
@@ -304,6 +308,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
       const data = await res.json();
       const formatted = mapPortfolioData(data);
       setInvestmentsData(formatted);
+      celebrate({ kind: 'success', title: editingId ? 'Asset updated' : 'Asset added', message: newAsset.name });
       setIsModalOpen(false);
     } catch(err) {
       console.error(err);
@@ -342,6 +347,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
         })
       });
 
+      celebrate({ kind: 'success', title: newTx.type === 'Sell' ? 'Sale recorded' : 'Purchase recorded', message: selectedHolding.name });
       setIsTxModalOpen(false);
       setTxAccountId('');
       setNewTx({ date: localDate(), type: 'Buy', amount: '', price: '', totalAmount: '' });
@@ -581,12 +587,12 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-end">
+      <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-end">
         <div>
           <h2 className="text-2xl font-bold">{activeCategory === 'All' ? 'Investments' : activeCategory}</h2>
           <p className="text-slate-500 dark:text-slate-400 mt-1">Track your wealth and assets</p>
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex flex-wrap gap-2 items-center">
           <button onClick={() => exportExcel('investment-portfolio', [{ name: 'Portfolio', rows: filteredInvestments.map(inv => ({ Name: inv.name, Type: inv.type, Ticker: inv.ticker || '', Platform: inv.platform || '', Invested: inv.invested, CurrentValue: inv.value, Shares: inv.shares || '', Currency: inv.currency })) }])} className={`p-2 rounded-xl border ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'border-slate-200 hover:bg-slate-50 text-slate-600'}`} title="Export Excel"><Download size={16} /></button>
           <button onClick={() => exportPdf('Investment Portfolio', filteredInvestments.map(inv => ({ Name: inv.name, Type: inv.type, Ticker: inv.ticker || '', Platform: inv.platform || '', Invested: inv.invested, CurrentValue: inv.value, Shares: inv.shares || '', Currency: inv.currency })), `Displayed in ${displayCurrency}`)} className={`p-2 rounded-xl border ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'border-slate-200 hover:bg-slate-50 text-slate-600'}`} title="Export PDF"><FileText size={16} /></button>
           {displayCurrency === 'PHP' && exchangeRates['PHP'] && (
@@ -644,11 +650,11 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className={`lg:col-span-2 rounded-3xl p-1 sm:p-6 shadow-sm border flex flex-col ${isAdvanced ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-          <div className="p-4 sm:p-0 flex justify-between items-start mb-6">
+          <div className="p-4 sm:p-0 flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-start mb-6">
             <div>
               <p className="text-sm font-medium text-slate-500 dark:text-slate-400 flex items-center gap-2">Total Balance</p>
               <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mt-4 mb-1">
-                {getSymbol(displayCurrency)}{totalValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                <CountUp value={totalValue} format={(value) => getSymbol(displayCurrency) + value.toLocaleString(undefined, { maximumFractionDigits: 2 })} />
               </h1>
               <p className="text-emerald-500 font-medium text-sm flex items-center gap-1">
                 {chartGain >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />} 
@@ -656,7 +662,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
    <span className="text-slate-400 ml-1 font-normal">{timeframe}</span>
               </p>
             </div>
-            <div className={`flex p-1 rounded-xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
+            <div className={`flex self-start max-w-full overflow-x-auto hide-scrollbar p-1 rounded-xl ${isAdvanced ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
                {timeframes.map(tf => (
                  <button 
                    key={tf}
@@ -680,7 +686,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
                     </linearGradient>
                   </defs>
                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} minTickGap={20} padding={{ left: 20, right: 20 }} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} tickFormatter={(val) => `${getSymbol(displayCurrency)}${(val/1000)}k`} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} width={52} tickFormatter={(val) => getSymbol(displayCurrency) + compactNumber.format(val)} />
                   <Tooltip 
                     contentStyle={{ backgroundColor: isAdvanced ? '#1e293b' : '#ffffff', border: isAdvanced ? '1px solid #334155' : '1px solid #e2e8f0', borderRadius: '12px' }} 
                     formatter={(value: number, name: string) => [`${getSymbol(displayCurrency)}${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, name]}
@@ -691,7 +697,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
               ) : (
                 <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} minTickGap={20} padding={{ left: 20, right: 20 }} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} tickFormatter={(val) => `${getSymbol(displayCurrency)}${(val/1000)}k`} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isAdvanced ? '#94a3b8' : '#64748b' }} width={52} tickFormatter={(val) => getSymbol(displayCurrency) + compactNumber.format(val)} />
                   <Tooltip 
                     contentStyle={{ backgroundColor: isAdvanced ? '#1e293b' : '#ffffff', border: isAdvanced ? '1px solid #334155' : '1px solid #e2e8f0', borderRadius: '12px' }} 
                     formatter={(value: number, name: string) => [`${getSymbol(displayCurrency)}${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, name]}

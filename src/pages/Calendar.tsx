@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { ChevronLeft, ChevronRight, Zap, Droplet, ArrowDownToLine, ArrowUpRight, ArrowDownRight, X, Calendar as CalendarIcon, Wallet, Plus, StickyNote, Filter, Pin, Target, PiggyBank } from 'lucide-react';
 import { GoalBuilder } from '../components/GoalBuilder';
+import { celebrate } from '../components/Celebrations';
 
 export function Calendar({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const { themeMode, setFocusGoalId } = useStore();
@@ -231,6 +232,7 @@ export function Calendar({ onNavigate }: { onNavigate?: (tab: string) => void })
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newNote)
       });
+      celebrate({ kind: 'success', title: newNote.type === 'pin' ? 'Date pinned' : 'Added to calendar', message: newNote.name });
       setIsAddNoteOpen(false);
       setNewNote({ name: '', date: '', type: 'note', amount: '' });
       fetchEvents();

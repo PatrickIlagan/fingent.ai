@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Car, Check, ChevronRight, Home, Laptop, Plane, ShieldAlert, Target } from 'lucide-react';
 import { daysBetween, isCardAccount, localDate } from '../lib/sharedRules';
 import { Dialog, dialogField, dialogPrimary, dialogSecondary } from './RecordDialogs';
+import { celebrate } from './Celebrations';
 
 export const GOAL_ICONS = { Target, Plane, Laptop, ShieldAlert, Car, Home } as const;
 const COLORS = ['emerald', 'blue', 'violet', 'amber', 'rose', 'fuchsia'] as const;
@@ -105,6 +106,7 @@ export function GoalBuilder({ advanced, accounts, goal, defaultDate, onSaved, on
     const saved = await response.json().catch(() => ({}));
     setSaving(false);
     if (!response.ok) return setError(saved.error || 'Could not save this goal.');
+    celebrate({ kind: 'success', title: editing ? 'Goal updated' : 'Goal created', message: name.trim() });
     onSaved(editing ? goal.id : saved.id);
   };
 
@@ -144,8 +146,8 @@ export function GoalBuilder({ advanced, accounts, goal, defaultDate, onSaved, on
             {remaining === 0 ? 'Already covered by the savings counted below.' : `${peso(perMonth)}/month to reach ${peso(Number(target))} by ${formatDate(date)}${counted > 0 ? ` (${peso(counted)} already counted)` : ''}.`}
           </div>}
           <div className="flex flex-wrap items-center gap-6">
-            <div className="flex gap-2">{(Object.keys(GOAL_ICONS) as string[]).map(option => <button key={option} type="button" aria-label={option} onClick={() => setIcon(option)} className={`p-3 rounded-xl transition-all ${icon === option ? (advanced ? 'bg-violet-600 text-white' : 'bg-slate-900 text-white') : (advanced ? 'bg-slate-900 text-slate-400 hover:text-white' : 'bg-slate-50 text-slate-500 hover:text-slate-900')}`}><GoalIcon name={option} /></button>)}</div>
-            <div className="flex gap-2">{COLORS.map(option => <button key={option} type="button" aria-label={option} onClick={() => setColor(option)} className={`w-8 h-8 rounded-full ${SWATCH[option]} ${color === option ? 'ring-2 ring-offset-2 ring-slate-400 dark:ring-offset-slate-800 scale-110' : 'hover:scale-110'} transition-all`} />)}</div>
+            <div className="flex flex-wrap gap-2">{(Object.keys(GOAL_ICONS) as string[]).map(option => <button key={option} type="button" aria-label={option} onClick={() => setIcon(option)} className={`p-3 rounded-xl transition-all ${icon === option ? (advanced ? 'bg-violet-600 text-white' : 'bg-slate-900 text-white') : (advanced ? 'bg-slate-900 text-slate-400 hover:text-white' : 'bg-slate-50 text-slate-500 hover:text-slate-900')}`}><GoalIcon name={option} /></button>)}</div>
+            <div className="flex flex-wrap gap-2">{COLORS.map(option => <button key={option} type="button" aria-label={option} onClick={() => setColor(option)} className={`w-8 h-8 rounded-full ${SWATCH[option]} ${color === option ? 'ring-2 ring-offset-2 ring-slate-400 dark:ring-offset-slate-800 scale-110' : 'hover:scale-110'} transition-all`} />)}</div>
           </div>
         </div>
 
@@ -223,6 +225,7 @@ export function AddToGoalDialog({ advanced, goal, accounts, onDone, onClose }: {
     const response = await fetch(`/api/goals/${goal.id}/contribute`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: Number(amount), from_account_id: Number(fromId), save_in_account_id: Number(saveInId || fromId) }) });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) { setError(body.error || 'Could not add to this goal.'); setWorking(false); return; }
+    celebrate({ kind: 'success', title: `${peso(Number(amount))} added`, message: `to ${goal.name}` });
     onDone();
   };
   return <Dialog advanced={advanced} title={`Add to ${goal.name}`} onClose={onClose}>

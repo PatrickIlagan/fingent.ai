@@ -3,6 +3,7 @@ import { localDate } from '../lib/sharedRules';
 import { useStore } from '../store/useStore';
 import { Briefcase, CheckCircle2, ChevronRight, TrendingUp, Edit2, Check, X, CalendarDays, Plus, Target } from 'lucide-react';
 import { AmountDialog, DeleteRecordDialog } from '../components/RecordDialogs';
+import { celebrate } from '../components/Celebrations';
 
 export function Career({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
   const { themeMode, triggerRefresh } = useStore();
@@ -220,6 +221,7 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
             body: JSON.stringify(editingFlowId ? details : { ...details, budget_preset_id: parseInt(incomeForm.budget_preset_id) || null })
          });
          if (!response.ok) return;
+         celebrate({ kind: 'success', title: editingFlowId ? 'Income updated' : 'Income flow saved', message: incomeForm.name });
          await reloadIncomeData();
          closeIncomeBuilder();
          triggerRefresh();
@@ -423,6 +425,7 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
                  onConfirm={async (amount) => {
                     const response = await fetch(`/api/income_flows/${amountEdit.flow.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ next_amount: amount }) });
                     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not save the amount.');
+                    celebrate({ kind: 'success', title: amount ? 'This month updated' : 'Back to the usual amount', message: amountEdit.flow.name });
                     await reloadIncomeData(); setAmountEdit(null);
                  }}
                  onClose={() => setAmountEdit(null)} />
@@ -433,6 +436,7 @@ export function Career({ category, onNavigate }: { category?: string, onNavigate
                  onConfirm={async (amount) => {
                     const response = await fetch(`/api/transactions/${amountEdit.transaction.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...amountEdit.transaction, amount }) });
                     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not update the deposit.');
+                    celebrate({ kind: 'success', title: 'Deposit updated', message: `₱${Number(amount).toLocaleString()}` });
                     await reloadIncomeData(); triggerRefresh(); setAmountEdit(null);
                  }}
                  onClose={() => setAmountEdit(null)} />

@@ -4,6 +4,8 @@ import { useStore } from '../store/useStore';
 import { CreditCard, Landmark, Wallet, Banknote, Plus, Minus, X, Edit2, Trash2, History, ArrowUpRight, ArrowDownRight, Calendar, FileText, Check, Download } from 'lucide-react';
 import { exportPdf } from '../lib/export';
 import { exportExcel } from '../lib/workbookExport';
+import { celebrate } from '../components/Celebrations';
+import { CountUp } from '../components/CountUp';
 
 const getIconForType = (type: string) => {
   if (type.toLowerCase() === 'card' || type.toLowerCase() === 'credit') return CreditCard;
@@ -107,6 +109,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
           })
         });
       }
+      celebrate({ kind: 'success', title: editingAccount ? 'Account updated' : 'Account added', message: newAccount.name });
       triggerRefresh();
       setIsAddAccountModalOpen(false);
       setNewAccount({ name: '', type: 'Bank', balance: '', color: '', purpose: '', credit_limit: '', interest_rate_pa: '', statement_date: '', due_date: '' }); setEditingAccount(null);
@@ -220,8 +223,8 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
         });
       }
 
+      celebrate({ kind: 'success', title: editingTransaction ? 'Transaction updated' : newTx.type === 'income' ? 'Income recorded' : 'Expense recorded', message: `₱${amount.toLocaleString()} · ${newTx.title}${!editingTransaction && newTx.type === 'income' && newTx.goalId ? ' · added to goal' : ''}` });
       triggerRefresh();
-      
       setIsTransactionModalOpen(false);
       setEditingTransaction(null);
       setNewTx({ type: 'expense', title: '', amount: '', date: '', notes: '', category: 'Expenses', goalId: '' });
@@ -413,16 +416,16 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
         </>
       ) : (
         <>
-      <div className="flex justify-between items-end">
+      <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-end">
         <div>
           <h2 className="text-2xl font-bold capitalize">{category ? `${category} Accounts` : 'All Accounts'}</h2>
           <p className="text-slate-500 dark:text-slate-400 mt-1">Manage your connected financial accounts</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
         <button onClick={() => exportExcel('accounts-and-transactions', [{ name: 'Accounts & Transactions', rows: accountExportRows }])} className={`px-3 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 border transition-colors ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'}`}><Download size={15} /> Excel</button>
         <button onClick={() => exportPdf('Accounts and Transactions', accountExportRows, 'FinGent account balances and transaction history')} className={`px-3 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 border transition-colors ${isAdvanced ? 'border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'}`}><FileText size={15} /> PDF</button>
         <button onClick={handleAccrueInterest} className={`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 border transition-colors ${isAdvanced ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'}`}>
-             Simulate Next Day (Accrue Interest)
+             <span className="sm:hidden">Accrue interest</span><span className="hidden sm:inline">Simulate Next Day (Accrue Interest)</span>
         </button>
         <button onClick={openAddAccountModal} className={`px-4 py-2.5 rounded-xl font-bold text-sm ${isAdvanced ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}>
           + Add Account
@@ -434,7 +437,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
         <div className="flex flex-col sm:flex-row justify-between gap-6 sm:gap-4">
           <div>
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Total {category ? category : 'Liquid'} Balance</p>
-            <h1 className="text-4xl font-extrabold tracking-tight text-emerald-500">₱{totalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h1>
+            <h1 className="text-4xl font-extrabold tracking-tight text-emerald-500"><CountUp value={totalBalance} format={(value) => '₱' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} /></h1>
             <p className="text-xs font-medium text-slate-400 mt-2">Available across {filteredAccounts.length} accounts</p>
           </div>
           
@@ -453,7 +456,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
         </div>
       </div>
 
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="fg-stagger grid md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredAccounts.map(acc => {
           const Icon = acc.icon;
           return (

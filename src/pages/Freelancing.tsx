@@ -20,6 +20,7 @@ import { useStore } from "../store/useStore";
 import { motion } from "framer-motion";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
+import { celebrate } from "../components/Celebrations";
 
 export function Freelancing({ currentTab, onNavigate }: any) {
   const { themeMode, selectedFreelance, setSelectedFreelance } = useStore();
@@ -153,12 +154,12 @@ export function Freelancing({ currentTab, onNavigate }: any) {
           ))}
         </div>
 
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-black">Your services</h2>
             <p className="text-sm text-slate-500 mt-1">Open a service to manage its contracts, invoices, and billable time.</p>
           </div>
-          <span className="text-sm font-bold text-slate-500">{profiles.length} service{profiles.length === 1 ? "" : "s"}</span>
+          <span className="shrink-0 whitespace-nowrap text-sm font-bold text-slate-500">{profiles.length} service{profiles.length === 1 ? "" : "s"}</span>
         </div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -768,6 +769,7 @@ function InvoicesTab({
       body: JSON.stringify({ account_id: accountId })
     });
     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "Could not mark this invoice as paid.");
+    celebrate({ kind: 'success', title: 'Invoice paid', message: `${payingInvoice.invoice_number}${accountId ? ' · deposited' : ''}` });
     setPayingInvoice(null);
     fetchAll();
   };
