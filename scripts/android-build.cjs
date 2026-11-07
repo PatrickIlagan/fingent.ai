@@ -5,7 +5,9 @@ const { spawnSync } = require('node:child_process');
 const root = join(__dirname, '..');
 const android = join(root, 'android');
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const gradle = process.platform === 'win32' ? 'gradlew.bat' : './gradlew';
+// A full, quoted path: Windows may be set not to run programs from the current folder
+// (NoDefaultCurrentDirectoryInExePath), and the project path can contain spaces.
+const gradle = process.platform === 'win32' ? `"${join(android, 'gradlew.bat')}"` : './gradlew';
 const bundledJdk = process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'FinGent', 'build-tools', 'jdk-21.0.11+10');
 const defaultAndroidSdk = process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Android', 'Sdk');
 const environment = { ...process.env };
