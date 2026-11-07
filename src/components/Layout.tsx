@@ -45,7 +45,7 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
       id: 'plans', 
       icon: Target, 
       label: 'Plans',
-      subItems: ['Budget', 'Goals']
+      subItems: ['Budget', 'Goals', 'Wealth', 'Rules']
     },
     { id: 'calendar', icon: Calendar, label: 'Calendar' },
     { 

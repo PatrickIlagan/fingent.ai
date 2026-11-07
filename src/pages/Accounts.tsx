@@ -11,6 +11,7 @@ import { celebrate } from '../components/Celebrations';
 import { CountUp } from '../components/CountUp';
 import { Suggestions } from '../components/Suggestions';
 import { Segmented } from '../components/Segmented';
+import { normalizePlan } from '../lib/wealthPlan';
 
 const getIconForType = (type: string) => {
   if (type.toLowerCase() === 'card' || type.toLowerCase() === 'credit') return CreditCard;
@@ -135,12 +136,15 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
   useEffect(() => {
     async function fetchData() {
       try {
-        const [accRes, txRes, goalsRes, categoriesRes] = await Promise.all([
+        const [accRes, txRes, goalsRes, categoriesRes, plansRes] = await Promise.all([
           fetch('/api/accounts').then(res => res.json()).catch(() => []),
           fetch('/api/transactions').then(res => res.json()).catch(() => []),
           fetch('/api/goals').then(res => res.json()).catch(() => []),
-          fetch('/api/categories').then(res => res.json()).catch(() => [])
+          fetch('/api/categories').then(res => res.json()).catch(() => []),
+          fetch('/api/wealth-plans').then(res => res.json()).catch(() => [])
         ]);
+        // Wealth plans that count part or all of each account.
+        const planShares = (Array.isArray(plansRes) ? plansRes : []).flatMap((record: any) => normalizePlan(record.plan).buckets.flatMap(bucket => bucket.links.filter(link => link.type === 'account').map(link => ({ account_id: link.id, label: `${record.name} · ${bucket.name}`, share: link.mode === 'whole' ? 'whole account' : link.mode === 'percent' ? `${link.value}%` : `₱${Math.round(link.value).toLocaleString('en-PH')}` }))));
         
         const accountsList = Array.isArray(accRes) ? accRes : [];
         const transactionsList = Array.isArray(txRes) ? txRes : [];
@@ -151,6 +155,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
           icon: getIconForType(a.type),
           color: a.color || getColorForType(a.type),
           purpose: a.purpose || '',
+          plan_shares: planShares.filter(share => share.account_id === Number(a.id)),
           transactions: transactionsList.filter((t: any) => t.account_id === a.id).map((t: any) => ({
             ...t,
             title: t.description || t.category
@@ -501,9 +506,10 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
               <div className="flex flex-col">
                 <p className="text-sm font-semibold text-white/85">{acc.name}</p>
                 {acc.purpose && <p className="text-xs text-white/65">{acc.purpose}</p>}
-                {(acc.goal_savings || []).length > 0 && (
+                {((acc.goal_savings || []).length > 0 || (acc.plan_shares || []).length > 0) && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    {acc.goal_savings.map((saving: any) => <span key={saving.goal_id} className="rounded-md bg-white/20 px-2 py-0.5 text-[11px] font-bold text-white">{saving.goal_name} ₱{Math.round(saving.amount).toLocaleString('en-PH')}{saving.mode === 'whole' ? ' · whole account' : ''}</span>)}
+                    {(acc.goal_savings || []).map((saving: any) => <span key={saving.goal_id} className="rounded-md bg-white/20 px-2 py-0.5 text-[11px] font-bold text-white">{saving.goal_name} ₱{Math.round(saving.amount).toLocaleString('en-PH')}{saving.mode === 'whole' ? ' · whole account' : ''}</span>)}
+                    {(acc.plan_shares || []).map((share: any) => <span key={share.label} className="rounded-md bg-white/20 px-2 py-0.5 text-[11px] font-bold text-white">{share.label} · {share.share}</span>)}
                   </div>
                 )}
                 {acc.goal_savings?.some((saving: any) => saving.mode !== 'whole') && acc.goal_savings.filter((saving: any) => saving.mode !== 'whole').reduce((sum: number, saving: any) => sum + saving.amount, 0) > Number(acc.balance) + 0.005 && (

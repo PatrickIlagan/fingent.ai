@@ -1,5 +1,6 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection } from '@capacitor-community/sqlite';
+import { isRuleIncome, normalizeEntry, normalizeRule, ruleAmount, ruleMatches, ruleMoves, ruleRecord, ruleTotals } from './incomeRules';
 import { evaluateRewards, planChallengeStart, planEquip, planLayout, planPurchase, rewardSummary, type RewardData } from './rewards';
 import { accountGoalSavings, addMonth, businessMetrics, entryId, goalProgress, isGoalError, localDate, parseList, planGoalContribution, planGoalWithdrawal, withWholeAccounts, categoryAliasGroup, dueOccurrences, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, isAutopayLiability, isIsoDate, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, ratesFromFrankfurter, resolveCategoryAlias, dueInterest, interestMode, interestSettings, isCardAccount, shareInterestWithGoals } from './sharedRules';
 
@@ -30,10 +31,11 @@ const collections: Record<string, string> = {
   '/api/freelancing/services': 'freelancing_services',
   '/api/freelancing/invoices': 'freelancing_invoices',
   '/api/freelancing/time_logs': 'freelancing_time_logs',
+  '/api/wealth-plans': 'wealth_plans',
 };
 
 const syncTableCollections: Record<string, string> = {
-  accounts: 'accounts', transactions: 'transactions', categories: 'categories', goals: 'goals', portfolios: 'portfolios', portfolio_transactions: 'portfolio_transactions', liabilities: 'liabilities', career: 'career_profile', career_tasks: 'career_tasks', personal_notes: 'personal_notes', personal_routines: 'personal_routines', calendar_events: 'calendar_events', income_flows: 'income_flows', budget_presets: 'budget_presets', budgets: 'budgets', businesses: 'businesses', business_deals: 'business_deals', business_items: 'business_items', business_transactions: 'business_transactions', freelance_businesses: 'freelance_businesses', freelancing_services: 'freelancing_services', freelancing_invoices: 'freelancing_invoices', freelancing_time_logs: 'freelancing_time_logs', reward_events: 'reward_events', reward_challenges: 'reward_challenges', reward_profile: 'reward_profile',
+  accounts: 'accounts', transactions: 'transactions', categories: 'categories', goals: 'goals', portfolios: 'portfolios', portfolio_transactions: 'portfolio_transactions', liabilities: 'liabilities', career: 'career_profile', career_tasks: 'career_tasks', personal_notes: 'personal_notes', personal_routines: 'personal_routines', calendar_events: 'calendar_events', income_flows: 'income_flows', budget_presets: 'budget_presets', budgets: 'budgets', businesses: 'businesses', business_deals: 'business_deals', business_items: 'business_items', business_transactions: 'business_transactions', freelance_businesses: 'freelance_businesses', freelancing_services: 'freelancing_services', freelancing_invoices: 'freelancing_invoices', freelancing_time_logs: 'freelancing_time_logs', reward_events: 'reward_events', reward_challenges: 'reward_challenges', reward_profile: 'reward_profile', wealth_plans: 'wealth_plans', income_rules: 'income_rules', income_rule_entries: 'income_rule_entries',
 };
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
@@ -214,7 +216,51 @@ async function recordAccountTransaction(entry: AccountEntry) {
   await adjustBalance(entry.account_id, entry.amount, entry.type);
   const id = await insert('transactions', { ...entry, account_id: Number(entry.account_id), notes: entry.notes || '', source: entry.source ?? null, source_id: entry.source_id ?? null });
   await ensureCategory(entry.category, entry.type);
+  if (entry.type === 'income' && entry.source !== 'income_rule') await applyIncomeRules({ ...entry, id });
   return id;
+}
+
+type RuleApplied = { rule_id: number; rule: string; amount: number; action: string };
+
+/** Runs every matching income rule on one income: counts it, and makes any spending or moves the rule asks for. */
+async function applyIncomeRules(tx: JsonRecord & { id: number }, only?: number): Promise<RuleApplied[]> {
+  if (!isRuleIncome(tx, true)) return [];
+  const rules = (await list('income_rules')).map(normalizeRule).filter(rule => rule.active && (!only || rule.id === only)).sort((a, b) => a.id - b.id);
+  const applied: RuleApplied[] = [];
+  for (const rule of rules) {
+    if (!ruleMatches(rule, tx)) continue;
+    const amount = ruleAmount(rule, tx);
+    if (amount <= 0) continue;
+    const txIds: number[] = [];
+    const date = String(tx.date || today()).slice(0, 10);
+    for (const move of ruleMoves(rule, tx, amount)) {
+      if (move.type === 'transfer') {
+        const from = await find('accounts', move.from);
+        const to = await find('accounts', move.to);
+        if (!from || !to) continue;
+        txIds.push(await recordAccountTransaction({ account_id: from.id, type: 'expense', amount: move.amount, category: 'Transfer', description: `Transfer to ${to.name}`, notes: move.description, date, source: 'income_rule', source_id: rule.id }));
+        txIds.push(await recordAccountTransaction({ account_id: to.id, type: 'income', amount: move.amount, category: 'Transfer', description: `Transfer from ${from.name}`, notes: move.description, date, source: 'income_rule', source_id: rule.id }));
+      } else {
+        if (!(await find('accounts', move.account_id))) continue;
+        txIds.push(await recordAccountTransaction({ account_id: move.account_id, type: move.type, amount: move.amount, category: move.category, description: move.description, date, source: 'income_rule', source_id: rule.id }));
+      }
+    }
+    await insert('income_rule_entries', { rule_id: rule.id, kind: 'accrual', source_tx_id: tx.id, amount, date, tx_ids: JSON.stringify(txIds), note: String(tx.description || tx.category || ''), created_at: new Date().toISOString() });
+    applied.push({ rule_id: rule.id, rule: rule.name, amount, action: rule.action });
+  }
+  return applied;
+}
+
+/** Undoes what the rules did for an income (when it is edited or deleted). */
+async function reverseIncomeRules(txId: unknown) {
+  const entries = (await list('income_rule_entries')).filter(entry => entry.kind !== 'give' && Number(entry.source_tx_id) === Number(txId));
+  if (!entries.length) return;
+  const transactions = await list('transactions');
+  for (const entry of entries) {
+    const ids = normalizeEntry(entry).tx_ids;
+    await removeTransactions(transactions.filter(transaction => ids.includes(Number(transaction.id))));
+    await remove('income_rule_entries', entry.id as number);
+  }
 }
 
 async function recordTransfer(from: JsonRecord, to: JsonRecord, amount: number, date: string, notes: string, source: string | null = null, sourceId: number | null = null) {
@@ -231,6 +277,7 @@ async function linkedTransactions(source: string, sourceId: unknown, legacyNote:
 /** Deletes transactions and restores the account balances they changed. */
 async function removeTransactions(transactions: JsonRecord[]) {
   for (const transaction of transactions) {
+    if (transaction.type === 'income' && transaction.source !== 'income_rule') await reverseIncomeRules(transaction.id);
     await adjustBalance(transaction.account_id, transaction.amount, transaction.type, true);
     await remove('transactions', transaction.id as number);
   }
@@ -338,6 +385,95 @@ function checkRewards() {
   });
   rewardsRun = run.catch(() => undefined);
   return run;
+}
+
+/** Wealth plans: the plan is one JSON document per row, as on desktop. */
+async function wealthPlansRoute(pathname: string, method: string, body: JsonRecord) {
+  if (pathname === '/api/wealth-plans' && method === 'GET') return json((await list('wealth_plans')).filter(plan => !number(plan.archived)).sort((a, b) => Number(a.id) - Number(b.id)));
+  const asText = (plan: unknown) => typeof plan === 'string' ? plan : JSON.stringify(plan ?? {});
+  if (pathname === '/api/wealth-plans' && method === 'POST') {
+    const name = String(body.name || '').trim();
+    if (!name) return json({ error: 'Give the plan a name.' }, 400);
+    const now = new Date().toISOString();
+    return json({ id: await insert('wealth_plans', { name: name.slice(0, 80), plan: asText(body.plan), created_at: now, updated_at: now, archived: 0 }) });
+  }
+  const one = pathname.match(/^\/api\/wealth-plans\/(\d+)$/);
+  if (one && method === 'PUT') {
+    const existing = await find('wealth_plans', one[1]);
+    if (!existing) return json({ error: 'Plan not found.' }, 404);
+    await replace('wealth_plans', one[1], { ...existing, name: body.name === undefined ? existing.name : String(body.name).trim().slice(0, 80) || existing.name, plan: body.plan === undefined ? existing.plan : asText(body.plan), archived: body.archived ? 1 : 0, updated_at: new Date().toISOString() });
+    return json({ success: true });
+  }
+  return null;
+}
+
+async function incomeRulesRoute(pathname: string, method: string, body: JsonRecord, search: URLSearchParams) {
+  const fail = (error: string, status = 400) => json({ error }, status);
+  if (pathname === '/api/income-rules' && method === 'GET') {
+    const entries = (await list('income_rule_entries')).map(normalizeEntry);
+    const month = today().slice(0, 7);
+    const rules = (await list('income_rules')).sort((a, b) => Number(a.id) - Number(b.id)).map(row => ({ ...normalizeRule(row), ...ruleTotals(Number(row.id), entries, month) }));
+    return json({ rules, latest_entry_id: entries.reduce((max, entry) => Math.max(max, entry.id), 0) });
+  }
+  if (pathname === '/api/income-rules/entries' && method === 'GET') {
+    const after = Number(search.get('after')) || 0;
+    const ruleId = Number(search.get('rule_id')) || 0;
+    const rules = await list('income_rules');
+    return json((await list('income_rule_entries')).map(normalizeEntry).filter(entry => entry.id > after && (!ruleId || entry.rule_id === ruleId)).sort((a, b) => b.id - a.id).slice(0, 200)
+      .map(entry => { const rule = rules.find(item => Number(item.id) === entry.rule_id); return { ...entry, rule_name: rule?.name ?? null, rule_action: rule?.action ?? null }; }));
+  }
+  if (pathname === '/api/income-rules' && method === 'POST') {
+    const record = ruleRecord(body, await list('accounts'));
+    if ('error' in record) return fail(String(record.error));
+    const id = await insert('income_rules', { ...record, created_at: new Date().toISOString() });
+    let backfilled = 0;
+    const since = String(body.count_since || '');
+    if (record.action === 'counter' && /^\d{4}-\d{2}-\d{2}$/.test(since)) {
+      const incomes = (await list('transactions')).filter(tx => tx.type === 'income' && String(tx.date) >= since).sort((a, b) => String(a.date).localeCompare(String(b.date)) || Number(a.id) - Number(b.id));
+      for (const tx of incomes) backfilled += (await applyIncomeRules(tx as JsonRecord & { id: number }, id)).length;
+    }
+    return json({ id, backfilled });
+  }
+  const one = pathname.match(/^\/api\/income-rules\/(\d+)$/);
+  if (one && method === 'PUT') {
+    const existing = await find('income_rules', one[1]);
+    if (!existing) return fail('Rule not found.', 404);
+    const record = ruleRecord({ ...normalizeRule(existing), ...body }, await list('accounts'));
+    if ('error' in record) return fail(String(record.error));
+    await replace('income_rules', one[1], { ...existing, ...record });
+    return json({ success: true });
+  }
+  if (one && method === 'DELETE') {
+    for (const entry of (await list('income_rule_entries')).filter(item => Number(item.rule_id) === Number(one[1]))) await remove('income_rule_entries', entry.id as number);
+    await remove('income_rules', one[1]);
+    return json({ success: true });
+  }
+  const give = pathname.match(/^\/api\/income-rules\/(\d+)\/give$/);
+  if (give && method === 'POST') {
+    const rule = await find('income_rules', give[1]);
+    if (!rule) return fail('Rule not found.', 404);
+    const sources = (Array.isArray(body.sources) ? body.sources as JsonRecord[] : []).map(item => ({ account_id: Number(item.account_id), amount: Math.round(number(item.amount) * 100) / 100 })).filter(item => item.account_id && item.amount > 0);
+    const amount = sources.length ? sources.reduce((sum, item) => sum + item.amount, 0) : Math.round(number(body.amount) * 100) / 100;
+    if (!Number.isFinite(amount) || amount <= 0) return fail('Enter how much you gave.');
+    for (const source of sources) if (!(await find('accounts', source.account_id))) return fail('That account no longer exists.');
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(body.date)) ? String(body.date) : today();
+    const category = String(body.category || rule.category || rule.name).trim().slice(0, 40);
+    const note = String(body.note || '').slice(0, 120);
+    const txIds: number[] = [];
+    for (const source of sources) txIds.push(await recordAccountTransaction({ account_id: source.account_id, type: 'expense', amount: source.amount, category, description: note ? `${rule.name} · ${note}` : String(rule.name), date, source: 'income_rule', source_id: Number(rule.id) }));
+    const id = await insert('income_rule_entries', { rule_id: Number(rule.id), kind: 'give', source_tx_id: null, amount, date, tx_ids: JSON.stringify(txIds), note, created_at: new Date().toISOString() });
+    return json({ id, amount });
+  }
+  const entry = pathname.match(/^\/api\/income-rules\/entries\/(\d+)$/);
+  if (entry && method === 'DELETE') {
+    const found = await find('income_rule_entries', entry[1]);
+    if (!found) return fail('Entry not found.', 404);
+    const ids = normalizeEntry(found).tx_ids;
+    await removeTransactions((await list('transactions')).filter(transaction => ids.includes(Number(transaction.id))));
+    await remove('income_rule_entries', entry[1]);
+    return json({ success: true });
+  }
+  return null;
 }
 
 async function rewardsRoute(pathname: string, method: string, body: JsonRecord) {
@@ -484,7 +620,12 @@ async function transactionResponse(method: string, path: string, body: JsonRecor
     const category = await resolveCategory(body.category);
     await adjustBalance(body.account_id, body.amount, body.type);
     await ensureCategory(category, body.type === 'income' ? 'income' : 'expense');
-    return json({ id: await insert('transactions', { ...body, category, notes: body.notes ?? '', date: body.date || today() }) });
+    // Only plan deposits may tag a manual entry; other sources belong to the features that own them.
+    const source = body.source === 'wealth_plan' ? 'wealth_plan' : null;
+    const record = { ...body, category, notes: body.notes ?? '', date: body.date || today(), source, source_id: source ? Number(body.source_id) || null : null };
+    const created = await insert('transactions', record);
+    const rules = body.type === 'income' ? await applyIncomeRules({ ...record, id: created }) : [];
+    return json({ id: created, rules });
   }
   const previous = await find('transactions', id);
   if (!previous) return json({ error: 'Transaction not found.' }, 404);
@@ -493,9 +634,14 @@ async function transactionResponse(method: string, path: string, body: JsonRecor
     const category = await resolveCategory(body.category);
     await adjustBalance(body.account_id, body.amount, body.type);
     await ensureCategory(category, body.type === 'income' ? 'income' : 'expense');
-    await replace('transactions', id, { ...previous, ...body, category, notes: body.notes ?? '', date: body.date || today() });
-    return json({ success: true });
+    const updated = { ...previous, ...body, category, notes: body.notes ?? '', date: body.date || today(), source: previous.source ?? null, source_id: previous.source_id ?? null };
+    await replace('transactions', id, updated);
+    // An edited income re-runs its rules so what they took matches the new amount.
+    if (previous.type === 'income') await reverseIncomeRules(id);
+    const rules = body.type === 'income' ? await applyIncomeRules({ ...updated, id: Number(id) }) : [];
+    return json({ success: true, rules });
   }
+  if (previous.type === 'income') await reverseIncomeRules(id);
   await adjustBalance(previous.account_id, previous.amount, previous.type, true);
   await remove('transactions', id);
   return json({ success: true });
@@ -547,6 +693,8 @@ async function bumpDataVersion() {
 async function route(pathname: string, search: URLSearchParams, method: string, body: JsonRecord) {
   if (pathname === '/api/health') return json({ status: 'ok', platform: `${Capacitor.getPlatform()}-native` });
   if (method === 'GET') await ensureRecurringPosted().catch((error) => console.error('Recurring entries could not be posted.', error));
+  if (pathname.startsWith('/api/wealth-plans')) { const handled = await wealthPlansRoute(pathname, method, body); if (handled) return handled; }
+  if (pathname.startsWith('/api/income-rules')) { const handled = await incomeRulesRoute(pathname, method, body, search); if (handled) return handled; }
   if (pathname.startsWith('/api/rewards')) { const handled = await rewardsRoute(pathname, method, body); if (handled) return handled; }
   if (pathname === '/api/system/sync/export' && method === 'GET') return json(await exportSyncSnapshot());
   if (pathname === '/api/system/sync/state') {
@@ -568,7 +716,8 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
     const to = body.to_account_id ? await find('accounts', Number(body.to_account_id)) : null;
     if (amount <= 0) return json({ error: 'A positive transfer amount is required.' }, 400);
     if (!from || !to || from.id === to.id) return json({ error: 'Choose two different existing accounts.' }, 400);
-    await recordTransfer(from, to, amount, String(body.date || today()), String(body.notes || ''));
+    const source = body.source === 'wealth_plan' ? 'wealth_plan' : null;
+    await recordTransfer(from, to, amount, String(body.date || today()), String(body.notes || ''), source, source ? Number(body.source_id) || null : null);
     return json({ success: true, from: from.name, to: to.name });
   }
   const invoicePayment = pathname.match(/^\/api\/freelancing\/invoices\/(\d+)\/pay$/);

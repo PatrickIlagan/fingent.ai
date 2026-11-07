@@ -16,6 +16,7 @@ import { Categories } from './pages/Categories';
 import { Personal } from './pages/Personal';
 import { Rewards } from './pages/Rewards';
 import { RewardsWatcher } from './components/RewardsWatcher';
+import { IncomeRulesWatcher } from './components/IncomeRules';
 import { ChatSheet } from './components/ChatSheet';
 import { Celebrations } from './components/Celebrations';
 import { SyncStatus } from './components/SyncStatus';
@@ -58,6 +59,7 @@ export default function App() {
       <Celebrations />
       <SyncStatus />
       <RewardsWatcher />
+      <IncomeRulesWatcher />
     </MotionConfig>
   );
 }

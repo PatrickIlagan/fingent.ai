@@ -4,6 +4,7 @@ import fsModule from "fs";
 import crypto from "crypto";
 import path from "path";
 import os from "os";
+import { isRuleIncome, normalizeEntry, normalizeRule, ruleAmount, ruleMatches, ruleMoves, ruleRecord, ruleTotals } from "./src/lib/incomeRules";
 import { evaluateRewards, planChallengeStart, planEquip, planLayout, planPurchase, rewardSummary, type RewardData } from "./src/lib/rewards";
 import { closeDb, getDataDir, getDb, lockDatabase, unlockDatabase, validateDatabaseFile } from "./server/db";
 import { accountGoalSavings, addMonth, isGoalError, businessMetrics, categoryAliasGroup, dueOccurrences, entryId, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, goalProgress, localDate, parseList, planGoalContribution, planGoalWithdrawal, ratesFromFrankfurter, withWholeAccounts, isAutopayLiability, isIsoDate, dueInterest, interestMode, interestSettings, isCardAccount, shareInterestWithGoals, INTEREST_FIELDS, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, resolveCategoryAlias as resolveCategoryLabel } from "./src/lib/sharedRules";
@@ -56,7 +57,48 @@ async function recordAccountTransaction(db: any, entry: AccountEntry) {
     [entry.account_id, entry.type, entry.amount, entry.category, entry.description, entry.notes || '', entry.date, entry.source || null, entry.source_id ?? null]
   );
   await upsertPersonalCategory(db, entry.category, entry.type);
+  if (entry.type === 'income' && entry.source !== 'income_rule') await applyIncomeRules(db, { ...entry, id: Number(result.lastInsertRowid) });
   return result.lastInsertRowid;
+}
+
+type RuleApplied = { rule_id: number; rule: string; amount: number; action: string };
+
+/** Runs every matching income rule on one income: counts it, and makes any spending or moves the rule asks for. */
+async function applyIncomeRules(db: any, tx: { id: number; account_id: unknown; type: unknown; amount: unknown; category?: unknown; description?: unknown; date?: unknown; source?: unknown }, only?: number): Promise<RuleApplied[]> {
+  if (!isRuleIncome(tx, true)) return [];
+  const rules = (await db.all("SELECT * FROM income_rules WHERE COALESCE(active, 1) = 1" + (only ? " AND id = ?" : ""), only ? [only] : [])).map(normalizeRule);
+  const applied: RuleApplied[] = [];
+  for (const rule of rules) {
+    if (!ruleMatches(rule, tx)) continue;
+    const amount = ruleAmount(rule, tx);
+    if (amount <= 0) continue;
+    const txIds: number[] = [];
+    const date = String(tx.date || today()).slice(0, 10);
+    for (const move of ruleMoves(rule, tx, amount)) {
+      if (move.type === 'transfer') {
+        const from = await db.get("SELECT id, name FROM accounts WHERE id = ?", [move.from]);
+        const to = await db.get("SELECT id, name FROM accounts WHERE id = ?", [move.to]);
+        if (!from || !to) continue;
+        txIds.push(Number(await recordAccountTransaction(db, { account_id: from.id, type: 'expense', amount: move.amount, category: 'Transfer', description: 'Transfer to ' + to.name, notes: move.description, date, source: 'income_rule', source_id: rule.id })));
+        txIds.push(Number(await recordAccountTransaction(db, { account_id: to.id, type: 'income', amount: move.amount, category: 'Transfer', description: 'Transfer from ' + from.name, notes: move.description, date, source: 'income_rule', source_id: rule.id })));
+      } else {
+        if (!(await db.get("SELECT id FROM accounts WHERE id = ?", [move.account_id]))) continue;
+        txIds.push(Number(await recordAccountTransaction(db, { account_id: move.account_id, type: move.type, amount: move.amount, category: move.category, description: move.description, date, source: 'income_rule', source_id: rule.id })));
+      }
+    }
+    await db.run("INSERT INTO income_rule_entries (rule_id, kind, source_tx_id, amount, date, tx_ids, note, created_at) VALUES (?, 'accrual', ?, ?, ?, ?, ?, ?)", [rule.id, tx.id, amount, date, JSON.stringify(txIds), String(tx.description || tx.category || ''), new Date().toISOString()]);
+    applied.push({ rule_id: rule.id, rule: rule.name, amount, action: rule.action });
+  }
+  return applied;
+}
+
+/** Undoes what the rules did for an income (when it is edited or deleted). */
+async function reverseIncomeRules(db: any, txId: number | string) {
+  const entries = (await db.all("SELECT * FROM income_rule_entries WHERE kind = 'accrual' AND source_tx_id = ?", [Number(txId)])).map(normalizeEntry);
+  for (const entry of entries) {
+    if (entry.tx_ids.length) await removeTransactions(db, await db.all(`SELECT * FROM transactions WHERE id IN (${entry.tx_ids.map(() => '?').join(', ')})`, entry.tx_ids));
+  }
+  if (entries.length) await db.run("DELETE FROM income_rule_entries WHERE kind = 'accrual' AND source_tx_id = ?", [Number(txId)]);
 }
 
 async function recordTransfer(db: any, from: { id: number; name: string }, to: { id: number; name: string }, amount: number, date: string, notes: string, source: string | null = null, sourceId: number | null = null) {
@@ -71,6 +113,7 @@ async function linkedTransactions(db: any, source: string, sourceId: number | st
 /** Deletes transactions and restores the account balances they changed. */
 async function removeTransactions(db: any, transactions: any[]) {
   for (const transaction of transactions) {
+    if (transaction.type === 'income' && transaction.source !== 'income_rule') await reverseIncomeRules(db, transaction.id);
     await db.run("UPDATE accounts SET balance = balance + ? WHERE id = ?", [transaction.type === 'income' ? -transaction.amount : transaction.amount, transaction.account_id]);
     await db.run("DELETE FROM transactions WHERE id = ?", [transaction.id]);
   }
@@ -208,7 +251,7 @@ function ensureRecurringPosted() {
 }
 
 const DRIVE_BACKUP_NAME = 'fingent-backup.enc';
-const SYNC_TABLES = ['accounts', 'transactions', 'categories', 'goals', 'portfolios', 'portfolio_transactions', 'liabilities', 'career', 'career_tasks', 'personal_notes', 'personal_routines', 'personal_routine_logs', 'calendar_events', 'income_flows', 'budget_presets', 'budgets', 'businesses', 'business_deals', 'business_items', 'business_transactions', 'freelance_businesses', 'freelancing_services', 'freelancing_invoices', 'freelancing_time_logs', 'reward_events', 'reward_challenges', 'reward_profile'];
+const SYNC_TABLES = ['accounts', 'transactions', 'categories', 'goals', 'portfolios', 'portfolio_transactions', 'liabilities', 'career', 'career_tasks', 'personal_notes', 'personal_routines', 'personal_routine_logs', 'calendar_events', 'income_flows', 'budget_presets', 'budgets', 'businesses', 'business_deals', 'business_items', 'business_transactions', 'freelance_businesses', 'freelancing_services', 'freelancing_invoices', 'freelancing_time_logs', 'reward_events', 'reward_challenges', 'reward_profile', 'wealth_plans', 'income_rules', 'income_rule_entries'];
 
 function encryptBackup(source: Buffer, password: string) {
   const salt = crypto.randomBytes(16);
@@ -872,7 +915,8 @@ To run FinGent as a desktop application:
       const from = await db.get("SELECT id, name FROM accounts WHERE id = ?", [from_account_id]);
       const to = await db.get("SELECT id, name FROM accounts WHERE id = ?", [to_account_id]);
       if (!from || !to || from.id === to.id) return res.status(400).json({ error: 'Choose two different existing accounts.' });
-      await recordTransfer(db, from, to, value, date, String(notes || ''));
+      const source = req.body.source === 'wealth_plan' ? 'wealth_plan' : null;
+      await recordTransfer(db, from, to, value, date, String(notes || ''), source, source ? Number(req.body.source_id) || null : null);
       res.json({ success: true, from: from.name, to: to.name });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1180,6 +1224,107 @@ To run FinGent as a desktop application:
     }
   }
 
+  // ---- Income rules ----
+  const rulesWithTotals = async (db: any) => {
+    const entries = (await db.all("SELECT * FROM income_rule_entries")).map(normalizeEntry);
+    const month = today().slice(0, 7);
+    return { entries, rules: (await db.all("SELECT * FROM income_rules ORDER BY id")).map((row: any) => ({ ...normalizeRule(row), ...ruleTotals(Number(row.id), entries, month) })) };
+  };
+  app.get("/api/income-rules", async (_req, res) => {
+    try { const { rules, entries } = await rulesWithTotals(await getDb()); res.json({ rules, latest_entry_id: entries.reduce((max: number, entry: any) => Math.max(max, entry.id), 0) }); }
+    catch (error: any) { res.status(500).json({ error: error.message }); }
+  });
+  app.get("/api/income-rules/entries", async (req, res) => {
+    try {
+      const db = await getDb();
+      const after = Number(req.query.after) || 0;
+      const ruleId = Number(req.query.rule_id) || 0;
+      const rows = await db.all("SELECT e.*, r.name AS rule_name, r.action AS rule_action FROM income_rule_entries e LEFT JOIN income_rules r ON r.id = e.rule_id WHERE e.id > ?" + (ruleId ? " AND e.rule_id = ?" : "") + " ORDER BY e.id DESC LIMIT 200", ruleId ? [after, ruleId] : [after]);
+      res.json(rows.map((row: any) => ({ ...normalizeEntry(row), rule_name: row.rule_name, rule_action: row.rule_action })));
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
+  });
+  app.post("/api/income-rules", (req, res) => respondInTransaction(res, async (db) => {
+    const record = ruleRecord(req.body, await db.all("SELECT id FROM accounts"));
+    if ('error' in record) throw Object.assign(new Error(String(record.error)), { status: 400 });
+    const fields = Object.keys(record);
+    const result = await db.run(`INSERT INTO income_rules (${fields.join(', ')}, created_at) VALUES (${fields.map(() => '?').join(', ')}, ?)`, [...fields.map(field => record[field]), new Date().toISOString()]);
+    const id = Number(result.lastInsertRowid);
+    // A counter can also count income you already logged since a date.
+    let backfilled = 0;
+    const since = String(req.body.count_since || '');
+    if (record.action === 'counter' && /^\d{4}-\d{2}-\d{2}$/.test(since)) {
+      for (const tx of await db.all("SELECT * FROM transactions WHERE type = 'income' AND date >= ? ORDER BY date, id", [since])) backfilled += (await applyIncomeRules(db, tx, id)).length;
+    }
+    return { id, backfilled };
+  }));
+  app.put("/api/income-rules/:id", (req, res) => respondInTransaction(res, async (db) => {
+    const existing = await db.get("SELECT * FROM income_rules WHERE id = ?", [req.params.id]);
+    if (!existing) throw Object.assign(new Error('Rule not found.'), { status: 404 });
+    const record = ruleRecord({ ...normalizeRule(existing), ...req.body }, await db.all("SELECT id FROM accounts"));
+    if ('error' in record) throw Object.assign(new Error(String(record.error)), { status: 400 });
+    const fields = Object.keys(record);
+    await db.run(`UPDATE income_rules SET ${fields.map(field => `${field} = ?`).join(', ')} WHERE id = ?`, [...fields.map(field => record[field]), req.params.id]);
+    return { success: true };
+  }));
+  app.delete("/api/income-rules/:id", (req, res) => respondInTransaction(res, async (db) => {
+    // The spending and moves it already made stay; only the rule and its history go.
+    await db.run("DELETE FROM income_rule_entries WHERE rule_id = ?", [req.params.id]);
+    await db.run("DELETE FROM income_rules WHERE id = ?", [req.params.id]);
+    return { success: true };
+  }));
+  app.post("/api/income-rules/:id/give", (req, res) => respondInTransaction(res, async (db) => {
+    const rule = await db.get("SELECT * FROM income_rules WHERE id = ?", [req.params.id]);
+    if (!rule) throw Object.assign(new Error('Rule not found.'), { status: 404 });
+    const sources = (Array.isArray(req.body.sources) ? req.body.sources : []).map((item: any) => ({ account_id: Number(item.account_id), amount: Math.round(Number(item.amount) * 100) / 100 })).filter((item: any) => item.account_id && item.amount > 0);
+    const amount = sources.length ? sources.reduce((sum: number, item: any) => sum + item.amount, 0) : Math.round(Number(req.body.amount) * 100) / 100;
+    if (!Number.isFinite(amount) || amount <= 0) throw Object.assign(new Error('Enter how much you gave.'), { status: 400 });
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body.date)) ? String(req.body.date) : today();
+    const category = String(req.body.category || rule.category || rule.name).trim().slice(0, 40);
+    const note = String(req.body.note || '').slice(0, 120);
+    const txIds: number[] = [];
+    for (const source of sources) {
+      if (!(await db.get("SELECT id FROM accounts WHERE id = ?", [source.account_id]))) throw Object.assign(new Error('That account no longer exists.'), { status: 400 });
+      txIds.push(Number(await recordAccountTransaction(db, { account_id: source.account_id, type: 'expense', amount: source.amount, category, description: note ? `${rule.name} · ${note}` : rule.name, date, source: 'income_rule', source_id: rule.id })));
+    }
+    const result = await db.run("INSERT INTO income_rule_entries (rule_id, kind, source_tx_id, amount, date, tx_ids, note, created_at) VALUES (?, 'give', NULL, ?, ?, ?, ?, ?)", [rule.id, amount, date, JSON.stringify(txIds), note, new Date().toISOString()]);
+    return { id: Number(result.lastInsertRowid), amount };
+  }));
+  app.delete("/api/income-rules/entries/:id", (req, res) => respondInTransaction(res, async (db) => {
+    // Removes one counted income or one give, undoing the transactions it made.
+    const entry = await db.get("SELECT * FROM income_rule_entries WHERE id = ?", [req.params.id]);
+    if (!entry) throw Object.assign(new Error('Entry not found.'), { status: 404 });
+    const ids = normalizeEntry(entry).tx_ids;
+    if (ids.length) await removeTransactions(db, await db.all(`SELECT * FROM transactions WHERE id IN (${ids.map(() => '?').join(', ')})`, ids));
+    await db.run("DELETE FROM income_rule_entries WHERE id = ?", [req.params.id]);
+    return { success: true };
+  }));
+
+  // ---- Wealth plans (the plan itself is a JSON document; projections run in the app) ----
+  app.get("/api/wealth-plans", async (_req, res) => {
+    try { res.json(await (await getDb()).all("SELECT * FROM wealth_plans WHERE COALESCE(archived, 0) = 0 ORDER BY id")); }
+    catch (error: any) { res.status(500).json({ error: error.message }); }
+  });
+  app.post("/api/wealth-plans", (req, res) => respondInTransaction(res, async (db) => {
+    const name = String(req.body.name || '').trim();
+    if (!name) throw Object.assign(new Error('Give the plan a name.'), { status: 400 });
+    const plan = typeof req.body.plan === 'string' ? req.body.plan : JSON.stringify(req.body.plan ?? {});
+    const now = new Date().toISOString();
+    const result = await db.run("INSERT INTO wealth_plans (name, plan, created_at, updated_at, archived) VALUES (?, ?, ?, ?, 0)", [name.slice(0, 80), plan, now, now]);
+    return { id: Number(result.lastInsertRowid) };
+  }));
+  app.put("/api/wealth-plans/:id", (req, res) => respondInTransaction(res, async (db) => {
+    const existing = await db.get("SELECT * FROM wealth_plans WHERE id = ?", [req.params.id]);
+    if (!existing) throw Object.assign(new Error('Plan not found.'), { status: 404 });
+    const name = req.body.name === undefined ? existing.name : String(req.body.name).trim().slice(0, 80) || existing.name;
+    const plan = req.body.plan === undefined ? existing.plan : typeof req.body.plan === 'string' ? req.body.plan : JSON.stringify(req.body.plan);
+    await db.run("UPDATE wealth_plans SET name = ?, plan = ?, updated_at = ?, archived = ? WHERE id = ?", [name, plan, new Date().toISOString(), req.body.archived ? 1 : 0, req.params.id]);
+    return { success: true };
+  }));
+  app.delete("/api/wealth-plans/:id", (req, res) => respondInTransaction(res, async (db) => {
+    await db.run("DELETE FROM wealth_plans WHERE id = ?", [req.params.id]);
+    return { success: true };
+  }));
+
   app.get("/api/rewards", async (_req, res) => {
     try {
       const db = await getDb();
@@ -1332,12 +1477,15 @@ To run FinGent as a desktop application:
         await db.run("UPDATE accounts SET balance = ? WHERE id = ?", [newBalance, account_id]);
       }
 
+      // Only plan deposits may tag a manual entry; other sources belong to the features that own them.
+      const source = req.body.source === 'wealth_plan' ? 'wealth_plan' : null;
       const result = await db.run(
-        "INSERT INTO transactions (account_id, type, amount, category, description, notes, date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [account_id, type, amount, category, description, notes, date]
+        "INSERT INTO transactions (account_id, type, amount, category, description, notes, date, source, source_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [account_id, type, amount, category, description, notes, date, source, source ? Number(req.body.source_id) || null : null]
       );
       await upsertPersonalCategory(db, category, type === 'income' ? 'income' : 'expense');
-      res.json({ id: result.lastInsertRowid });
+      const rules = type === 'income' ? await applyIncomeRules(db, { id: Number(result.lastInsertRowid), account_id, type, amount, category, description, date, source }) : [];
+      res.json({ id: result.lastInsertRowid, rules });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -1348,9 +1496,9 @@ To run FinGent as a desktop application:
       const db = await getDb();
       const { id } = req.params;
       
-      // We should theoretically reverse the balance change, but this is a simplified version
       const tx = await db.get("SELECT * FROM transactions WHERE id = ?", [id]);
       if (tx) {
+        if (tx.type === 'income') await reverseIncomeRules(db, id);
         const account = await db.get("SELECT balance FROM accounts WHERE id = ?", [tx.account_id]);
         if (account) {
            const newBalance = tx.type === 'income' ? account.balance - tx.amount : account.balance + tx.amount;
@@ -2090,7 +2238,10 @@ To run FinGent as a desktop application:
         [account_id, type, amount, category, description, notes, date, req.params.id]
       );
       await upsertPersonalCategory(db, category, type === 'income' ? 'income' : 'expense');
-      res.json({ success: true });
+      // An edited income re-runs its rules so what they took matches the new amount.
+      if (previous.type === 'income') await reverseIncomeRules(db, req.params.id);
+      const rules = type === 'income' ? await applyIncomeRules(db, { id: Number(req.params.id), account_id, type, amount, category, description, date, source: previous.source }) : [];
+      res.json({ success: true, rules });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

@@ -9,11 +9,14 @@ import { celebrate, celebrateCompletedGoals } from '../components/Celebrations';
 import { Suggestions } from '../components/Suggestions';
 import { MilestoneBar, MilestoneChips } from '../components/MilestoneBar';
 import { Segmented } from '../components/Segmented';
+import { WealthPlans } from './WealthPlans';
+import { IncomeRulesPage } from '../components/IncomeRules';
 
 export function Plans({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
   const { themeMode, shouldRefresh, triggerRefresh, focusGoalId, setFocusGoalId } = useStore();
   const isAdvanced = themeMode === 'advanced';
 
+  const isWealth = category === 'wealth';
   const isGoals = category === 'goals';
   const isBudget = category === 'budget';
   const showAll = !category;
@@ -562,6 +565,9 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
       </div>
     );
   }
+
+  if (isWealth) return <WealthPlans />;
+  if (category === 'rules') return <IncomeRulesPage />;
 
   if (isBudgetBuilderOpen) {
     const totalAllocated = allocations.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);

@@ -3,12 +3,15 @@ import { Sparkles } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { MILESTONES, milestonePoints } from '../lib/rewards';
 
+// A stable empty list: a new [] on every read makes the store re-render forever.
+const NONE: number[] = [];
+
 /**
  * A goal progress bar with 25 / 50 / 75% ticks. Ticks whose points were
  * earned glow; the bar itself fills in on first view.
  */
 export function MilestoneBar({ goalId, percent, fill, height = 'h-3', className = '' }: { goalId: number; percent: number; fill: string; height?: string; className?: string }) {
-  const reached = useStore(state => state.rewards?.milestones?.[goalId] ?? []) as number[];
+  const reached = useStore(state => state.rewards?.milestones?.[goalId] ?? NONE) as number[];
   const hidden = useStore(state => state.hiddenTabs.includes('rewards'));
   const value = Math.max(0, Math.min(100, Number(percent) || 0));
   return <div className={`relative ${className}`}>
@@ -28,7 +31,7 @@ export function MilestoneBar({ goalId, percent, fill, height = 'h-3', className 
 
 /** The four milestones for a goal and their points, for goal detail. */
 export function MilestoneChips({ goalId, target, baseline }: { goalId: number; target: number; baseline: number | null | undefined }) {
-  const reached = useStore(state => state.rewards?.milestones?.[goalId] ?? []) as number[];
+  const reached = useStore(state => state.rewards?.milestones?.[goalId] ?? NONE) as number[];
   const hidden = useStore(state => state.hiddenTabs.includes('rewards'));
   if (hidden) return null;
   return <div className="mb-5">

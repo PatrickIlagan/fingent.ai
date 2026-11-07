@@ -426,6 +426,46 @@ async function initDb(db: any) {
       description TEXT,
       FOREIGN KEY(service_id) REFERENCES freelancing_services(id)
     );
+    -- Income rules: take a percent of every income (tithes, paying yourself first, taxes).
+    CREATE TABLE IF NOT EXISTS income_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      mode TEXT DEFAULT 'percent',
+      percent REAL DEFAULT 0,
+      amount REAL DEFAULT 0,
+      categories TEXT DEFAULT '[]',
+      accounts TEXT DEFAULT '[]',
+      include_interest INTEGER DEFAULT 0,
+      action TEXT DEFAULT 'counter',
+      targets TEXT DEFAULT '[]',
+      category TEXT,
+      start_date TEXT,
+      active INTEGER DEFAULT 1,
+      created_at TEXT
+    );
+    -- What each rule counted from an income (accrual) or what was handed over (give), with the transactions it made.
+    CREATE TABLE IF NOT EXISTS income_rule_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rule_id INTEGER NOT NULL,
+      kind TEXT DEFAULT 'accrual',
+      source_tx_id INTEGER,
+      amount REAL NOT NULL,
+      date TEXT,
+      tx_ids TEXT DEFAULT '[]',
+      note TEXT,
+      created_at TEXT
+    );
+
+    -- Wealth plans: the whole plan (buckets, extras, injections, links, deposit history) is one JSON document.
+    CREATE TABLE IF NOT EXISTS wealth_plans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      plan TEXT NOT NULL,
+      created_at TEXT,
+      updated_at TEXT,
+      archived INTEGER DEFAULT 0
+    );
+
     -- Ipon rewards: a points ledger (one row per award or purchase), challenges, and the pet.
     CREATE TABLE IF NOT EXISTS reward_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

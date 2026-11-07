@@ -10,6 +10,7 @@ import { CountUp } from '../components/CountUp';
 import { Suggestions } from '../components/Suggestions';
 import { MilestoneBar } from '../components/MilestoneBar';
 import { IponCard } from '../components/IponCard';
+import { ToGiveCard } from '../components/IncomeRules';
 
 type ChartRange = '1w' | '1m' | '6m' | '1y';
 
@@ -339,6 +340,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
         </div>
 
         <IponCard onNavigate={onNavigate} />
+        <ToGiveCard onNavigate={onNavigate} />
 
         <Suggestions page="home" onNavigate={onNavigate} />
 
