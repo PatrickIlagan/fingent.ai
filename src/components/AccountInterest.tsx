@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { BadgePercent, ChevronDown, Edit2, Plus, Sparkles, X } from 'lucide-react';
 import { DEFAULT_INTEREST_TAX, dueInterest, interestDay, interestFrequency, interestMode, interestRates, interestTiers, localDate, monthlyInterestEstimate, shiftDate } from '../lib/sharedRules';
 import { findProduct } from '../lib/institutions';
 import { Dialog, dialogField, dialogPrimary, dialogSecondary } from './RecordDialogs';
+import { Segmented } from './Segmented';
 
 // ---- Form values (rates as percentages, everything as text) ----------------
 
@@ -56,9 +58,9 @@ export function interestPayload(form: InterestForm, accountType: string) {
 const pct = (value: number) => `${(value * 100).toFixed(2).replace(/\.?0+$/, '')}%`;
 const peso = (value: number, decimals = 2) => '₱' + value.toLocaleString('en-PH', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 const MODES = [
-  { id: 'auto', label: 'Automatic', help: 'Adds interest for you on schedule.' },
-  { id: 'remind', label: 'Remind me', help: 'Shows what’s due; you confirm the real amount.' },
-  { id: 'fixed', label: 'Fixed amount', help: 'Adds the same amount every month.' },
+  { id: 'auto', label: 'Auto', help: 'Adds interest for you on schedule.' },
+  { id: 'remind', label: 'Remind', help: 'Shows what’s due; you confirm the real amount.' },
+  { id: 'fixed', label: 'Fixed', help: 'Adds the same amount every month.' },
   { id: 'off', label: 'Off', help: 'This account doesn’t earn interest.' },
 ];
 
@@ -70,14 +72,11 @@ export function InterestFields({ advanced, form, onChange }: { advanced: boolean
   const boost = preset?.product.interest?.boost;
   const input = `w-full min-w-0 rounded-xl border px-3 py-2.5 text-sm outline-none ${advanced ? 'bg-slate-900 border-slate-700 focus:border-violet-500' : 'bg-slate-50 border-slate-200 focus:border-emerald-500'}`;
   const label = 'block text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1';
-  const segment = (active: boolean) => `rounded-lg px-2 py-2 text-xs font-bold transition-colors ${active ? (advanced ? 'bg-violet-600 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-200'}`;
   const on = form.interest_mode !== 'off';
 
   return <div className={`space-y-3 rounded-2xl border p-3.5 ${advanced ? 'border-slate-700 bg-slate-900/40' : 'border-slate-100 bg-slate-50/60'}`}>
     <div className="flex items-center gap-2 text-sm font-bold"><BadgePercent size={16} className={advanced ? 'text-violet-300' : 'text-emerald-600'} /> Earns interest</div>
-    <div className={`grid grid-cols-4 gap-1 rounded-xl p-1 ${advanced ? 'bg-slate-800' : 'bg-slate-100'}`}>
-      {MODES.map(mode => <button type="button" key={mode.id} onClick={() => onChange({ interest_mode: mode.id })} className={segment(form.interest_mode === mode.id)}>{mode.label}</button>)}
-    </div>
+    <Segmented label="Interest mode" size="sm" value={form.interest_mode} onChange={mode => onChange({ interest_mode: mode })} options={MODES.map(mode => ({ value: mode.id, label: mode.label }))} />
     <p className="text-[11px] text-slate-500">{MODES.find(mode => mode.id === form.interest_mode)?.help}</p>
 
     {on && form.interest_mode === 'fixed' && <div className="grid grid-cols-[1fr_1fr] gap-3">
@@ -92,9 +91,7 @@ export function InterestFields({ advanced, form, onChange }: { advanced: boolean
       </div>
       <div className="grid grid-cols-[1fr_1fr] gap-3">
         <div><label className={label}>Credited</label>
-          <div className={`grid grid-cols-[1fr_1fr] gap-1 rounded-xl p-1 ${advanced ? 'bg-slate-800' : 'bg-slate-100'}`}>
-            {['daily', 'monthly'].map(frequency => <button type="button" key={frequency} onClick={() => onChange({ interest_frequency: frequency })} className={segment(form.interest_frequency === frequency)}>{frequency === 'daily' ? 'Daily' : 'Monthly'}</button>)}
-          </div>
+          <Segmented label="Credited" size="sm" value={form.interest_frequency} onChange={frequency => onChange({ interest_frequency: frequency })} options={[{ value: 'daily', label: 'Daily' }, { value: 'monthly', label: 'Monthly' }]} />
         </div>
         {(form.interest_frequency === 'monthly' || form.interest_mode === 'remind') && <div><label className={label}>{form.interest_mode === 'remind' ? 'Remind on day' : 'Credit day'}</label><input type="number" min="1" max="31" value={form.interest_day} onChange={event => onChange({ interest_day: event.target.value })} className={input} placeholder="31 = month end" /></div>}
       </div>
@@ -108,7 +105,7 @@ export function InterestFields({ advanced, form, onChange }: { advanced: boolean
       </div>}
 
       <button type="button" onClick={() => setMore(value => !value)} className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"><ChevronDown size={14} className={`transition-transform ${more ? 'rotate-180' : ''}`} /> Boosts, tiers, and minimum balance</button>
-      {more && <div className="space-y-3">
+      <AnimatePresence initial={false}>{more && <motion.div key="more" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }} className="space-y-3 overflow-hidden">
         <div className="grid grid-cols-[1fr_1fr] gap-3">
           <div><label className={label}>Boost (+% p.a.)</label><input type="number" min="0" step="0.01" inputMode="decimal" value={form.interest_boost_pa} onChange={event => onChange({ interest_boost_pa: event.target.value })} className={input} placeholder="e.g. 12" /></div>
           <div><label className={label}>Boost cap (₱)</label><input type="number" min="0" inputMode="decimal" value={form.interest_cap} onChange={event => onChange({ interest_cap: event.target.value })} className={input} placeholder="No limit" /></div>
@@ -126,7 +123,7 @@ export function InterestFields({ advanced, form, onChange }: { advanced: boolean
           </div>)}
           <button type="button" onClick={() => onChange({ interest_tiers: [...form.interest_tiers, { from: '', rate_pa: '' }] })} className={`text-xs font-bold ${advanced ? 'text-violet-300' : 'text-emerald-700'}`}>+ Add a tier</button>
         </div>
-      </div>}
+      </motion.div>}</AnimatePresence>
     </>}
   </div>;
 }

@@ -8,6 +8,8 @@ import { format } from 'date-fns';
 import { celebrateCompletedGoals } from '../components/Celebrations';
 import { CountUp } from '../components/CountUp';
 import { Suggestions } from '../components/Suggestions';
+import { MilestoneBar } from '../components/MilestoneBar';
+import { IponCard } from '../components/IponCard';
 
 type ChartRange = '1w' | '1m' | '6m' | '1y';
 
@@ -70,7 +72,11 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
     emerald: { hero: 'from-emerald-500 to-teal-400 border-emerald-400', line: '#10B981', lightText: 'text-emerald-50', soft: 'from-emerald-50 to-teal-50/50 border-emerald-100', label: 'text-emerald-600' },
     ocean: { hero: 'from-blue-600 to-cyan-500 border-blue-500', line: '#2563EB', lightText: 'text-blue-50', soft: 'from-blue-50 to-cyan-50/50 border-blue-100', label: 'text-blue-600' },
     violet: { hero: 'from-violet-600 to-fuchsia-500 border-violet-500', line: '#8B5CF6', lightText: 'text-violet-50', soft: 'from-violet-50 to-fuchsia-50/50 border-violet-100', label: 'text-violet-600' },
-    sunset: { hero: 'from-rose-600 to-orange-400 border-rose-500', line: '#E11D48', lightText: 'text-rose-50', soft: 'from-rose-50 to-orange-50/50 border-rose-100', label: 'text-rose-600' }
+    sunset: { hero: 'from-rose-600 to-orange-400 border-rose-500', line: '#E11D48', lightText: 'text-rose-50', soft: 'from-rose-50 to-orange-50/50 border-rose-100', label: 'text-rose-600' },
+    mango: { hero: 'from-amber-500 to-orange-400 border-amber-400', line: '#F59E0B', lightText: 'text-amber-50', soft: 'from-amber-50 to-orange-50/50 border-amber-100', label: 'text-amber-600' },
+    sakura: { hero: 'from-pink-500 to-rose-400 border-pink-400', line: '#EC4899', lightText: 'text-pink-50', soft: 'from-pink-50 to-rose-50/50 border-pink-100', label: 'text-pink-600' },
+    matcha: { hero: 'from-green-600 to-lime-500 border-green-500', line: '#65A30D', lightText: 'text-lime-50', soft: 'from-lime-50 to-green-50/50 border-lime-100', label: 'text-green-700' },
+    midnight: { hero: 'from-indigo-700 to-slate-700 border-indigo-600', line: '#4F46E5', lightText: 'text-indigo-50', soft: 'from-indigo-50 to-slate-50/50 border-indigo-100', label: 'text-indigo-600' }
   }[accentColor];
 
   const accountColor = (account: any) => account.color || (String(account.type).toLowerCase() === 'card'
@@ -332,6 +338,8 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
           )}
         </div>
 
+        <IponCard onNavigate={onNavigate} />
+
         <Suggestions page="home" onNavigate={onNavigate} />
 
         {/* Financial Goals Overview */}
@@ -351,12 +359,7 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
                      <span className="font-medium text-slate-800 dark:text-slate-200">{goal.name}</span>
                      <span className="text-slate-500 dark:text-slate-400 font-bold">{progress}%</span>
                    </div>
-                   <div className="h-3 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden mb-2">
-                     <div 
-                       className={`h-full rounded-full transition-all ${goal.color === 'emerald' ? (isAdvanced ? 'bg-emerald-500' : 'bg-emerald-400') : (isAdvanced ? 'bg-violet-500' : 'bg-teal-500')}`} 
-                       style={{ width: `${progress}%` }} 
-                     />
-                   </div>
+                   <MilestoneBar goalId={goal.id} percent={progress} className="mb-2" fill={goal.color === 'emerald' ? (isAdvanced ? 'bg-emerald-500' : 'bg-emerald-400') : (isAdvanced ? 'bg-violet-500' : 'bg-teal-500')} />
                    <p className="text-xs text-slate-500 dark:text-slate-400 flex justify-between gap-2">
                      <span className={goal.progress?.status === 'behind' || goal.progress?.status === 'overdue' ? 'font-bold text-amber-600 dark:text-amber-300' : 'font-bold text-emerald-600 dark:text-emerald-400'}>{goal.progress ? paceLabel(goal.progress) : ''}</span>
                      <span>₱{goal.current.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / ₱{goal.target.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
@@ -415,8 +418,8 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
         </div>
 
         {/* Lower Main Content - 2 Column Grid */}
-        <div className="grid xl:grid-cols-2 gap-6">
-          <div className="space-y-6">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div className="min-w-0 space-y-6">
             {/* Wealth Portfolio Summary */}
             <div onClick={() => onNavigate?.('investments')} className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 cursor-pointer hover:shadow-md transition-shadow">
               <div className="flex items-center justify-between mb-4">
@@ -448,14 +451,14 @@ export function Home({ onNavigate, toggleChat }: { onNavigate?: (tab: string) =>
                 <h3 className="font-bold text-lg">Your Accounts</h3>
                 <button onClick={() => onNavigate?.('accounts')} className="text-sm font-medium text-emerald-500 dark:text-violet-400 hover:underline">View All</button>
               </div>
-              <div className="fg-stagger grid grid-cols-2 gap-4">
+              <div className="fg-stagger grid grid-cols-2 gap-3 sm:gap-4">
                 {data.accounts.map(acc => (
-                  <div key={acc.id} onClick={() => onNavigate?.('accounts')} className={`cursor-pointer rounded-3xl bg-gradient-to-br ${accountColor(acc)} p-5 text-white shadow-sm ring-1 ring-black/5 transition-transform hover:-translate-y-1 hover:shadow-lg`}>
+                  <div key={acc.id} onClick={() => onNavigate?.('accounts')} className={`min-w-0 cursor-pointer rounded-3xl bg-gradient-to-br ${accountColor(acc)} p-5 text-white shadow-sm ring-1 ring-black/5 transition-transform hover:-translate-y-1 hover:shadow-lg`}>
                     <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/20 bg-white/15 shadow-sm backdrop-blur-sm">
                       <Wallet className="w-6 h-6 text-white" />
                     </div>
-                    <p className="text-sm font-semibold text-white/80">{acc.name}</p>
-                    <p className="text-xl font-bold tracking-tight mt-1">₱{acc.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                    <p className="truncate text-sm font-semibold text-white/80">{acc.name}</p>
+                    <p className="truncate text-lg sm:text-xl font-bold tracking-tight mt-1">₱{acc.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                   </div>
                 ))}
               </div>

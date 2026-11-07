@@ -1,5 +1,6 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection } from '@capacitor-community/sqlite';
+import { evaluateRewards, planChallengeStart, planEquip, planLayout, planPurchase, rewardSummary, type RewardData } from './rewards';
 import { accountGoalSavings, addMonth, businessMetrics, entryId, goalProgress, isGoalError, localDate, parseList, planGoalContribution, planGoalWithdrawal, withWholeAccounts, categoryAliasGroup, dueOccurrences, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, isAutopayLiability, isIsoDate, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, ratesFromFrankfurter, resolveCategoryAlias, dueInterest, interestMode, interestSettings, isCardAccount, shareInterestWithGoals } from './sharedRules';
 
 type JsonRecord = Record<string, unknown>;
@@ -32,7 +33,7 @@ const collections: Record<string, string> = {
 };
 
 const syncTableCollections: Record<string, string> = {
-  accounts: 'accounts', transactions: 'transactions', categories: 'categories', goals: 'goals', portfolios: 'portfolios', portfolio_transactions: 'portfolio_transactions', liabilities: 'liabilities', career: 'career_profile', career_tasks: 'career_tasks', personal_notes: 'personal_notes', personal_routines: 'personal_routines', calendar_events: 'calendar_events', income_flows: 'income_flows', budget_presets: 'budget_presets', budgets: 'budgets', businesses: 'businesses', business_deals: 'business_deals', business_items: 'business_items', business_transactions: 'business_transactions', freelance_businesses: 'freelance_businesses', freelancing_services: 'freelancing_services', freelancing_invoices: 'freelancing_invoices', freelancing_time_logs: 'freelancing_time_logs',
+  accounts: 'accounts', transactions: 'transactions', categories: 'categories', goals: 'goals', portfolios: 'portfolios', portfolio_transactions: 'portfolio_transactions', liabilities: 'liabilities', career: 'career_profile', career_tasks: 'career_tasks', personal_notes: 'personal_notes', personal_routines: 'personal_routines', calendar_events: 'calendar_events', income_flows: 'income_flows', budget_presets: 'budget_presets', budgets: 'budgets', businesses: 'businesses', business_deals: 'business_deals', business_items: 'business_items', business_transactions: 'business_transactions', freelance_businesses: 'freelance_businesses', freelancing_services: 'freelancing_services', freelancing_invoices: 'freelancing_invoices', freelancing_time_logs: 'freelancing_time_logs', reward_events: 'reward_events', reward_challenges: 'reward_challenges', reward_profile: 'reward_profile',
 };
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
@@ -298,6 +299,100 @@ async function postDueRecurring() {
   }
 
   await postDueInterest();
+  await checkRewards();
+}
+
+// ---- Ipon rewards (same rules as the server) -------------------------------------
+async function rewardData(): Promise<RewardData> {
+  const { goals, accounts } = await goalContext();
+  let profile = await find('reward_profile', 1);
+  if (!profile) {
+    await insert('reward_profile', { pet_name: 'Mochi', equipped: {}, hatched_at: null, created_at: today() });
+    profile = await find('reward_profile', 1);
+  }
+  const [transactions, incomeFlows, budgets, challenges, events, sync] = await Promise.all([list('transactions'), list('income_flows'), list('budgets'), list('reward_challenges'), list('reward_events'), find('app_settings', 1)]);
+  return {
+    goals, accounts, transactions, incomeFlows, budgets, profile: profile ?? {},
+    challenges: challenges.map((row): JsonRecord => ({ ...row, params: typeof row.params === 'string' ? JSON.parse(row.params || '{}') : (row.params ?? {}) })).sort((a, b) => Number(a.id) - Number(b.id)) as any,
+    events: events.sort((a, b) => Number(a.id) - Number(b.id)) as any,
+    syncConnected: sync?.google_connected === true,
+  };
+}
+
+// The phone store has no unique index, so checks run one at a time.
+let rewardsRun: Promise<unknown> = Promise.resolve();
+function checkRewards() {
+  const run = rewardsRun.then(async () => {
+    const result = evaluateRewards(await rewardData(), today());
+    for (const baseline of result.baselines) {
+      const goal = await find('goals', baseline.goal_id);
+      if (goal && (goal.reward_baseline === undefined || goal.reward_baseline === null)) await replace('goals', baseline.goal_id, { ...goal, reward_baseline: baseline.percent });
+    }
+    const created = new Date().toISOString();
+    for (const award of result.awards) await insert('reward_events', { ...award, created_at: created });
+    for (const update of result.challengeUpdates) {
+      const challenge = await find('reward_challenges', update.id);
+      if (challenge && challenge.status === 'active') await replace('reward_challenges', update.id, { ...challenge, status: update.status, completed_at: update.completed_at });
+    }
+    return result;
+  });
+  rewardsRun = run.catch(() => undefined);
+  return run;
+}
+
+async function rewardsRoute(pathname: string, method: string, body: JsonRecord) {
+  if (pathname === '/api/rewards' && method === 'GET') {
+    const result = await checkRewards();
+    return json({ ...rewardSummary(await rewardData(), today()), new_events: result.awards });
+  }
+  if (pathname === '/api/rewards/buy' && method === 'POST') {
+    const plan = planPurchase(await rewardData(), String(body.item_id || ''), today());
+    if ('error' in plan) return json({ error: plan.error }, 400);
+    await insert('reward_events', { ...plan.event, created_at: new Date().toISOString() });
+    return json({ success: true });
+  }
+  if (pathname === '/api/rewards/equip' && method === 'POST') {
+    const plan = planEquip(await rewardData(), String(body.slot || ''), body.item_id ? String(body.item_id) : null);
+    if ('error' in plan) return json({ error: plan.error }, 400);
+    const profile = await find('reward_profile', 1);
+    if (profile) await replace('reward_profile', 1, { ...profile, equipped: plan.equipped });
+    return json({ success: true });
+  }
+  if (pathname === '/api/rewards/layout' && method === 'POST') {
+    const plan = planLayout(await rewardData(), body.layout);
+    if ('error' in plan) return json({ error: plan.error }, 400);
+    const profile = await find('reward_profile', 1);
+    if (profile) await replace('reward_profile', 1, { ...profile, equipped: plan.equipped });
+    return json({ success: true });
+  }
+  if (pathname === '/api/rewards/profile' && method === 'POST') {
+    await rewardData();
+    const profile = (await find('reward_profile', 1))!;
+    const next: JsonRecord = { ...profile };
+    if (body.pet_name !== undefined) {
+      const name = String(body.pet_name).trim().slice(0, 24);
+      if (!name) return json({ error: 'Give your pet a name.' }, 400);
+      next.pet_name = name;
+    }
+    if (body.hatched && !profile.hatched_at) next.hatched_at = today();
+    await replace('reward_profile', 1, next);
+    return json({ success: true });
+  }
+  if (pathname === '/api/rewards/challenges' && method === 'POST') {
+    const plan = planChallengeStart(await rewardData(), String(body.template || ''), today());
+    if ('error' in plan) return json({ error: plan.error }, 400);
+    let goalId = plan.linkGoalId;
+    if (plan.goal) goalId = await insert('goals', { name: plan.goal.name, target: plan.goal.target, saved: 0, date: plan.goal.date, color: plan.goal.color, icon: plan.goal.icon, sources: [], transactions: [], created_at: today(), reward_baseline: 0 });
+    const id = await insert('reward_challenges', { ...plan.challenge, params: { ...plan.challenge.params, start_saved: 0 }, goal_id: goalId, completed_at: null });
+    return json({ id, goal_id: goalId });
+  }
+  const cancel = pathname.match(/^\/api\/rewards\/challenges\/(\d+)\/cancel$/);
+  if (cancel && method === 'POST') {
+    const challenge = await find('reward_challenges', Number(cancel[1]));
+    if (challenge && challenge.status === 'active') await replace('reward_challenges', Number(cancel[1]), { ...challenge, status: 'cancelled' });
+    return json({ success: true });
+  }
+  return null;
 }
 
 /** Credits interest that's due (automatic and fixed modes) and grows goal savings held in those accounts. */
@@ -452,6 +547,7 @@ async function bumpDataVersion() {
 async function route(pathname: string, search: URLSearchParams, method: string, body: JsonRecord) {
   if (pathname === '/api/health') return json({ status: 'ok', platform: `${Capacitor.getPlatform()}-native` });
   if (method === 'GET') await ensureRecurringPosted().catch((error) => console.error('Recurring entries could not be posted.', error));
+  if (pathname.startsWith('/api/rewards')) { const handled = await rewardsRoute(pathname, method, body); if (handled) return handled; }
   if (pathname === '/api/system/sync/export' && method === 'GET') return json(await exportSyncSnapshot());
   if (pathname === '/api/system/sync/state') {
     const state = await syncState();
@@ -672,6 +768,11 @@ async function route(pathname: string, search: URLSearchParams, method: string, 
         await applyGoalContribution(record, plan);
       }
       if (failed) { await remove('goals', id); return json({ error: failed }, 400); }
+      // Milestone points count only progress made after the goal was set up.
+      const createdContext = await goalContext();
+      const made = createdContext.goals.find((item) => item.id === id);
+      const stored = await find('goals', id);
+      if (made && stored) await replace('goals', id, { ...stored, reward_baseline: goalProgress(made, createdContext.accounts).percent });
       if (body.autosave_amount) recurringCheckedOn = '';
       return json({ id });
     }

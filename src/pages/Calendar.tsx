@@ -5,6 +5,7 @@ import { GoalBuilder } from '../components/GoalBuilder';
 import { celebrate } from '../components/Celebrations';
 import { interestDay, interestFrequency, interestMode, localDate, monthlyInterestEstimate } from '../lib/sharedRules';
 import { Suggestions } from '../components/Suggestions';
+import { Segmented } from '../components/Segmented';
 
 export function Calendar({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const { themeMode, setFocusGoalId } = useStore();
@@ -313,17 +314,7 @@ export function Calendar({ onNavigate }: { onNavigate?: (tab: string) => void })
         </h2>
         
         <div className="flex gap-2 flex-wrap">
-          <div className={`flex rounded-xl p-1 text-sm font-bold ${isAdvanced ? 'bg-slate-900' : 'bg-slate-100'}`}>
-             {['all', 'bills', 'transactions', 'goals', 'notes'].map(f => (
-               <button 
-                 key={f}
-                 onClick={() => setFilter(f)}
-                 className={`px-3 py-1.5 rounded-lg transition-colors capitalize ${filter === f ? (isAdvanced ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}
-               >
-                 {f}
-               </button>
-             ))}
-          </div>
+          <Segmented label="Show" size="sm" fill={false} value={filter} onChange={setFilter} options={['all', 'bills', 'transactions', 'goals', 'notes'].map(value => ({ value, label: value[0].toUpperCase() + value.slice(1) }))} />
           <button 
             onClick={() => setIsAddNoteOpen(true)}
             className={`px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors flex items-center gap-2 ${isAdvanced ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}

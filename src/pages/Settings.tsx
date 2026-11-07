@@ -6,9 +6,10 @@ import { getByokSettings, saveByokSettings, testByokKey } from '../lib/byokAssis
 import { exportEverythingWorkbook } from '../lib/workbookExport';
 import { exportEverythingPdfStatement } from '../lib/export';
 import { GoogleSyncCard } from '../components/GoogleSyncCard';
+import { itemById } from '../lib/rewardsCatalog';
 
 export function Settings() {
-  const { themeMode, setThemeMode, accentColor, setAccentColor, hiddenTabs, toggleTabVisibility, triggerRefresh, aiEnabled, setAiEnabled, suggestionsEnabled, setSuggestionsEnabled, geminiSuggestions, setGeminiSuggestions, dismissedSuggestions, restoreSuggestions } = useStore();
+  const { themeMode, setThemeMode, accentColor, setAccentColor, hiddenTabs, toggleTabVisibility, triggerRefresh, aiEnabled, setAiEnabled, suggestionsEnabled, setSuggestionsEnabled, geminiSuggestions, setGeminiSuggestions, dismissedSuggestions, restoreSuggestions, rewards } = useStore();
   const isAdvanced = themeMode === 'advanced';
   // The mobile apps keep records in their own encrypted store, so the desktop .db file cannot be exported or imported there.
   const isNative = Capacitor.isNativePlatform();
@@ -18,7 +19,7 @@ export function Settings() {
   const [byokStatus, setByokStatus] = useState<'idle' | 'testing' | 'connected' | 'error'>('idle');
   const [byokError, setByokError] = useState('');
   const moduleOptions = [
-    ['accounts', 'Accounts'], ['liabilities', 'Liabilities'], ['plans', 'Plans'], ['calendar', 'Calendar'],
+    ['rewards', 'Ipon (pet & points)'], ['accounts', 'Accounts'], ['liabilities', 'Liabilities'], ['plans', 'Plans'], ['calendar', 'Calendar'],
     ['investments', 'Investments'], ['career', 'Career'], ['business', 'Business'], ['freelancing', 'Freelancing'],
     ['taxes', 'Taxes'], ['categories', 'Categories'], ['personal', 'Personal space']
   ];
@@ -26,8 +27,13 @@ export function Settings() {
     { id: 'emerald' as const, label: 'Emerald', swatch: 'from-emerald-400 to-teal-500' },
     { id: 'ocean' as const, label: 'Ocean', swatch: 'from-blue-500 to-cyan-500' },
     { id: 'violet' as const, label: 'Violet', swatch: 'from-violet-500 to-fuchsia-500' },
-    { id: 'sunset' as const, label: 'Sunset', swatch: 'from-rose-500 to-orange-400' }
+    { id: 'sunset' as const, label: 'Sunset', swatch: 'from-rose-500 to-orange-400' },
+    { id: 'mango' as const, label: 'Mango', swatch: 'from-amber-400 to-orange-500', item: 'theme-mango' },
+    { id: 'sakura' as const, label: 'Sakura', swatch: 'from-pink-400 to-rose-400', item: 'theme-sakura' },
+    { id: 'matcha' as const, label: 'Matcha', swatch: 'from-lime-400 to-green-500', item: 'theme-matcha' },
+    { id: 'midnight' as const, label: 'Midnight', swatch: 'from-indigo-500 to-slate-700', item: 'theme-midnight' }
   ];
+  const ownedRewards = new Set(rewards?.owned ?? []);
 
   const handleExport = () => {
     window.location.href = '/api/system/export';
@@ -112,7 +118,7 @@ export function Settings() {
           <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
             <div className="mb-3 flex items-center gap-2"><Palette size={18} /><div><p className="font-bold">Accent color</p><p className="text-sm text-slate-500">Personalize navigation, highlights, and primary actions.</p></div></div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {accentOptions.map(option => <button key={option.id} onClick={() => setAccentColor(option.id)} className={`rounded-2xl border p-3 text-left transition-all ${accentColor === option.id ? (isAdvanced ? 'border-white/40 bg-slate-700' : 'border-slate-400 bg-slate-50 shadow-sm') : (isAdvanced ? 'border-slate-700 hover:border-slate-500' : 'border-slate-200 hover:border-slate-300')}`}><span className={`mb-2 block h-8 rounded-xl bg-gradient-to-r ${option.swatch}`} /><span className="text-xs font-bold">{option.label}</span>{accentColor === option.id && <CheckCircle2 size={14} className="float-right mt-0.5 text-emerald-500" />}</button>)}
+              {accentOptions.map(option => { const locked = 'item' in option && !ownedRewards.has(String(option.item)); const cost = 'item' in option ? itemById(String(option.item))?.cost : 0; return <button key={option.id} disabled={locked} title={locked ? `Unlock in Ipon for ${cost} points` : undefined} onClick={() => setAccentColor(option.id)} className={`relative rounded-2xl border p-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60 ${accentColor === option.id ? (isAdvanced ? 'border-white/40 bg-slate-700' : 'border-slate-400 bg-slate-50 shadow-sm') : (isAdvanced ? 'border-slate-700 hover:border-slate-500' : 'border-slate-200 hover:border-slate-300')}`}><span className={`mb-2 block h-8 rounded-xl bg-gradient-to-r ${option.swatch}`} /><span className="text-xs font-bold">{option.label}</span>{accentColor === option.id && <CheckCircle2 size={14} className="float-right mt-0.5 text-emerald-500" />}{locked && <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-slate-900/80 px-1.5 py-0.5 text-[10px] font-bold text-white"><LockKeyhole size={10} /> {cost}</span>}</button>; })}
             </div>
           </div>
 

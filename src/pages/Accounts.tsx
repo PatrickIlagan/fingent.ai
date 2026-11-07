@@ -10,6 +10,7 @@ import { exportExcel } from '../lib/workbookExport';
 import { celebrate } from '../components/Celebrations';
 import { CountUp } from '../components/CountUp';
 import { Suggestions } from '../components/Suggestions';
+import { Segmented } from '../components/Segmented';
 
 const getIconForType = (type: string) => {
   if (type.toLowerCase() === 'card' || type.toLowerCase() === 'credit') return CreditCard;
@@ -753,20 +754,7 @@ export function Accounts({ category, onNavigate }: { category?: string, onNaviga
               </div>
 
               <div className="space-y-4">
-                <div className="flex rounded-xl overflow-hidden border dark:border-slate-700">
-                  <button 
-                    onClick={() => setNewTx(prev => ({ ...prev, type: 'expense', category: prev.category === 'Income' ? 'Expenses' : prev.category }))}
-                    className={`flex-1 py-2 font-medium text-sm transition-colors ${newTx.type === 'expense' ? (isAdvanced ? 'bg-rose-500/20 text-rose-400' : 'bg-rose-50 text-rose-600') : 'hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-                  >
-                    Expense
-                  </button>
-                  <button 
-                    onClick={() => setNewTx(prev => ({ ...prev, type: 'income', category: prev.category === 'Expenses' ? 'Income' : prev.category }))}
-                    className={`flex-1 py-2 font-medium text-sm transition-colors ${newTx.type === 'income' ? (isAdvanced ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-50 text-emerald-600') : 'hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-                  >
-                    Income
-                  </button>
-                </div>
+                <Segmented label="Transaction type" value={newTx.type} onChange={type => setNewTx(prev => ({ ...prev, type, category: type === 'income' ? (prev.category === 'Expenses' ? 'Income' : prev.category) : (prev.category === 'Income' ? 'Expenses' : prev.category) }))} options={[{ value: 'expense', label: 'Expense', tone: 'rose' }, { value: 'income', label: 'Income', tone: 'emerald' }]} />
 
                 <div>
                   <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Amount</label>

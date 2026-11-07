@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Car, Check, ChevronRight, Home, Laptop, Plane, ShieldAlert, Target } from 'lucide-react';
+import { Car, Check, ChevronRight, Home, Laptop, Plane, ShieldAlert, Target, PiggyBank } from 'lucide-react';
 import { daysBetween, isCardAccount, localDate } from '../lib/sharedRules';
 import { Dialog, dialogField, dialogPrimary, dialogSecondary } from './RecordDialogs';
 import { celebrate } from './Celebrations';
+import { Segmented } from './Segmented';
 
-export const GOAL_ICONS = { Target, Plane, Laptop, ShieldAlert, Car, Home } as const;
+export const GOAL_ICONS = { Target, Plane, Laptop, ShieldAlert, Car, Home, PiggyBank } as const;
 const COLORS = ['emerald', 'blue', 'violet', 'amber', 'rose', 'fuchsia'] as const;
 const SWATCH: Record<string, string> = { emerald: 'bg-emerald-500', blue: 'bg-blue-500', violet: 'bg-violet-500', amber: 'bg-amber-500', rose: 'bg-rose-500', fuchsia: 'bg-fuchsia-500' };
 
@@ -165,9 +166,7 @@ export function GoalBuilder({ advanced, accounts, goal, defaultDate, onSaved, on
                 <div><p className="font-bold">{account.name}</p><p className="text-xs text-slate-500">{account.type} · {peso(account.balance)}{others.length && !takenWhole ? ` · ${peso(others.reduce((sum: number, entry: any) => sum + entry.amount, 0))} counts toward other goals` : ''}</p></div>
                 {takenWhole ? <span className="text-xs font-bold text-slate-500">Counts fully toward {takenWhole.goal_name}</span>
                   : lockedPart ? <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">{peso(Number(link.amount))} saved here</span>
-                  : <div className={`flex rounded-xl p-1 text-xs font-bold ${advanced ? 'bg-slate-900' : 'bg-slate-100'}`}>
-                    {([['off', 'Not used'], ...(editing ? [] : [['part', 'Part of it']]), ['whole', 'All of it']] as [Link['mode'], string][]).map(([mode, text]) => <button key={mode} type="button" disabled={mode === 'whole' && others.length > 0} onClick={() => setLink(account.id, { mode })} className={`px-3 py-1.5 rounded-lg disabled:opacity-40 ${link.mode === mode ? (advanced ? 'bg-slate-700 text-white' : 'bg-white shadow-sm') : 'text-slate-500'}`}>{text}</button>)}
-                  </div>}
+                  : <Segmented label={`How ${account.name} counts`} size="sm" fill={false} value={link.mode} onChange={mode => setLink(account.id, { mode })} options={([['off', 'Not used'], ...(editing ? [] : [['part', 'Part of it']]), ['whole', 'All of it']] as [Link['mode'], string][]).map(([mode, text]) => ({ value: mode, label: text, disabled: mode === 'whole' && others.length > 0 }))} />}
               </div>
               {link.mode === 'part' && !lockedPart && <div className="relative mt-3"><span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-slate-400">₱</span>
                 <input type="number" min="0" value={link.amount} onChange={event => setLink(account.id, { amount: event.target.value })} placeholder="How much of it is for this goal?" className={`${input} pl-9 pr-4 py-3`} /></div>}

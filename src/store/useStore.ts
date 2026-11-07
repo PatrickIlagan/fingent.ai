@@ -1,7 +1,10 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
-export type AccentColor = 'emerald' | 'ocean' | 'violet' | 'sunset';
+import type { rewardSummary } from '../lib/rewards';
+
+export type AccentColor = 'emerald' | 'ocean' | 'violet' | 'sunset' | 'mango' | 'sakura' | 'matcha' | 'midnight';
+export type RewardsSnapshot = ReturnType<typeof rewardSummary>;
 
 export interface BusinessData {
   id: number;
@@ -41,6 +44,9 @@ interface AppState {
   dismissedSuggestions: string[];
   dismissSuggestion: (id: string) => void;
   restoreSuggestions: () => void;
+  /** Latest Ipon summary, refreshed after changes. */
+  rewards: RewardsSnapshot | null;
+  setRewards: (rewards: RewardsSnapshot | null) => void;
 }
 
 export const useStore = create<AppState>()(persist((set) => ({
@@ -66,6 +72,8 @@ export const useStore = create<AppState>()(persist((set) => ({
   setGeminiSuggestions: (enabled) => set({ geminiSuggestions: enabled }),
   dismissedSuggestions: [],
   restoreSuggestions: () => set({ dismissedSuggestions: [] }),
+  rewards: null,
+  setRewards: (rewards) => set({ rewards }),
   dismissSuggestion: (id) => set((state) => ({ dismissedSuggestions: [...state.dismissedSuggestions.filter(item => item !== id), id].slice(-200) })),
 }), {
   name: 'fingent-preferences',

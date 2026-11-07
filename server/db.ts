@@ -140,6 +140,7 @@ async function initDb(db: any) {
     await db.exec(`ALTER TABLE goals ADD COLUMN ${column};`).catch(() => {});
   }
   await db.exec(`ALTER TABLE liabilities ADD COLUMN account_id INTEGER;`).catch(() => {});
+  await db.exec(`ALTER TABLE goals ADD COLUMN reward_baseline REAL;`).catch(() => {});
   // Interest settings (see `dueInterest` in sharedRules).
   for (const column of 'interest_tiers TEXT, interest_min_balance REAL, interest_boost_pa REAL, interest_boost_until TEXT, interest_cap REAL, interest_frequency TEXT, interest_day INTEGER, interest_mode TEXT, interest_fixed_amount REAL, interest_tax_rate REAL, interest_last_date TEXT'.split(', ')) {
     await db.exec(`ALTER TABLE accounts ADD COLUMN ${column};`).catch(() => {});
@@ -213,7 +214,8 @@ async function initDb(db: any) {
       autosave_next_amount REAL,
       autosave_date TEXT,
       autosave_from_account_id INTEGER,
-      autosave_account_id INTEGER
+      autosave_account_id INTEGER,
+      reward_baseline REAL
     );
 
     CREATE TABLE IF NOT EXISTS portfolios (
@@ -424,6 +426,37 @@ async function initDb(db: any) {
       description TEXT,
       FOREIGN KEY(service_id) REFERENCES freelancing_services(id)
     );
+    -- Ipon rewards: a points ledger (one row per award or purchase), challenges, and the pet.
+    CREATE TABLE IF NOT EXISTS reward_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ref_key TEXT NOT NULL UNIQUE,
+      kind TEXT,
+      points INTEGER NOT NULL,
+      label TEXT,
+      date TEXT,
+      created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS reward_challenges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      template TEXT NOT NULL,
+      title TEXT,
+      params TEXT,
+      goal_id INTEGER,
+      started_at TEXT,
+      ends_at TEXT,
+      status TEXT DEFAULT 'active',
+      completed_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS reward_profile (
+      id INTEGER PRIMARY KEY,
+      pet_name TEXT,
+      equipped TEXT,
+      hatched_at TEXT,
+      created_at TEXT
+    );
+
     -- Device-only settings (sync state, Google sign-in). Never part of a sync snapshot.
     CREATE TABLE IF NOT EXISTS app_settings (
       key TEXT PRIMARY KEY,

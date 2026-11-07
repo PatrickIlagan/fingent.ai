@@ -11,6 +11,7 @@ import { CountUp } from '../components/CountUp';
 const compactNumber = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 import { celebrate } from '../components/Celebrations';
 import { Suggestions } from '../components/Suggestions';
+import { Segmented } from '../components/Segmented';
 
 const getSymbol = (currency?: string) => {
   if (currency === 'USD') return '$';
@@ -514,16 +515,7 @@ export function Investments({ category, onNavigate }: { category?: string, onNav
                   </select>
                </div>
                
-               <div className="flex bg-slate-100 dark:bg-slate-900 rounded-lg p-1 mb-4">
-                 <button 
-                    className={`flex-1 py-1.5 text-xs font-medium rounded-md ${txInputMode === 'shares' ? 'bg-white dark:bg-slate-800 shadow' : 'text-slate-500'}`}
-                    onClick={() => { setTxInputMode('shares'); setNewTx({...newTx, totalAmount: ''}); }}
-                 >By Shares</button>
-                 <button 
-                    className={`flex-1 py-1.5 text-xs font-medium rounded-md ${txInputMode === 'total' ? 'bg-white dark:bg-slate-800 shadow' : 'text-slate-500'}`}
-                    onClick={() => { setTxInputMode('total'); setNewTx({...newTx, amount: ''}); }}
-                 >By Total Invested</button>
-               </div>
+               <Segmented label="Enter by" size="sm" className="mb-4" value={txInputMode} onChange={mode => { setTxInputMode(mode); setNewTx(mode === 'shares' ? { ...newTx, totalAmount: '' } : { ...newTx, amount: '' }); }} options={[{ value: 'shares', label: 'By shares' }, { value: 'total', label: 'By total invested' }]} />
                <div className="grid grid-cols-2 gap-4">
                  {txInputMode === 'total' ? (
                    <div>

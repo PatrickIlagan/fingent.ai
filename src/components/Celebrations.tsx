@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Check, Trophy } from 'lucide-react';
+import { Check, Sparkles, Trophy } from 'lucide-react';
+import { itemById } from '../lib/rewardsCatalog';
 import { useStore } from '../store/useStore';
 
-type Celebration = { id: number; title: string; message?: string; kind: 'success' | 'goal' };
+type Celebration = { id: number; title: string; message?: string; kind: 'success' | 'goal' | 'points' };
 const EVENT = 'fingent-celebrate';
 const CELEBRATED_GOALS = 'fingent-celebrated-goals';
 
@@ -24,7 +25,16 @@ export function celebrateCompletedGoals(goals: { id: number; name: string; progr
 
 const CONFETTI_COLORS = ['#10b981', '#8b5cf6', '#f59e0b', '#f43f5e', '#0ea5e9', '#14b8a6'];
 
-function Confetti() {
+/** The burst shape for each celebration effect bought in Ipon. */
+function pieceShape(effect: string, index: number, size: number, color: string) {
+  if (effect === 'coins') return { width: size * 1.5, height: size * 1.5, background: 'radial-gradient(circle at 35% 35%, #fff3b0, #f59e0b 60%, #b45309)', borderRadius: 999 };
+  if (effect === 'hearts') return { width: size * 1.6, height: size * 1.6, background: ['#f43f5e', '#ec4899', '#fb7185'][index % 3], clipPath: 'path("M8 14 C3 10 0 7 0 4 C0 1.5 2 0 4 0 C5.6 0 7 1 8 2.4 C9 1 10.4 0 12 0 C14 0 16 1.5 16 4 C16 7 13 10 8 14 Z")' };
+  if (effect === 'stars') return { width: size * 1.7, height: size * 1.7, background: ['#fbbf24', '#fde047', '#a78bfa'][index % 3], clipPath: 'polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)' };
+  if (effect === 'petals') return { width: size * 1.2, height: size * 1.8, background: ['#fbcfe8', '#f9a8d4', '#fce7f3'][index % 3], borderRadius: '50% 50% 50% 50% / 70% 70% 30% 30%' };
+  return null;
+}
+
+function Confetti({ effect }: { effect: string; key?: string | number }) {
   const pieces = useMemo(() => Array.from({ length: 36 }, (_, index) => {
     const angle = (Math.PI * 2 * index) / 36 + Math.random() * 0.4;
     const distance = 120 + Math.random() * 160;
@@ -41,7 +51,7 @@ function Confetti() {
   }), []);
   return <div className="pointer-events-none fixed inset-0 z-[65] overflow-hidden">
     {pieces.map((piece, index) => (
-      <motion.span key={index} className="absolute left-1/2 top-[38%]" style={{ width: piece.size, height: piece.round ? piece.size : piece.size * 0.45, background: piece.color, borderRadius: piece.round ? 999 : 2 }}
+      <motion.span key={index} className="absolute left-1/2 top-[38%]" style={pieceShape(effect, index, piece.size, piece.color) ?? { width: piece.size, height: piece.round ? piece.size : piece.size * 0.45, background: piece.color, borderRadius: piece.round ? 999 : 2 }}
         initial={{ x: 0, y: 0, opacity: 1, rotate: 0, scale: 0.6 }}
         animate={{ x: piece.x, y: [0, piece.rise, piece.rise + 260], opacity: [1, 1, 0], rotate: piece.rotate, scale: 1 }}
         transition={{ duration: piece.duration, delay: piece.delay, ease: 'easeOut', times: [0, 0.35, 1] }} />
@@ -54,6 +64,7 @@ export function Celebrations() {
   const [items, setItems] = useState<Celebration[]>([]);
   const reduceMotion = useReducedMotion();
   const advanced = useStore(state => state.themeMode === 'advanced');
+  const effect = useStore(state => itemById(state.rewards?.equipped.effect)?.value ?? 'classic');
 
   useEffect(() => {
     const onCelebrate = (event: Event) => {
@@ -74,8 +85,8 @@ export function Celebrations() {
             transition={{ type: 'spring', stiffness: 420, damping: 30 }}
             className={`pointer-events-auto flex w-full max-w-sm items-center gap-3 rounded-2xl border px-4 py-3 shadow-xl backdrop-blur ${advanced ? 'border-slate-700 bg-slate-800/95 text-white' : 'border-emerald-100 bg-white/95 text-slate-900'}`}>
             <motion.span initial={{ scale: 0, rotate: -45 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 500, damping: 16, delay: 0.08 }}
-              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white ${item.kind === 'goal' ? 'bg-gradient-to-br from-amber-400 to-rose-500' : 'bg-gradient-to-br from-emerald-400 to-teal-500'}`}>
-              {item.kind === 'goal' ? <Trophy size={18} /> : <Check size={18} strokeWidth={3} />}
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white ${item.kind === 'goal' ? 'bg-gradient-to-br from-amber-400 to-rose-500' : item.kind === 'points' ? 'bg-gradient-to-br from-amber-300 to-pink-400' : 'bg-gradient-to-br from-emerald-400 to-teal-500'}`}>
+              {item.kind === 'goal' ? <Trophy size={18} /> : item.kind === 'points' ? <Sparkles size={18} /> : <Check size={18} strokeWidth={3} />}
             </motion.span>
             <div className="min-w-0">
               <p className="font-bold leading-tight">{item.title}</p>
@@ -85,6 +96,6 @@ export function Celebrations() {
         ))}
       </AnimatePresence>
     </div>
-    {!reduceMotion && <AnimatePresence>{items.filter(item => item.kind === 'goal').map(item => <Confetti key={item.id} />)}</AnimatePresence>}
+    {!reduceMotion && <AnimatePresence>{items.filter(item => item.kind === 'goal').map(item => <Confetti key={item.id} effect={effect} />)}</AnimatePresence>}
   </>;
 }

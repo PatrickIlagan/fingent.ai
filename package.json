@@ -21,6 +21,8 @@
     "ios:open": "cap open ios"
   },
   "dependencies": {
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/share": "^8.0.3",
     "archiver": "^8.0.0",
     "better-sqlite3-multiple-ciphers": "^12.11.1",
     "express": "^4.21.2",
@@ -56,8 +58,8 @@
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "recharts": "^3.9.2",
-    "tailwindcss": "^4.1.14",
     "tailwind-merge": "^3.6.0",
+    "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3",

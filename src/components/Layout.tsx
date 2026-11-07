@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Home, Calendar, Briefcase, Bot, PieChart, Settings, CreditCard, Clock, Receipt, Target, ChevronDown, ChevronRight, Building, FileText, Download, ArrowLeft, Megaphone, Package, ShoppingCart, Activity, Users, DollarSign, TrendingUp, Tags, UserRound, FileSpreadsheet, Menu, MoreHorizontal, X } from 'lucide-react';
+import { Home, Calendar, Briefcase, Bot, PieChart, Settings, CreditCard, Clock, Receipt, Target, ChevronDown, ChevronRight, Building, FileText, Download, ArrowLeft, Megaphone, Package, ShoppingCart, Activity, Users, DollarSign, TrendingUp, Tags, UserRound, FileSpreadsheet, Menu, MoreHorizontal, X, PawPrint } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { exportEverythingWorkbook } from '../lib/workbookExport';
@@ -10,7 +10,11 @@ const accentStyles = {
   emerald: { gradient: 'from-emerald-400 to-teal-500', solid: 'bg-emerald-500 hover:bg-emerald-600', soft: 'bg-emerald-100 text-emerald-800', darkSoft: 'bg-emerald-500/20 text-emerald-300', text: 'text-emerald-600', darkText: 'text-emerald-400', shadow: 'shadow-emerald-500/40', page: 'from-emerald-50 via-white to-teal-50', border: 'border-emerald-100' },
   ocean: { gradient: 'from-blue-500 to-cyan-500', solid: 'bg-blue-600 hover:bg-blue-700', soft: 'bg-blue-100 text-blue-800', darkSoft: 'bg-blue-500/20 text-blue-300', text: 'text-blue-600', darkText: 'text-blue-400', shadow: 'shadow-blue-500/40', page: 'from-blue-50 via-white to-cyan-50', border: 'border-blue-100' },
   violet: { gradient: 'from-violet-500 to-fuchsia-500', solid: 'bg-violet-600 hover:bg-violet-700', soft: 'bg-violet-100 text-violet-800', darkSoft: 'bg-violet-500/20 text-violet-300', text: 'text-violet-600', darkText: 'text-violet-400', shadow: 'shadow-violet-500/40', page: 'from-violet-50 via-white to-fuchsia-50', border: 'border-violet-100' },
-  sunset: { gradient: 'from-rose-500 to-orange-400', solid: 'bg-rose-600 hover:bg-rose-700', soft: 'bg-rose-100 text-rose-800', darkSoft: 'bg-rose-500/20 text-rose-300', text: 'text-rose-600', darkText: 'text-rose-400', shadow: 'shadow-rose-500/40', page: 'from-rose-50 via-white to-orange-50', border: 'border-rose-100' }
+  sunset: { gradient: 'from-rose-500 to-orange-400', solid: 'bg-rose-600 hover:bg-rose-700', soft: 'bg-rose-100 text-rose-800', darkSoft: 'bg-rose-500/20 text-rose-300', text: 'text-rose-600', darkText: 'text-rose-400', shadow: 'shadow-rose-500/40', page: 'from-rose-50 via-white to-orange-50', border: 'border-rose-100' },
+  mango: { gradient: 'from-amber-400 to-orange-500', solid: 'bg-amber-500 hover:bg-amber-600', soft: 'bg-amber-100 text-amber-800', darkSoft: 'bg-amber-500/20 text-amber-300', text: 'text-amber-600', darkText: 'text-amber-400', shadow: 'shadow-amber-500/40', page: 'from-amber-50 via-white to-orange-50', border: 'border-amber-100' },
+  sakura: { gradient: 'from-pink-400 to-rose-400', solid: 'bg-pink-500 hover:bg-pink-600', soft: 'bg-pink-100 text-pink-800', darkSoft: 'bg-pink-500/20 text-pink-300', text: 'text-pink-600', darkText: 'text-pink-400', shadow: 'shadow-pink-500/40', page: 'from-pink-50 via-white to-rose-50', border: 'border-pink-100' },
+  matcha: { gradient: 'from-lime-400 to-green-500', solid: 'bg-green-600 hover:bg-green-700', soft: 'bg-lime-100 text-green-800', darkSoft: 'bg-lime-500/20 text-lime-300', text: 'text-green-700', darkText: 'text-lime-400', shadow: 'shadow-lime-500/40', page: 'from-lime-50 via-white to-green-50', border: 'border-lime-100' },
+  midnight: { gradient: 'from-indigo-500 to-slate-700', solid: 'bg-indigo-600 hover:bg-indigo-700', soft: 'bg-indigo-100 text-indigo-800', darkSoft: 'bg-indigo-500/20 text-indigo-300', text: 'text-indigo-600', darkText: 'text-indigo-400', shadow: 'shadow-indigo-500/40', page: 'from-indigo-50 via-white to-slate-100', border: 'border-indigo-100' }
 };
 
 export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any) {
@@ -24,6 +28,7 @@ export function Layout({ children, currentTab, setCurrentTab, toggleChat }: any)
   
   let tabs = [
     { id: 'home', icon: Home, label: 'Home' },
+    { id: 'rewards', icon: PawPrint, label: 'Ipon' },
     { 
       id: 'accounts', 
       icon: CreditCard, 

@@ -4,6 +4,7 @@ import fsModule from "fs";
 import crypto from "crypto";
 import path from "path";
 import os from "os";
+import { evaluateRewards, planChallengeStart, planEquip, planLayout, planPurchase, rewardSummary, type RewardData } from "./src/lib/rewards";
 import { closeDb, getDataDir, getDb, lockDatabase, unlockDatabase, validateDatabaseFile } from "./server/db";
 import { accountGoalSavings, addMonth, isGoalError, businessMetrics, categoryAliasGroup, dueOccurrences, entryId, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, goalProgress, localDate, parseList, planGoalContribution, planGoalWithdrawal, ratesFromFrankfurter, withWholeAccounts, isAutopayLiability, isIsoDate, dueInterest, interestMode, interestSettings, isCardAccount, shareInterestWithGoals, INTEREST_FIELDS, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, resolveCategoryAlias as resolveCategoryLabel } from "./src/lib/sharedRules";
 // yahoo-finance2 exposes its constructor as CommonJS's `.default`. Using an
@@ -138,6 +139,38 @@ async function postDueRecurring(db: any) {
   }
 
   await postDueInterest(db);
+  await checkRewards(db);
+}
+
+// ---- Ipon rewards ----------------------------------------------------------------
+async function rewardData(db: any): Promise<RewardData> {
+  const { goals, accounts } = await goalContext(db);
+  let profile = await db.get("SELECT * FROM reward_profile WHERE id = 1");
+  if (!profile) {
+    await db.run("INSERT OR IGNORE INTO reward_profile (id, pet_name, equipped, created_at) VALUES (1, 'Mochi', '{}', ?)", [today()]);
+    profile = await db.get("SELECT * FROM reward_profile WHERE id = 1");
+  }
+  const challenges = (await db.all("SELECT * FROM reward_challenges ORDER BY id")).map((row: any) => ({ ...row, params: parseJsonObject(row.params) }));
+  return {
+    goals, accounts, profile, challenges,
+    transactions: await db.all("SELECT * FROM transactions"),
+    incomeFlows: await db.all("SELECT * FROM income_flows"),
+    budgets: await db.all("SELECT id FROM budgets"),
+    events: await db.all("SELECT * FROM reward_events ORDER BY id"),
+    syncConnected: Boolean((await db.get("SELECT value FROM app_settings WHERE key = 'google_refresh_token'"))?.value),
+  };
+}
+
+const parseJsonObject = (value: unknown) => { try { const parsed = JSON.parse(String(value || '{}')); return parsed && typeof parsed === 'object' ? parsed : {}; } catch { return {}; } };
+
+/** Records any points that are due. Each award has a unique key, so re-running never doubles it. */
+async function checkRewards(db: any) {
+  const result = evaluateRewards(await rewardData(db), today());
+  for (const baseline of result.baselines) await db.run("UPDATE goals SET reward_baseline = ? WHERE id = ? AND reward_baseline IS NULL", [baseline.percent, baseline.goal_id]);
+  const created = new Date().toISOString();
+  for (const award of result.awards) await db.run("INSERT OR IGNORE INTO reward_events (ref_key, kind, points, label, date, created_at) VALUES (?, ?, ?, ?, ?, ?)", [award.ref_key, award.kind, award.points, award.label, award.date, created]);
+  for (const update of result.challengeUpdates) await db.run("UPDATE reward_challenges SET status = ?, completed_at = ? WHERE id = ? AND status = 'active'", [update.status, update.completed_at, update.id]);
+  return result;
 }
 
 /** Credits interest that's due (automatic and fixed modes) and grows goal savings held in those accounts. */
@@ -175,7 +208,7 @@ function ensureRecurringPosted() {
 }
 
 const DRIVE_BACKUP_NAME = 'fingent-backup.enc';
-const SYNC_TABLES = ['accounts', 'transactions', 'categories', 'goals', 'portfolios', 'portfolio_transactions', 'liabilities', 'career', 'career_tasks', 'personal_notes', 'personal_routines', 'personal_routine_logs', 'calendar_events', 'income_flows', 'budget_presets', 'budgets', 'businesses', 'business_deals', 'business_items', 'business_transactions', 'freelance_businesses', 'freelancing_services', 'freelancing_invoices', 'freelancing_time_logs'];
+const SYNC_TABLES = ['accounts', 'transactions', 'categories', 'goals', 'portfolios', 'portfolio_transactions', 'liabilities', 'career', 'career_tasks', 'personal_notes', 'personal_routines', 'personal_routine_logs', 'calendar_events', 'income_flows', 'budget_presets', 'budgets', 'businesses', 'business_deals', 'business_items', 'business_transactions', 'freelance_businesses', 'freelancing_services', 'freelancing_invoices', 'freelancing_time_logs', 'reward_events', 'reward_challenges', 'reward_profile'];
 
 function encryptBackup(source: Buffer, password: string) {
   const salt = crypto.randomBytes(16);
@@ -1147,6 +1180,63 @@ To run FinGent as a desktop application:
     }
   }
 
+  app.get("/api/rewards", async (_req, res) => {
+    try {
+      const db = await getDb();
+      const result = await checkRewards(db);
+      res.json({ ...rewardSummary(await rewardData(db), today()), new_events: result.awards });
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
+  });
+
+  app.post("/api/rewards/buy", (req, res) => respondInTransaction(res, async (db) => {
+    const plan = planPurchase(await rewardData(db), String(req.body.item_id || ''), today());
+    if ('error' in plan) throw Object.assign(new Error(plan.error), { status: 400 });
+    await db.run("INSERT INTO reward_events (ref_key, kind, points, label, date, created_at) VALUES (?, ?, ?, ?, ?, ?)", [plan.event.ref_key, plan.event.kind, plan.event.points, plan.event.label, plan.event.date, new Date().toISOString()]);
+    return { success: true };
+  }));
+
+  app.post("/api/rewards/equip", (req, res) => respondInTransaction(res, async (db) => {
+    const plan = planEquip(await rewardData(db), String(req.body.slot || ''), req.body.item_id ? String(req.body.item_id) : null);
+    if ('error' in plan) throw Object.assign(new Error(plan.error), { status: 400 });
+    await db.run("UPDATE reward_profile SET equipped = ? WHERE id = 1", [JSON.stringify(plan.equipped)]);
+    return { success: true };
+  }));
+
+  app.post("/api/rewards/layout", (req, res) => respondInTransaction(res, async (db) => {
+    const plan = planLayout(await rewardData(db), req.body.layout);
+    if ('error' in plan) throw Object.assign(new Error(plan.error), { status: 400 });
+    await db.run("UPDATE reward_profile SET equipped = ? WHERE id = 1", [JSON.stringify(plan.equipped)]);
+    return { success: true };
+  }));
+
+  app.post("/api/rewards/profile", (req, res) => respondInTransaction(res, async (db) => {
+    await rewardData(db);
+    if (req.body.pet_name !== undefined) {
+      const name = String(req.body.pet_name).trim().slice(0, 24);
+      if (!name) throw Object.assign(new Error('Give your pet a name.'), { status: 400 });
+      await db.run("UPDATE reward_profile SET pet_name = ? WHERE id = 1", [name]);
+    }
+    if (req.body.hatched) await db.run("UPDATE reward_profile SET hatched_at = COALESCE(hatched_at, ?) WHERE id = 1", [today()]);
+    return { success: true };
+  }));
+
+  app.post("/api/rewards/challenges", (req, res) => respondInTransaction(res, async (db) => {
+    const plan = planChallengeStart(await rewardData(db), String(req.body.template || ''), today());
+    if ('error' in plan) throw Object.assign(new Error(plan.error), { status: 400 });
+    let goalId = plan.linkGoalId;
+    if (plan.goal) {
+      const goal = await db.run("INSERT INTO goals (name, target, saved, date, color, icon, sources, transactions, created_at, reward_baseline) VALUES (?, ?, 0, ?, ?, ?, '[]', '[]', ?, 0)", [plan.goal.name, plan.goal.target, plan.goal.date, plan.goal.color, plan.goal.icon, today()]);
+      goalId = Number(goal.lastInsertRowid);
+    }
+    const challenge = await db.run("INSERT INTO reward_challenges (template, title, params, goal_id, started_at, ends_at, status) VALUES (?, ?, ?, ?, ?, ?, 'active')", [plan.challenge.template, plan.challenge.title, JSON.stringify({ ...plan.challenge.params, start_saved: 0 }), goalId, plan.challenge.started_at, plan.challenge.ends_at]);
+    return { id: Number(challenge.lastInsertRowid), goal_id: goalId };
+  }));
+
+  app.post("/api/rewards/challenges/:id/cancel", (req, res) => respondInTransaction(res, async (db) => {
+    await db.run("UPDATE reward_challenges SET status = 'cancelled' WHERE id = ? AND status = 'active'", [req.params.id]);
+    return { success: true };
+  }));
+
   app.post("/api/goals", (req, res) => respondInTransaction(res, async (db) => {
       const { name, target, saved = 0, date = null, color = 'emerald', icon = 'Target', starting_savings = [] } = req.body;
       if (!String(name || '').trim() || !(Number(target) > 0)) throw Object.assign(new Error('A goal needs a name and a target above zero.'), { status: 400 });
@@ -1165,6 +1255,9 @@ To run FinGent as a desktop application:
         if (isGoalError(plan)) throw Object.assign(new Error(plan.error), { status: 400 });
         await applyGoalContribution(db, goal, plan);
       }
+      const created = await goalContext(db);
+      const made = created.goals.find((item: any) => item.id === id);
+      if (made) await db.run("UPDATE goals SET reward_baseline = ? WHERE id = ?", [goalProgress(made, created.accounts).percent, id]);
       if (req.body.autosave_amount) recurringCheckedOn = '';
       return { id };
   }));

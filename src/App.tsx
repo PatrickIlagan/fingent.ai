@@ -14,6 +14,8 @@ import { Taxes } from './pages/Taxes';
 import { Settings } from './pages/Settings';
 import { Categories } from './pages/Categories';
 import { Personal } from './pages/Personal';
+import { Rewards } from './pages/Rewards';
+import { RewardsWatcher } from './components/RewardsWatcher';
 import { ChatSheet } from './components/ChatSheet';
 import { Celebrations } from './components/Celebrations';
 import { SyncStatus } from './components/SyncStatus';
@@ -35,6 +37,7 @@ export default function App() {
         <AnimatePresence mode="wait">
           <motion.div key={page} className="fg-page" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0, transition: { duration: 0.26, ease: [0.22, 1, 0.36, 1] } }} exit={{ opacity: 0, y: -8, transition: { duration: 0.14 } }}>
             {currentTab === 'home' && <Home onNavigate={setCurrentTab} toggleChat={() => setIsChatOpen(true)} />}
+            {currentTab === 'rewards' && <Rewards onNavigate={setCurrentTab} />}
             {currentTab === 'calendar' && <Calendar onNavigate={setCurrentTab} />}
             {currentTab.startsWith('investments') && <Investments category={currentTab.split('-').slice(1).join('-')} onNavigate={setCurrentTab} />}
             {currentTab.startsWith('career') && <Career category={currentTab.split('-').slice(1).join('-')} onNavigate={setCurrentTab} />}
@@ -54,6 +57,7 @@ export default function App() {
       <ChatSheet isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} onNavigate={setCurrentTab} />
       <Celebrations />
       <SyncStatus />
+      <RewardsWatcher />
     </MotionConfig>
   );
 }

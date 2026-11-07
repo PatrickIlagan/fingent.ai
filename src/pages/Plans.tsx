@@ -7,6 +7,8 @@ import { AmountDialog, DeleteRecordDialog } from '../components/RecordDialogs';
 import { Target, PieChart, Plus, Plane, Laptop, ShieldAlert, Calendar as CalendarIcon, Home, Car, AlertCircle, CheckCircle2, TrendingUp, X } from 'lucide-react';
 import { celebrate, celebrateCompletedGoals } from '../components/Celebrations';
 import { Suggestions } from '../components/Suggestions';
+import { MilestoneBar, MilestoneChips } from '../components/MilestoneBar';
+import { Segmented } from '../components/Segmented';
 
 export function Plans({ category, onNavigate }: { category?: string, onNavigate?: (tab: string) => void }) {
   const { themeMode, shouldRefresh, triggerRefresh, focusGoalId, setFocusGoalId } = useStore();
@@ -385,18 +387,15 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
           <div className="space-y-6">
             <div className={card}>
               <h3 className="font-bold text-lg mb-4">Goal progress</h3>
-              <div className="h-4 w-full bg-slate-100 dark:bg-slate-700 rounded-full mb-6 overflow-hidden">
-                <div className={`h-full rounded-full transition-all duration-1000 ${isCompleted ? 'bg-emerald-500' : isAdvanced ? 'bg-violet-500' : 'bg-slate-900'}`} style={{ width: `${Number(pace.percent) || 0}%` }} />
-              </div>
+              <MilestoneBar goalId={selectedGoal.id} percent={Number(pace.percent) || 0} height="h-4" className="mb-4" fill={isCompleted ? 'bg-emerald-500' : isAdvanced ? 'bg-violet-500' : 'bg-slate-900'} />
+              <MilestoneChips goalId={selectedGoal.id} target={Number(selectedGoal.target) || 0} baseline={selectedGoal.reward_baseline} />
               {!isCompleted ? (
                 <div className="space-y-4">
                   <div className="flex justify-between items-center text-sm"><span className="font-medium text-slate-500">Remaining</span><span className="font-bold">{peso(pace.remaining)}</span></div>
                   <div className="flex justify-between items-center text-sm"><span className="font-medium text-slate-500">Expected by now</span><span className="font-bold">{peso(pace.expectedByNow)}</span></div>
                   <div className="flex justify-between items-center text-sm"><span className="font-medium text-slate-500">Time left</span><span className="font-bold">{pace.status === 'overdue' ? 'Target date passed' : savingViewMode === 'monthly' ? `${Math.max(0, pace.monthsLeft).toFixed(1)} months` : `${Math.max(0, pace.daysLeft)} days`}</span></div>
                   <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
-                    <div className={`flex rounded-xl p-1 text-xs font-bold mb-3 ${isAdvanced ? 'bg-slate-900' : 'bg-slate-100'}`}>
-                      {(['monthly', 'daily'] as const).map(mode => <button key={mode} onClick={() => setSavingViewMode(mode)} className={`flex-1 px-3 py-1.5 rounded-lg capitalize ${savingViewMode === mode ? (isAdvanced ? 'bg-slate-700 text-white' : 'bg-white shadow-sm') : 'text-slate-500'}`}>{mode}</button>)}
-                    </div>
+                    <Segmented label="Show amount needed per" size="sm" className="mb-3" value={savingViewMode} onChange={setSavingViewMode} options={[{ value: 'monthly', label: 'Monthly' }, { value: 'daily', label: 'Daily' }]} />
                     <div className="flex justify-between items-center text-sm">
                       <span className="font-bold text-violet-500">Needed per {savingViewMode === 'monthly' ? 'month' : 'day'}</span>
                       <span className="font-bold text-lg">{peso(savingViewMode === 'monthly' ? pace.requiredMonthly : pace.requiredDaily)}</span>
@@ -1387,12 +1386,7 @@ export function Plans({ category, onNavigate }: { category?: string, onNavigate?
                     <p className="text-sm font-medium text-slate-500 mb-1">/ {peso(goal.target)}</p>
                   </div>
                   
-                  <div className="h-2.5 w-full bg-slate-100 dark:bg-slate-700 rounded-full mb-2 overflow-hidden relative z-10">
-                    <div 
-                      className={`h-full rounded-full transition-all duration-1000 ${isCompleted ? 'bg-emerald-500' : isAdvanced ? 'bg-violet-500' : 'bg-slate-900'}`} 
-                      style={{ width: `${progress}%` }} 
-                    />
-                  </div>
+                  <MilestoneBar goalId={goal.id} percent={progress} height="h-2.5" className="mb-2 z-10" fill={isCompleted ? 'bg-emerald-500' : isAdvanced ? 'bg-violet-500' : 'bg-slate-900'} />
                   <div className="flex justify-between items-center text-xs font-bold text-slate-500 mb-5 relative z-10">
                     <div className="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-0.5" onClick={e => e.stopPropagation()}>
                       <button 

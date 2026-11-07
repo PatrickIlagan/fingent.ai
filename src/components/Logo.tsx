@@ -1,6 +1,6 @@
 import { useId } from 'react';
 
-export type LogoAccent = 'emerald' | 'ocean' | 'violet' | 'sunset';
+export type LogoAccent = 'emerald' | 'ocean' | 'violet' | 'sunset' | 'mango' | 'sakura' | 'matcha' | 'midnight';
 
 // Gradient stops for each accent, matching the Tailwind gradients used in the layout.
 export const LOGO_COLORS: Record<LogoAccent, [string, string]> = {
@@ -8,6 +8,10 @@ export const LOGO_COLORS: Record<LogoAccent, [string, string]> = {
   ocean: ['#3b82f6', '#06b6d4'],
   violet: ['#8b5cf6', '#d946ef'],
   sunset: ['#f43f5e', '#fb923c'],
+  mango: ['#fbbf24', '#f97316'],
+  sakura: ['#f472b6', '#fb7185'],
+  matcha: ['#a3e635', '#16a34a'],
+  midnight: ['#6366f1', '#334155'],
 };
 
 // The mark on a 64×64 grid: an "F" whose arms rise to the right like a trend line,

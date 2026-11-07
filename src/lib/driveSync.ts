@@ -3,6 +3,7 @@ import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { auth, googleProvider, isFirebaseConfigured } from './firebase';
 import { useStore } from '../store/useStore';
+import { DATA_CHANGED, watchChanges } from './changeWatcher';
 
 // Cross-device sync through the user's own Google Drive. Everything is
 // encrypted on this device (AES-256-GCM, key from the app password via PBKDF2)
@@ -38,6 +39,7 @@ type RemoteFile = { id: string; modifiedTime: string; appProperties?: Record<str
 export type SyncEvent = { status: 'syncing' | 'pushed' | 'pulled' | 'idle' | 'error' | 'conflict'; message?: string; remoteDevice?: string; remoteTime?: string };
 
 let sessionPassword: string | null = null;
+let listeningForChanges = false;
 let memoryToken: { value: string; expires: number } | null = null;
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let running: Promise<unknown> | null = null;
@@ -147,7 +149,7 @@ async function importSnapshot(snapshot: any) {
     const store = useStore.getState();
     useStore.setState({
       themeMode: preferences.themeMode === 'advanced' ? 'advanced' : preferences.themeMode === 'basic' ? 'basic' : store.themeMode,
-      accentColor: ['emerald', 'ocean', 'violet', 'sunset'].includes(preferences.accentColor) ? preferences.accentColor : store.accentColor,
+      accentColor: ['emerald', 'ocean', 'violet', 'sunset', 'mango', 'sakura', 'matcha', 'midnight'].includes(preferences.accentColor) ? preferences.accentColor : store.accentColor,
       hiddenTabs: Array.isArray(preferences.hiddenTabs) ? preferences.hiddenTabs.filter((tab: unknown) => typeof tab === 'string') : store.hiddenTabs,
     });
   }
@@ -226,25 +228,11 @@ export function schedulePush() {
   pushTimer = setTimeout(() => { pushTimer = null; void autoSync(false); }, PUSH_DELAY_MS);
 }
 
-/** Watches for successful changes so they can be pushed. Wraps whatever fetch is current (the phone API replaces it at unlock). */
-function watchChanges() {
-  const current = window.fetch as typeof window.fetch & { __fingentSyncWatch?: boolean };
-  if (current.__fingentSyncWatch) return;
-  const watched = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const response = await current(input, init);
-    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url, window.location.origin);
-    const method = (init?.method ?? (typeof input === 'object' && 'method' in input ? input.method : 'GET')).toUpperCase();
-    if (method !== 'GET' && url.origin === window.location.origin && url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/system/') && response.ok) schedulePush();
-    return response;
-  }) as typeof window.fetch & { __fingentSyncWatch?: boolean };
-  watched.__fingentSyncWatch = true;
-  window.fetch = watched;
-}
-
 /** Called after unlock: keeps the app password in memory (only) for encryption and syncs once. */
 export function startSyncSession(password: string) {
   sessionPassword = password;
   watchChanges();
+  if (!listeningForChanges) { window.addEventListener(DATA_CHANGED, () => schedulePush()); listeningForChanges = true; }
   // Let the dashboard load first. On phones this may show the Google account sheet.
   setTimeout(() => { void autoSync(Capacitor.isNativePlatform()); }, 1200);
 }
