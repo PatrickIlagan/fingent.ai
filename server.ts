@@ -4,13 +4,16 @@ import fsModule from "fs";
 import crypto from "crypto";
 import path from "path";
 import os from "os";
+import { createRequire } from "module";
 import { isRuleIncome, normalizeEntry, normalizeRule, ruleAmount, ruleMatches, ruleMoves, ruleRecord, ruleTotals } from "./src/lib/incomeRules";
 import { evaluateRewards, planChallengeStart, planEquip, planLayout, planPurchase, rewardSummary, type RewardData } from "./src/lib/rewards";
 import { closeDb, getDataDir, getDb, lockDatabase, unlockDatabase, validateDatabaseFile } from "./server/db";
 import { accountGoalSavings, addMonth, isGoalError, businessMetrics, categoryAliasGroup, dueOccurrences, entryId, FALLBACK_FX_RATES, formatTicker, FX_RATES_URL, goalProgress, localDate, parseList, planGoalContribution, planGoalWithdrawal, ratesFromFrankfurter, withWholeAccounts, isAutopayLiability, isIsoDate, dueInterest, interestMode, interestSettings, isCardAccount, shareInterestWithGoals, INTEREST_FIELDS, legacyIncomeFlowNote, legacyLiabilityNote, liabilityAfterPayment, liabilityCategory, resolveCategoryAlias as resolveCategoryLabel } from "./src/lib/sharedRules";
-// yahoo-finance2 exposes its constructor as CommonJS's `.default`. Using an
-// explicit require keeps the production CJS bundle compatible with Electron.
-const YahooFinance = require('yahoo-finance2').default;
+// yahoo-finance2 exposes its constructor as CommonJS's `.default`. The production
+// bundle is CommonJS (for Electron) and has `require`; `npm run dev` runs this file
+// as an ES module, which doesn't, so it gets one from the project folder.
+const loadModule = typeof require === 'function' ? require : createRequire(path.join(process.cwd(), 'server.ts'));
+const YahooFinance = loadModule('yahoo-finance2').default;
 const yahooFinance = new YahooFinance();
 
 async function resolveCategoryAlias(db: any, value: string) {
